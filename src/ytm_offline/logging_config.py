@@ -15,7 +15,7 @@ class RedactFilter(logging.Filter):
 
     _PATTERNS = [
         (re.compile(r"(?i)(Cookie:\s*)[^\s\r\n]+"), r"\1<redacted>"),
-        (re.compile(r"(?i)(Authorization:\s*)[^\s\r\n]+"), r"\1<redacted>"),
+        (re.compile(r"(?i)(Authorization:\s*)[^;\r\n]+"), r"\1<redacted>"),
         (re.compile(r"(?i)(SAPISID\s*=\s*)[^\s;,&]+"), r"\1<redacted>"),
     ]
 
