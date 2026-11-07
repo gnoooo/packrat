@@ -21,7 +21,10 @@ from ytm_offline import discover_phase4 as discover_phase4_module
 from ytm_offline import queues as queues_module
 from ytm_offline import sync as sync_module
 from ytm_offline import tui as tui_module
-from ytm_offline.sizes import format_size
+from ytm_offline.batch import run_batch_download
+from ytm_offline.manifest import Manifest
+from ytm_offline.playlist import write_m3u8
+from ytm_offline.sizes import format_size, parse_size
 from ytm_offline.sync import _cache_browser_cookies
 
 
@@ -421,6 +424,144 @@ def cmd_retry(args: argparse.Namespace) -> int:
             ascii_mode=args.ascii,
         )
     return sync_module.run_retry(args)
+
+
+def cmd_download_manifest(args: argparse.Namespace) -> int:
+    """Resume downloads from any existing manifest file."""
+    manifest_path = pathlib.Path(args.manifest)
+    if not manifest_path.exists():
+        print(f"manifest not found: {manifest_path}", file=sys.stderr)
+        return 1
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"cannot read manifest: {exc}", file=sys.stderr)
+        return 1
+
+    output_root = pathlib.Path(args.output) if args.output else manifest_path.parent.parent
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    # Artist manifests carry their own label and playlist layout.
+    if payload.get("command") == "artist" or "label" in payload:
+        label = payload.get("label") or payload.get("artist", manifest_path.stem)
+        kwargs: dict[str, Any] = {
+            "label": label,
+            "output_root": output_root,
+            "archive_path": args.archive,
+            "cookies": args.cookies,
+            "cookies_from_browser": args.cookies_from_browser,
+            "browser_profile": args.browser_profile,
+            "max_size": args.max_size,
+            "delay": args.delay,
+        }
+        if args.tui:
+            result = tui_module.run_tui(
+                artists_module.download_artist,
+                kwargs,
+                mode="artist",
+                ascii_mode=args.ascii,
+            )
+        else:
+            result = artists_module.download_artist(**kwargs)
+        if "error" in result:
+            print(result["error"], file=sys.stderr)
+            return 1
+        summary = result["summary"]
+        print(
+            f"downloaded {summary['downloaded']}  archived {summary['archived']}"
+            f"  skipped-size {summary['skipped_size']}  failed {summary['failed']}"
+            f"  stopped {summary['stopped']}"
+        )
+        print(f"manifest: {result['manifest_path']}")
+        print(f"playlists: {result['m3u8_dir']}")
+        return 1 if (summary["failed"] or summary["stopped"]) else 0
+
+    # Generic manifest (sync, discover, albums, queues, phase4, radio, ...).
+    manifest = Manifest.load(manifest_path)
+    entries = manifest.pending()
+    if not entries:
+        print("no pending tracks in manifest")
+        return 0
+
+    total_size = sum((e.get("est_size") or 0) for e in entries)
+    print(f"pending tracks: {len(entries)}")
+    print(f"estimated size: {format_size(total_size)}")
+
+    if not args.yes:
+        if sys.stdin.isatty():
+            answer = input("download now? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("not downloading (use --yes to skip the prompt)")
+                return 0
+        else:
+            print("not downloading (use --yes to skip the prompt)")
+            return 0
+
+    stem = manifest_path.stem
+    if stem.endswith(".manifest"):
+        stem = stem[: -len(".manifest")]
+    m3u8_path = output_root / "playlists" / f"{stem}.m3u8"
+
+    def save_callback(current_entries: list[dict[str, Any]]) -> None:
+        manifest.entries = current_entries
+        manifest.write(manifest_path, "json")
+        downloaded = [
+            e for e in current_entries
+            if e.get("status") == "downloaded" and e.get("path")
+        ]
+        if downloaded:
+            write_m3u8(
+                m3u8_path,
+                [
+                    {
+                        "path": e["path"],
+                        "duration": e.get("duration", 0),
+                        "title": e["title"],
+                        "artist": e["artist"],
+                    }
+                    for e in downloaded
+                ],
+            )
+
+    if args.tui:
+        return tui_module.run_tui(
+            run_batch_download,
+            {
+                "entries": entries,
+                "output_root": output_root,
+                "save_callback": save_callback,
+                "cookies": args.cookies,
+                "cookies_from_browser": args.cookies_from_browser,
+                "browser_profile": args.browser_profile,
+                "max_size": parse_size(args.max_size) if args.max_size else None,
+                "delay": args.delay,
+                "archive_path": args.archive,
+                "mode": "manifest",
+            },
+            mode="manifest",
+            ascii_mode=args.ascii,
+        )
+
+    summary = run_batch_download(
+        entries,
+        output_root=output_root,
+        save_callback=save_callback,
+        cookies=args.cookies,
+        cookies_from_browser=args.cookies_from_browser,
+        browser_profile=args.browser_profile,
+        max_size=parse_size(args.max_size) if args.max_size else None,
+        delay=args.delay,
+        archive_path=args.archive,
+        mode="manifest",
+    )
+    print(
+        f"downloaded {summary['downloaded']}  archived {summary['archived']}"
+        f"  skipped-size {summary['skipped_size']}  failed {summary['failed']}"
+        f"  stopped {summary['stopped']}"
+    )
+    print(f"manifest: {manifest_path}")
+    print(f"playlist: {m3u8_path}")
+    return 1 if (summary["failed"] or summary["stopped"]) else 0
 
 
 def cmd_artist(args: argparse.Namespace) -> int:
@@ -949,6 +1090,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_radio.add_argument("--download", action="store_true", help=argparse.SUPPRESS)  # kept for compat
     p_radio.add_argument("--dry-run", action="store_true", help="list the radio without downloading")
     p_radio.set_defaults(func=cmd_radio)
+
+    p_manifest = sub.add_parser("download-manifest", help="resume downloads from an existing manifest")
+    p_manifest.add_argument("--manifest", required=True, help="path to a manifest JSON file")
+    p_manifest.add_argument("--output", "-o", default=None, help="output root directory (default: parent of playlists/)")
+    p_manifest.add_argument("--yes", action="store_true", help="download without asking")
+    p_manifest.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
+    p_manifest.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
+    p_manifest.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
+    p_manifest.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
+    p_manifest.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
+    p_manifest.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
+    p_manifest.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
+    p_manifest.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
+    p_manifest.set_defaults(func=cmd_download_manifest)
 
     p_artist = sub.add_parser("artist", help="download one or more artists' full catalogs")
     p_artist.add_argument("artists", nargs="+", help="artist name, channelId, or channel URL")
