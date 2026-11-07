@@ -1,0 +1,717 @@
+"""Discovery from YouTube Music recommendations (Home, Charts, Moods, New Releases)."""
+
+from __future__ import annotations
+
+import pathlib
+import re
+import sys
+from typing import Any
+
+from ytmusicapi import YTMusic
+
+from ytm_offline.archive import Archive
+from ytm_offline.download import estimate_track
+from ytm_offline.manifest import Manifest
+from ytm_offline.sizes import format_size, parse_size
+
+
+# Values observed in real ytmusicapi responses.
+ALLOWED_VIDEO_TYPES = {
+    "MUSIC_VIDEO_TYPE_ATV",
+    "MUSIC_VIDEO_TYPE_OMV",
+}
+
+
+def _artist_name(raw: dict[str, Any]) -> str:
+    artists = raw.get("artists") or []
+    if artists:
+        return artists[0].get("name", "Unknown Artist")
+    # Some items carry the artist as the channel/uploader.
+    return raw.get("author") or raw.get("channel", {}).get("name") or "Unknown Artist"
+
+
+def _album_name(raw: dict[str, Any]) -> str:
+    album = raw.get("album")
+    if isinstance(album, dict):
+        return album.get("name") or "Unknown Album"
+    if isinstance(album, str):
+        return album or "Unknown Album"
+    return "Unknown Album"
+
+
+def _parse_duration_string(value: str | None) -> int | None:
+    if not value:
+        return None
+    parts = value.split(":")
+    try:
+        seconds = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(seconds) == 2:
+        return seconds[0] * 60 + seconds[1]
+    if len(seconds) == 3:
+        return seconds[0] * 3600 + seconds[1] * 60 + seconds[2]
+    return None
+
+
+def _duration_seconds(raw: dict[str, Any], yt: YTMusic | None = None) -> int | None:
+    """Best-effort track duration in seconds."""
+    if "duration_seconds" in raw and raw["duration_seconds"]:
+        return int(raw["duration_seconds"])
+    for key in ("lengthSeconds", "length_seconds"):
+        if key in raw and raw[key]:
+            return int(raw[key])
+    for key in ("duration", "length"):
+        if raw.get(key):
+            parsed = _parse_duration_string(str(raw[key]))
+            if parsed is not None:
+                return parsed
+    # Expensive fallback: ask the song endpoint for the length.
+    if yt is not None and raw.get("videoId"):
+        try:
+            song = yt.get_song(raw["videoId"])
+            return int(song["videoDetails"]["lengthSeconds"])
+        except Exception:
+            pass
+    return None
+
+
+def _video_type(raw: dict[str, Any], yt: YTMusic | None = None) -> str | None:
+    vt = raw.get("videoType") or raw.get("musicVideoType")
+    if vt:
+        return vt
+    if yt is not None and raw.get("videoId"):
+        try:
+            song = yt.get_song(raw["videoId"])
+            return song["videoDetails"].get("musicVideoType")
+        except Exception:
+            pass
+    return None
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip punctuation for deduplication."""
+    return re.sub(r"[^a-z0-9]+", "", str(text).lower())
+
+
+def _track_key(raw: dict[str, Any]) -> tuple[str, str]:
+    return (_normalize(_artist_name(raw)), _normalize(raw.get("title", "")))
+
+
+def _is_music_track(
+    raw: dict[str, Any],
+    yt: YTMusic | None,
+    min_duration: int,
+    max_duration: int,
+) -> bool:
+    """Keep only official music tracks in the configured duration window."""
+    # Drop obvious podcasts / live / mix uploads.
+    if raw.get("podcastId") or "podcast" in str(raw.get("type", "")).lower():
+        return False
+
+    video_type = _video_type(raw, yt)
+    if video_type not in ALLOWED_VIDEO_TYPES:
+        return False
+
+    duration = _duration_seconds(raw, yt)
+    if duration is None:
+        return False
+    if not (min_duration <= duration <= max_duration):
+        return False
+
+    # get_song also tells us if it is live content.
+    if yt is not None and raw.get("videoId"):
+        try:
+            song = yt.get_song(raw["videoId"])
+            if song["videoDetails"].get("isLiveContent"):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _to_track(
+    raw: dict[str, Any],
+    source: str,
+    container: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "video_id": raw["videoId"],
+        "title": raw.get("title", "Unknown"),
+        "artist": _artist_name(raw),
+        "album": _album_name(raw),
+        "duration": _duration_seconds(raw) or 0,
+        "source": source,
+        "container": container,
+        "reason": reason,
+        "bucket": raw.get("__bucket__", source),
+        "seed": raw.get("__seed__", ""),
+        "query": raw.get("__query__", ""),
+    }
+
+
+def _collect_tracks(
+    candidates: list[dict[str, Any]],
+    source: str,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    yt: YTMusic | None,
+    min_duration: int,
+    max_duration: int,
+    archive: Archive,
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+    return_funnel: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], dict[str, int]]:
+    """Apply filters, caps and deduplication to a list of candidate tracks."""
+    result: list[dict[str, Any]] = []
+    container_counts: dict[tuple[str, str], int] = {}
+    artist_counts: dict[str, int] = {}
+
+    funnel: dict[str, int] = {
+        "resolved": len(candidates),
+        "type": 0,
+        "duration": 0,
+        "dedupe": 0,
+        "caps": 0,
+    }
+
+    for raw in candidates:
+        video_id = raw.get("videoId")
+        if not video_id:
+            continue
+        if video_id in archive:
+            continue
+        if video_id in seen_video_ids:
+            continue
+
+        video_type = _video_type(raw, yt)
+        if video_type not in ALLOWED_VIDEO_TYPES:
+            continue
+        funnel["type"] += 1
+
+        duration = _duration_seconds(raw, yt)
+        if duration is None or not (min_duration <= duration <= max_duration):
+            continue
+        funnel["duration"] += 1
+
+        key = _track_key(raw)
+        if key in seen_keys:
+            continue
+        funnel["dedupe"] += 1
+
+        container = raw.get("__container__", source)
+        artist = _artist_name(raw)
+
+        if container_counts.get((source, container), 0) >= per_container:
+            continue
+        if artist_counts.get(artist, 0) >= per_artist:
+            continue
+        funnel["caps"] += 1
+
+        container_counts[(source, container)] = container_counts.get((source, container), 0) + 1
+        artist_counts[artist] = artist_counts.get(artist, 0) + 1
+        seen_video_ids.add(video_id)
+        seen_keys.add(key)
+        result.append(
+            _to_track(
+                raw,
+                source,
+                container,
+                raw.get("__reason__", source),
+            )
+        )
+        if len(result) >= quota:
+            break
+
+    if return_funnel:
+        return result, funnel
+    return result
+
+
+def _resolve_playlist_tracks(
+    yt: YTMusic,
+    playlist_id: str,
+    container: str,
+    reason: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        data = yt.get_playlist(playlistId=playlist_id, limit=limit)
+    except Exception:
+        return []
+    tracks = []
+    for t in data.get("tracks", []):
+        t["__container__"] = container
+        t["__reason__"] = reason
+        tracks.append(t)
+    return tracks
+
+
+def _resolve_album_tracks(
+    yt: YTMusic,
+    browse_id: str,
+    container: str,
+    reason: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    try:
+        data = yt.get_album(browseId=browse_id)
+    except Exception:
+        return []
+    tracks = []
+    for t in data.get("tracks", [])[:limit]:
+        t["__container__"] = container
+        t["__reason__"] = reason
+        tracks.append(t)
+    return tracks
+
+
+def discover_charts(
+    yt: YTMusic,
+    country: str,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    min_duration: int,
+    max_duration: int,
+    archive: Archive,
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    try:
+        charts = yt.get_charts(country=country)
+    except Exception:
+        return []
+    videos = charts.get("videos")
+    if not videos or not videos[0].get("playlistId"):
+        return []
+    playlist_id = videos[0]["playlistId"]
+    container = videos[0].get("title", f"charts-{country}")
+    candidates = _resolve_playlist_tracks(
+        yt,
+        playlist_id,
+        container,
+        f"chart {country}",
+        limit=max(quota * 2, 50),
+    )
+    return _collect_tracks(
+        candidates,
+        "charts",
+        quota,
+        per_container,
+        per_artist,
+        yt,
+        min_duration,
+        max_duration,
+        archive,
+        seen_video_ids,
+        seen_keys,
+    )
+
+
+def discover_new_releases(
+    yt: YTMusic,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    min_duration: int,
+    max_duration: int,
+    archive: Archive,
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    try:
+        explore = yt.get_explore()
+    except Exception:
+        return []
+    candidates: list[dict[str, Any]] = []
+    for release in explore.get("new_releases", []):
+        browse_id = release.get("browseId")
+        if not browse_id:
+            continue
+        container = release.get("title", "Unknown Release")
+        candidates.extend(
+            _resolve_album_tracks(
+                yt,
+                browse_id,
+                container,
+                f"new release ({release.get('type', 'Album')})",
+                limit=per_container * 2,
+            )
+        )
+        if len(candidates) >= quota * 3:
+            break
+    return _collect_tracks(
+        candidates,
+        "new_releases",
+        quota,
+        per_container,
+        per_artist,
+        yt,
+        min_duration,
+        max_duration,
+        archive,
+        seen_video_ids,
+        seen_keys,
+    )
+
+
+def discover_moods(
+    yt: YTMusic,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    min_duration: int,
+    max_duration: int,
+    archive: Archive,
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    try:
+        categories = yt.get_mood_categories()
+    except Exception:
+        return []
+    candidates: list[dict[str, Any]] = []
+    moods_iterated = 0
+    for group, moods in categories.items():
+        for mood in moods[:3]:  # a few moods per group is enough
+            try:
+                playlists = yt.get_mood_playlists(mood["params"])
+            except Exception:
+                continue
+            for pl in playlists[:3]:
+                playlist_id = pl.get("playlistId")
+                if not playlist_id:
+                    continue
+                candidates.extend(
+                    _resolve_playlist_tracks(
+                        yt,
+                        playlist_id,
+                        pl.get("title", "Unknown Playlist"),
+                        f"mood: {mood['title']}",
+                        limit=per_container * 2,
+                    )
+                )
+            moods_iterated += 1
+            if moods_iterated >= 3 or len(candidates) >= quota * 3:
+                break
+        if len(candidates) >= quota * 3:
+            break
+    return _collect_tracks(
+        candidates,
+        "moods",
+        quota,
+        per_container,
+        per_artist,
+        yt,
+        min_duration,
+        max_duration,
+        archive,
+        seen_video_ids,
+        seen_keys,
+    )
+
+
+def discover_home(
+    yt: YTMusic,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    min_duration: int,
+    max_duration: int,
+    archive: Archive,
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    try:
+        sections = yt.get_home(limit=10)
+    except Exception:
+        return []
+    candidates: list[dict[str, Any]] = []
+    for section in sections:
+        section_title = section.get("title", "Home")
+        for item in section.get("contents", [])[:15]:
+            if not item:
+                continue
+            # Skip podcasts / episodes outright.
+            if item.get("podcastId") or "podcast" in str(item.get("type", "")).lower():
+                continue
+
+            if item.get("videoId"):
+                item["__container__"] = section_title
+                item["__reason__"] = f"home: {section_title}"
+                candidates.append(item)
+            elif item.get("browseId"):
+                candidates.extend(
+                    _resolve_album_tracks(
+                        yt,
+                        item["browseId"],
+                        item.get("title", section_title),
+                        f"home album: {section_title}",
+                        limit=per_container * 2,
+                    )
+                )
+            elif item.get("playlistId"):
+                candidates.extend(
+                    _resolve_playlist_tracks(
+                        yt,
+                        item["playlistId"],
+                        item.get("title", section_title),
+                        f"home playlist: {section_title}",
+                        limit=per_container * 2,
+                    )
+                )
+        if len(candidates) >= quota * 3:
+            break
+    return _collect_tracks(
+        candidates,
+        "home",
+        quota,
+        per_container,
+        per_artist,
+        yt,
+        min_duration,
+        max_duration,
+        archive,
+        seen_video_ids,
+        seen_keys,
+    )
+
+
+def run_discover(
+    headers_path: str,
+    sources: list[str],
+    country: str,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    min_duration: int,
+    max_duration: int,
+    archive_path: str,
+    cookies: str | None,
+    cookies_from_browser: str | None,
+    browser_profile: str | None,
+    max_size: str | None,
+    dry_run: bool,
+    output_root: str,
+) -> tuple[Manifest, dict[str, Any]]:
+    yt = YTMusic(headers_path)
+    archive = Archive(archive_path)
+    seen_video_ids: set[str] = set()
+    seen_keys: set[tuple[str, str]] = set()
+
+    all_tracks: list[dict[str, Any]] = []
+    per_source: dict[str, list[dict[str, Any]]] = {}
+
+    source_map = {
+        "home": discover_home,
+        "charts": discover_charts,
+        "moods": discover_moods,
+        "new_releases": discover_new_releases,
+        }
+
+    for source in sources:
+        if source == "charts":
+            tracks = discover_charts(
+                yt,
+                country,
+                quota,
+                per_container,
+                per_artist,
+                min_duration,
+                max_duration,
+                archive,
+                seen_video_ids,
+                seen_keys,
+            )
+        else:
+            func = source_map.get(source)
+            if not func:
+                continue
+            tracks = func(
+                yt,
+                quota,
+                per_container,
+                per_artist,
+                min_duration,
+                max_duration,
+                archive,
+                seen_video_ids,
+                seen_keys,
+            )
+        per_source[source] = tracks
+        all_tracks.extend(tracks)
+        # Update global dedupe sets.
+        for t in tracks:
+            seen_video_ids.add(t["video_id"])
+            seen_keys.add((_normalize(t["artist"]), _normalize(t["title"])))
+
+    # Estimate sizes for pending tracks.
+    max_size_bytes = parse_size(max_size) if max_size else None
+    manifest = Manifest()
+    total_est = 0
+    skipped_size = 0
+    for t in all_tracks:
+        est = None
+        if t["video_id"] not in archive:
+            info = estimate_track(
+                t["video_id"],
+                cookies=cookies,
+                cookies_from_browser=cookies_from_browser,
+                browser_profile=browser_profile,
+            )
+            if info:
+                est = info.get("filesize_approx") or sum(
+                    f.get("filesize_approx") or 0 for f in info.get("requested_formats") or [info]
+                )
+                est = int(est) if est else None
+                if max_size_bytes and est and est > max_size_bytes:
+                    skipped_size += 1
+                    manifest.add(
+                        t["video_id"],
+                        t["title"],
+                        t["artist"],
+                        t["album"],
+                        est,
+                        "skipped_size",
+                        path=None,
+                        source=t["source"],
+                        container=t["container"],
+                        reason=t["reason"],
+                    )
+                    continue
+                total_est += est or 0
+        manifest.add(
+            t["video_id"],
+            t["title"],
+            t["artist"],
+            t["album"],
+            est,
+            "pending" if t["video_id"] not in archive else "archived",
+            path=None,
+            source=t["source"],
+            container=t["container"],
+            reason=t["reason"],
+        )
+
+    summary = {
+        "total": len(all_tracks),
+        "per_source": {k: len(v) for k, v in per_source.items()},
+        "estimated_size": total_est,
+        "estimated_size_human": format_size(total_est),
+        "skipped_by_size": skipped_size,
+        "top_artists": _top_artists(all_tracks),
+    }
+    return manifest, summary
+
+
+def _top_artists(tracks: list[dict[str, Any]], n: int = 10) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+    for t in tracks:
+        counts[t["artist"]] = counts.get(t["artist"], 0) + 1
+    return sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:n]
+
+
+def download_pending(
+    manifest: Manifest,
+    output_root: pathlib.Path,
+    cookies: str | None,
+    cookies_from_browser: str | None,
+    browser_profile: str | None,
+    archive_path: str,
+    delay: float,
+) -> int:
+    """Download the pending tracks from a discovery manifest.
+
+    Uses the same 3-consecutive-retryable-error stop rule as sync.
+    """
+    import random
+    import time
+
+    from ytm_offline.archive import Archive
+    from ytm_offline.download import DownloadResult, download_track
+    from ytm_offline.playlist import write_m3u8
+
+    archive = Archive(archive_path)
+    pending = [e for e in manifest.entries if e["status"] == "pending"]
+    if not pending:
+        print("no pending tracks to download")
+        return 0
+
+    downloaded_entries: list[dict[str, Any]] = []
+    consecutive_retryable = 0
+    failures: list[str] = []
+    stop_early = False
+
+    for i, entry in enumerate(pending, start=1):
+        track = {
+            "video_id": entry["video_id"],
+            "title": entry["title"],
+            "artist": entry["artist"],
+            "album": entry["album"],
+            "track_num": None,
+            "duration": 0,
+        }
+        print(f"[{i}/{len(pending)}] {track['video_id']} - {track['title']}")
+        result = download_track(
+            track,
+            output_root=output_root,
+            cookies=cookies,
+            cookies_from_browser=cookies_from_browser,
+            browser_profile=browser_profile,
+            max_retries=3,
+        )
+
+        entry["status"] = result.status
+        if result.error:
+            entry["error"] = result.error
+
+        if result.status == "downloaded":
+            archive.add(track["video_id"])
+            archive.save()
+            consecutive_retryable = 0
+            entry["path"] = str(result.filepath)
+            downloaded_entries.append(
+                {
+                    "path": result.filepath,
+                    "duration": result.info.get("duration") or 0 if result.info else 0,
+                    "title": track["title"],
+                    "artist": track["artist"],
+                }
+            )
+        elif result.retryable:
+            consecutive_retryable += 1
+            failures.append(track["video_id"])
+            if consecutive_retryable >= 3:
+                print(
+                    "stopping discovery download: 3 consecutive retryable errors",
+                    file=sys.stderr,
+                )
+                stop_early = True
+                break
+        else:
+            consecutive_retryable = 0
+            failures.append(track["video_id"])
+
+        if i < len(pending) and not stop_early:
+            time.sleep(delay * random.uniform(0.5, 1.5))
+
+    if stop_early:
+        for entry in manifest.entries:
+            if entry["status"] == "pending":
+                entry["error"] = "batch stopped after 3 consecutive retryable errors"
+
+    manifest_path = output_root / "playlists" / "discover.manifest.json"
+    manifest.write(manifest_path, "json")
+    m3u8_path = output_root / "playlists" / "discover.m3u8"
+    if downloaded_entries:
+        write_m3u8(m3u8_path, downloaded_entries)
+
+    print("\ndiscover download report:")
+    for status, count in manifest.counts().items():
+        if count:
+            print(f"  {status}: {count}")
+    return 1 if (failures or stop_early) else 0
