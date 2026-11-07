@@ -1,0 +1,20 @@
+# Credentials / auth files (never commit)
+browser.json
+cookies.txt
+headers_auth.json
+*.json.auth
+
+# Downloads and state
+music/
+.ytm_offline_archive
+
+# Python build artifacts
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Environment
+.env

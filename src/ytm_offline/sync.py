@@ -1,0 +1,336 @@
+"""Batch sync implementation."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import pathlib
+import re
+import tempfile
+from typing import Any, Callable
+
+from ytmusicapi import YTMusic
+from yt_dlp.cookies import extract_cookies_from_browser
+
+from ytm_offline.archive import Archive
+from ytm_offline.batch import run_batch_download
+from ytm_offline.download import estimate_track
+from ytm_offline.manifest import Manifest
+from ytm_offline.naming import parse_playlist_id
+from ytm_offline.playlist import write_m3u8
+from ytm_offline.sizes import format_size, parse_size
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_track(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    """Turn a ytmusicapi track dict into our internal shape."""
+    artists = raw.get("artists") or []
+    artist = artists[0]["name"] if artists else "Unknown Artist"
+    album = (raw.get("album") or {}).get("name") or "Unknown Album"
+    return {
+        "video_id": raw["videoId"],
+        "title": raw.get("title", "Unknown"),
+        "artist": artist,
+        "album": album,
+        "track_num": raw.get("trackNumber") or raw.get("index") or index,
+        "duration": raw.get("duration_seconds") or raw.get("lengthSeconds") or 0,
+    }
+
+
+def _parse_browser_name(browser_spec: str) -> str:
+    match = re.match(r"[A-Za-z0-9]+", browser_spec)
+    if not match:
+        raise ValueError(f"invalid --cookies-from-browser value: {browser_spec}")
+    return match.group(0).lower()
+
+
+def _cache_browser_cookies(browser_spec: str, profile: str | None = None) -> str:
+    """Extract cookies from the browser once and save them to a temp Netscape file."""
+    browser_name = _parse_browser_name(browser_spec)
+    jar = extract_cookies_from_browser(browser_name, profile=profile)
+    fd, path = tempfile.mkstemp(
+        suffix=".txt", prefix="ytm_cookies_", dir="/tmp/opencode"
+    )
+    os.close(fd)
+    jar.save(path, ignore_discard=True, ignore_expires=True)
+    return path
+
+
+def resolve_tracks(source: str, headers_path: str, limit: int) -> list[dict[str, Any]]:
+    """Fetch track list from liked songs or a playlist."""
+    yt = YTMusic(headers_path)
+    if source == "liked":
+        data = yt.get_liked_songs(limit=limit)
+        tracks = data.get("tracks", [])
+    elif source.startswith("playlist:"):
+        playlist_id = parse_playlist_id(source)
+        data = yt.get_playlist(playlistId=playlist_id, limit=limit)
+        tracks = data.get("tracks", [])
+    else:
+        raise ValueError(f"unknown source: {source}")
+    tracks = tracks[:limit]
+    return [_normalize_track(t, i + 1) for i, t in enumerate(tracks)]
+
+
+def _source_name(source: str) -> str:
+    if source == "liked":
+        return "liked"
+    if source.startswith("playlist:"):
+        return f"playlist_{parse_playlist_id(source)}"
+    return re.sub(r"[^\w.-]+", "_", source)
+
+
+def _estimate_size(info: dict[str, Any] | None) -> int | None:
+    if not info:
+        return None
+    if info.get("filesize_approx"):
+        return int(info["filesize_approx"])
+    requested = info.get("requested_formats") or []
+    if requested:
+        return int(sum(f.get("filesize_approx") or 0 for f in requested))
+    return None
+
+
+def _write_failures(path: pathlib.Path, video_ids: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(video_ids, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _m3u8_from_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": e["path"],
+            "duration": e.get("duration", 0),
+            "title": e["title"],
+            "artist": e["artist"],
+        }
+        for e in entries
+        if e.get("status") == "downloaded" and e.get("path")
+    ]
+
+
+def run_retry(
+    args: argparse.Namespace,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
+    control: Any = None,
+) -> int:
+    """Retry failed/pending tracks recorded in a manifest."""
+    manifest_path = pathlib.Path(args.manifest)
+    if not manifest_path.exists():
+        logger.error("manifest not found: %s", manifest_path)
+        return 1
+
+    temp_cookie_file: str | None = None
+    try:
+        if args.cookies_from_browser and not args.cookies:
+            logger.info("caching cookies from %s", args.cookies_from_browser)
+            args.cookies = _cache_browser_cookies(args.cookies_from_browser, args.browser_profile)
+            args.cookies_from_browser = None
+            temp_cookie_file = args.cookies
+
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entries = data.get("entries", [])
+        output_root = pathlib.Path(args.output)
+        output_root.mkdir(parents=True, exist_ok=True)
+        archive = Archive(args.archive)
+        max_size = parse_size(args.max_size) if args.max_size else None
+
+        source_name = manifest_path.stem.replace(".manifest", "").replace(".failed", "")
+        m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
+        failures_path = output_root / "playlists" / f"{source_name}.failed.json"
+
+        to_retry = [
+            e for e in entries if e["status"] not in ("downloaded", "archived")
+        ]
+        if not to_retry:
+            logger.info("no retryable tracks in manifest")
+            return 0
+
+        logger.info("retrying %d tracks", len(to_retry))
+
+        def save_callback(current_entries: list[dict[str, Any]]) -> None:
+            manifest_path.write_text(
+                json.dumps({"entries": current_entries}, indent=2),
+                encoding="utf-8",
+            )
+            write_m3u8(m3u8_path, _m3u8_from_entries(current_entries))
+
+        summary = run_batch_download(
+            to_retry,
+            output_root=output_root,
+            save_callback=save_callback,
+            cookies=args.cookies,
+            max_size=max_size,
+            delay=args.delay,
+            event_callback=event_callback,
+            control=control,
+            archive=archive,
+            mode="retry",
+        )
+
+        failures = [e["video_id"] for e in to_retry if e.get("status") == "failed"]
+        _write_failures(failures_path, failures)
+
+        logger.info("retry report:")
+        for status in Manifest.VALID_STATUSES:
+            count = sum(1 for e in to_retry if e.get("status") == status)
+            if count:
+                logger.info("  %s: %d", status, count)
+        return 1 if (failures or summary["stopped"]) else 0
+    finally:
+        if temp_cookie_file:
+            try:
+                os.unlink(temp_cookie_file)
+            except OSError:
+                pass
+
+
+def run_sync(
+    args: argparse.Namespace,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
+    control: Any = None,
+) -> int:
+    """Sync liked songs or a playlist to disk."""
+    output_root = pathlib.Path(args.output)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    temp_cookie_file: str | None = None
+    try:
+        if args.cookies_from_browser and not args.cookies:
+            logger.info("caching cookies from %s", args.cookies_from_browser)
+            args.cookies = _cache_browser_cookies(args.cookies_from_browser, args.browser_profile)
+            args.cookies_from_browser = None
+            temp_cookie_file = args.cookies
+
+        archive = Archive(args.archive)
+        source_name = _source_name(args.source)
+        manifest_path = output_root / "playlists" / f"{source_name}.manifest.{args.manifest_format}"
+        m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
+        failures_path = output_root / "playlists" / f"{source_name}.failed.json"
+
+        max_size = parse_size(args.max_size) if args.max_size else None
+
+        tracks = resolve_tracks(args.source, args.headers, args.limit)
+        if not tracks:
+            logger.info("no tracks found for source")
+            return 0
+
+        logger.info("resolved %d tracks from %s", len(tracks), args.source)
+
+        # Pre-flight: build manifest and estimate sizes for non-archived tracks.
+        entries: list[dict[str, Any]] = []
+        pending_entries: list[dict[str, Any]] = []
+        total_est_bytes = 0
+        for track in tracks:
+            if track["video_id"] in archive:
+                entry = {
+                    "video_id": track["video_id"],
+                    "title": track["title"],
+                    "artist": track["artist"],
+                    "album": track["album"],
+                    "duration": track.get("duration", 0),
+                    "est_size": None,
+                    "status": "archived",
+                    "path": None,
+                    "error": None,
+                    "source": args.source,
+                }
+                entries.append(entry)
+                continue
+            info = estimate_track(
+                track["video_id"],
+                cookies=args.cookies,
+                cookies_from_browser=args.cookies_from_browser,
+                browser_profile=args.browser_profile,
+            )
+            est_size = _estimate_size(info)
+            entry = {
+                "video_id": track["video_id"],
+                "title": track["title"],
+                "artist": track["artist"],
+                "album": track["album"],
+                "duration": track.get("duration", 0),
+                "est_size": est_size,
+                "status": "pending",
+                "path": None,
+                "error": None,
+                "source": args.source,
+            }
+            entries.append(entry)
+            pending_entries.append(entry)
+            if est_size:
+                total_est_bytes += est_size
+
+        pending_size = sum(
+            e.get("est_size") or 0 for e in entries if e["status"] == "pending"
+        )
+        logger.info("pending tracks: %d", len(pending_entries))
+        logger.info("estimated pending size: %s", format_size(pending_size))
+
+        manifest = Manifest()
+        manifest.entries = entries
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write(manifest_path, args.manifest_format)
+
+        if event_callback:
+            event_callback(
+                {
+                    "type": "start",
+                    "payload": {
+                        "mode": args.source,
+                        "total": len(entries),
+                        "total_est_bytes": total_est_bytes,
+                        "max_size_bytes": max_size,
+                    },
+                }
+            )
+
+        if args.dry_run:
+            logger.info("dry-run manifest: %s", manifest_path)
+            return 0
+
+        def save_callback(current_entries: list[dict[str, Any]]) -> None:
+            manifest.entries = current_entries
+            manifest.write(manifest_path, args.manifest_format)
+            write_m3u8(m3u8_path, _m3u8_from_entries(current_entries))
+            _write_failures(
+                failures_path,
+                [e["video_id"] for e in current_entries if e.get("status") == "failed"],
+            )
+
+        summary = run_batch_download(
+            pending_entries,
+            output_root=output_root,
+            save_callback=save_callback,
+            cookies=args.cookies,
+            max_size=max_size,
+            delay=args.delay,
+            event_callback=event_callback,
+            control=control,
+            archive=archive,
+            mode=args.source,
+        )
+
+        if summary["stopped"]:
+            for e in entries:
+                if e.get("status") == "pending":
+                    e["error"] = "batch stopped after 3 consecutive retryable errors"
+            manifest.write(manifest_path, args.manifest_format)
+
+        logger.info("sync report:")
+        for status, count in manifest.counts().items():
+            if count:
+                logger.info("  %s: %d", status, count)
+        logger.info("manifest: %s", manifest_path)
+        return 1 if (summary["failed"] or summary["stopped"]) else 0
+    finally:
+        if temp_cookie_file:
+            try:
+                os.unlink(temp_cookie_file)
+            except OSError:
+                pass

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ytm-offline"
+version = "0.1.0"
+description = "Download music from YouTube Music for offline use."
+requires-python = ">=3.10"
+dependencies = [
+    "ytmusicapi==1.12.3",
+    "yt-dlp[default]==2026.10.26",
+    "mutagen",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+ytm-offline = "ytm_offline.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ytm_offline"]
