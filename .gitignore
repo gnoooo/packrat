@@ -18,3 +18,6 @@ dist/
 
 # Environment
 .env
+
+# Runtime logs
+logs/

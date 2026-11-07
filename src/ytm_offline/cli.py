@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
@@ -25,7 +26,7 @@ from ytm_offline.batch import run_batch_download
 from ytm_offline.manifest import Manifest
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
-from ytm_offline.sync import _cache_browser_cookies
+from ytm_offline.sync import browser_cookie_file
 
 
 def _redact(msg: object) -> str:
@@ -281,15 +282,16 @@ def cmd_discover(args: argparse.Namespace) -> int:
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    temp_cookie_file: str | None = None
-    try:
-        if args.cookies_from_browser and not args.cookies:
+    cookie_ctx = (
+        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
+        if args.cookies_from_browser and not args.cookies
+        else contextlib.nullcontext(args.cookies)
+    )
+    with cookie_ctx as cookie_path:
+        if cookie_path and args.cookies_from_browser and not args.cookies:
             print(f"caching cookies from {args.cookies_from_browser}...")
-            args.cookies = _cache_browser_cookies(
-                args.cookies_from_browser, args.browser_profile
-            )
+            args.cookies = cookie_path
             args.cookies_from_browser = None
-            temp_cookie_file = args.cookies
 
         sources = [s.strip() for s in args.source.split(",") if s.strip()]
         manifest, summary = discover_module.run_discover(
@@ -337,12 +339,6 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 delay=args.delay,
             )
         return 0
-    finally:
-        if temp_cookie_file:
-            try:
-                os.unlink(temp_cookie_file)
-            except OSError:
-                pass
 
 
 def cmd_discover_phase4(args: argparse.Namespace) -> int:

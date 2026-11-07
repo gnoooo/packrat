@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import contextlib
 import json
 import logging
 import os
 import pathlib
 import re
+import signal
 import tempfile
+from collections.abc import Iterator
 from typing import Any, Callable
 
 from ytmusicapi import YTMusic
@@ -47,16 +51,70 @@ def _parse_browser_name(browser_spec: str) -> str:
     return match.group(0).lower()
 
 
-def _cache_browser_cookies(browser_spec: str, profile: str | None = None) -> str:
-    """Extract cookies from the browser once and save them to a temp Netscape file."""
+_COOKIE_TEMP_FILES: set[str] = set()
+
+
+def _cleanup_cookie_files() -> None:
+    for path in list(_COOKIE_TEMP_FILES):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        _COOKIE_TEMP_FILES.discard(path)
+
+
+atexit.register(_cleanup_cookie_files)
+
+
+_cookie_signal_installed = False
+_original_sigint: Callable[[int, Any], Any] | int | None = None
+_original_sigterm: Callable[[int, Any], Any] | int | None = None
+
+
+def _install_cookie_signal_handlers() -> None:
+    global _cookie_signal_installed, _original_sigint, _original_sigterm
+    if _cookie_signal_installed:
+        return
+
+    def _handler(signum: int, frame: Any) -> None:
+        _cleanup_cookie_files()
+        old = _original_sigint if signum == signal.SIGINT else _original_sigterm
+        if callable(old):
+            old(signum, frame)
+        elif old is not None and old != signal.SIG_DFL:
+            signal.signal(signum, old)
+            os.kill(os.getpid(), signum)
+        else:
+            os.kill(os.getpid(), signum)
+
+    _original_sigint = signal.signal(signal.SIGINT, _handler)
+    _original_sigterm = signal.signal(signal.SIGTERM, _handler)
+    _cookie_signal_installed = True
+
+
+@contextlib.contextmanager
+def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterator[str]:
+    """Extract cookies to a 0600 temp file and guarantee cleanup on exit/crash."""
     browser_name = _parse_browser_name(browser_spec)
     jar = extract_cookies_from_browser(browser_name, profile=profile)
     fd, path = tempfile.mkstemp(
         suffix=".txt", prefix="ytm_cookies_", dir="/tmp/opencode"
     )
     os.close(fd)
-    jar.save(path, ignore_discard=True, ignore_expires=True)
-    return path
+    try:
+        os.chmod(path, 0o600)
+        jar.save(path, ignore_discard=True, ignore_expires=True)
+        _COOKIE_TEMP_FILES.add(path)
+        _install_cookie_signal_handlers()
+        yield path
+    finally:
+        _cleanup_cookie_files()
+
+
+def _cache_browser_cookies(browser_spec: str, profile: str | None = None) -> str:
+    """Deprecated: use browser_cookie_file context manager instead."""
+    with browser_cookie_file(browser_spec, profile) as path:
+        return path
 
 
 def resolve_tracks(source: str, headers_path: str, limit: int) -> list[dict[str, Any]]:
@@ -125,13 +183,16 @@ def run_retry(
         logger.error("manifest not found: %s", manifest_path)
         return 1
 
-    temp_cookie_file: str | None = None
-    try:
-        if args.cookies_from_browser and not args.cookies:
+    cookie_ctx = (
+        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
+        if args.cookies_from_browser and not args.cookies
+        else contextlib.nullcontext(args.cookies)
+    )
+    with cookie_ctx as cookie_path:
+        if cookie_path and args.cookies_from_browser and not args.cookies:
             logger.info("caching cookies from %s", args.cookies_from_browser)
-            args.cookies = _cache_browser_cookies(args.cookies_from_browser, args.browser_profile)
+            args.cookies = cookie_path
             args.cookies_from_browser = None
-            temp_cookie_file = args.cookies
 
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = data.get("entries", [])
@@ -182,12 +243,6 @@ def run_retry(
             if count:
                 logger.info("  %s: %d", status, count)
         return 1 if (failures or summary["stopped"]) else 0
-    finally:
-        if temp_cookie_file:
-            try:
-                os.unlink(temp_cookie_file)
-            except OSError:
-                pass
 
 
 def run_sync(
@@ -199,13 +254,16 @@ def run_sync(
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    temp_cookie_file: str | None = None
-    try:
-        if args.cookies_from_browser and not args.cookies:
+    cookie_ctx = (
+        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
+        if args.cookies_from_browser and not args.cookies
+        else contextlib.nullcontext(args.cookies)
+    )
+    with cookie_ctx as cookie_path:
+        if cookie_path and args.cookies_from_browser and not args.cookies:
             logger.info("caching cookies from %s", args.cookies_from_browser)
-            args.cookies = _cache_browser_cookies(args.cookies_from_browser, args.browser_profile)
+            args.cookies = cookie_path
             args.cookies_from_browser = None
-            temp_cookie_file = args.cookies
 
         archive = Archive(args.archive)
         source_name = _source_name(args.source)
@@ -328,9 +386,3 @@ def run_sync(
                 logger.info("  %s: %d", status, count)
         logger.info("manifest: %s", manifest_path)
         return 1 if (summary["failed"] or summary["stopped"]) else 0
-    finally:
-        if temp_cookie_file:
-            try:
-                os.unlink(temp_cookie_file)
-            except OSError:
-                pass
