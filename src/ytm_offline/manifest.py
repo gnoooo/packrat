@@ -8,6 +8,9 @@ import pathlib
 from typing import Any, Iterable
 
 
+SCHEMA_VERSION = 1
+
+
 class Manifest:
     """Collects per-track status and writes JSON/CSV."""
 
@@ -21,6 +24,7 @@ class Manifest:
 
     def __init__(self) -> None:
         self.entries: list[dict] = []
+        self.version: int = SCHEMA_VERSION
 
     def add(
         self,
@@ -63,8 +67,10 @@ class Manifest:
 
     @classmethod
     def load(cls, path: pathlib.Path) -> "Manifest":
+        data = json.loads(path.read_text(encoding="utf-8"))
         manifest = cls()
-        manifest.entries = json.loads(path.read_text(encoding="utf-8")).get("entries", [])
+        manifest.entries = data.get("entries", [])
+        manifest.version = data.get("version", 1)
         return manifest
 
     def failed_ids(self) -> list[str]:
@@ -79,6 +85,7 @@ class Manifest:
             path.write_text(
                 json.dumps(
                     {
+                        "version": self.version,
                         "entries": self.entries,
                         "total_est_size": self.total_est_size(),
                         "counts": self.counts(),
