@@ -12,7 +12,7 @@ from typing import Any, Callable
 import yt_dlp
 
 from ytm_offline.logging_config import redact
-from ytm_offline.naming import track_path
+from ytm_offline.naming import SINGLES_DIR_DEFAULT, track_path
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +222,8 @@ def download_track(
         track.get("title", ""),
         track.get("track_num"),
         ext="m4a",
+        release_type=track.get("release_type"),
+        singles_dir=track.get("singles_dir", SINGLES_DIR_DEFAULT),
     )
 
     def emit_start(stage: str = "resolving") -> None:

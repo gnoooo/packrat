@@ -12,7 +12,7 @@ from ytmusicapi import YTMusic
 from ytm_offline.archive import Archive
 from ytm_offline.batch import run_batch_download
 from ytm_offline.discover import _normalize
-from ytm_offline.naming import clean, track_path
+from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, is_single, track_path
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
@@ -382,6 +382,7 @@ def build_top_songs(
     *,
     top_limit: int | None = None,
     max_per_album: int | None = None,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> dict[str, Any]:
     """Build pending entries for an artist's top songs with owned-dedupe."""
     discography = get_top_songs(yt, browse_id, limit=top_limit)
@@ -435,6 +436,7 @@ def build_top_songs(
                 "release_year": 9999,
                 "release_type": "top",
                 "popularity": len(entries),
+                "singles_dir": singles_dir,
             }
         )
 
@@ -528,6 +530,7 @@ def build_catalog(
     max_per_album: int | None = None,
     max_size: str | None = None,
     delay: float = 7.0,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> dict[str, Any]:
     """Fetch, filter and dedupe an artist catalog; return manifest payload.
 
@@ -542,6 +545,7 @@ def build_catalog(
             output_root=output_root,
             top_limit=top_limit,
             max_per_album=max_per_album,
+            singles_dir=singles_dir,
         )
         if scope in ("top-songs", "all")
         else None
@@ -644,6 +648,7 @@ def build_catalog(
                     "source": f"artist:{artist_name}",
                     "release_year": year,
                     "release_type": release.get("kind", "album"),
+                    "singles_dir": singles_dir,
                 }
             )
         release_meta.append(
@@ -705,6 +710,24 @@ def build_catalog(
 
 
 def owned_file_exists(output_root: pathlib.Path, track: dict[str, Any], release: dict[str, Any]) -> bool:
+    """Check disk for the track under either layout.
+
+    Singles: the new <Artist>/<singles_dir>/<title>.m4a path or the legacy
+    <Artist>/<SingleTitle>/NN - title.m4a path; other releases unchanged.
+    """
+    kind = release.get("kind", "")
+    if kind == "single":
+        singles_layout = track_path(
+            output_root,
+            track.get("artist", ""),
+            release.get("title", ""),
+            track.get("title", ""),
+            track_num=track.get("track_num"),
+            ext="m4a",
+            release_type="single",
+        )
+        if singles_layout.exists():
+            return True
     return track_path(
         output_root,
         track.get("artist", ""),
@@ -763,6 +786,8 @@ def write_artist_playlists(
     playlists_dir.mkdir(parents=True, exist_ok=True)
     by_album: dict[str, list[dict[str, Any]]] = {}
     for entry in downloaded:
+        if is_single(entry.get("album", ""), entry.get("release_type")):
+            continue  # no per-single m3u8; they go into <artist>-singles.m3u8
         by_album.setdefault(entry.get("album", "Unknown Album"), []).append(entry)
     for album, tracks in by_album.items():
         tracks.sort(key=lambda x: int(x.get("track_num") or 0))
@@ -772,6 +797,23 @@ def write_artist_playlists(
     all_path = playlists_dir / "artist-all.m3u8"
     write_m3u8(all_path, [m3u8_entry(e) for e in artist_all_entries(downloaded)])
     written.append(str(all_path))
+    single_downloaded = [
+        e for e in downloaded if is_single(e.get("album", ""), e.get("release_type"))
+    ]
+    if single_downloaded:
+        single_artist = single_downloaded[0].get("artist", "artist")
+        singles_path_m3u8 = playlists_dir / f"{clean(single_artist) or 'artist'}-singles.m3u8"
+
+        def singles_sort_key(entry: dict[str, Any]) -> tuple[int, str]:
+            try:
+                year = int(entry.get("release_year") or 0)
+            except (TypeError, ValueError):
+                year = 0
+            return (year if year else 9999, str(entry.get("title", "")))
+
+        ordered = sorted(single_downloaded, key=singles_sort_key)
+        write_m3u8(singles_path_m3u8, [m3u8_entry(e) for e in ordered])
+        written.append(str(singles_path_m3u8))
     top_downloaded = [e for e in downloaded if e.get("release_type") == "top"]
     if top_downloaded:
         top_artist = top_downloaded[0].get("artist", "artist")

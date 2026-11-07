@@ -22,7 +22,7 @@ from ytm_offline.discover import (
     _video_type,
 )
 from ytm_offline.manifest import Manifest
-from ytm_offline.naming import clean, track_path
+from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, track_path
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
@@ -113,6 +113,7 @@ def _build_queue(
     seed_artists: set[str],
     max_tracks: int | None = None,
     hop: int = 0,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (accepted_tracks, hop_seed_candidates) for one queue."""
     data = yt.get_watch_playlist(
@@ -141,6 +142,7 @@ def _build_queue(
             artist,
             _album_name(raw),
             raw.get("title", "Unknown"),
+            singles_dir=singles_dir,
         )
         vid = raw["videoId"]
         accepted.append(
@@ -151,6 +153,7 @@ def _build_queue(
                 "album": _album_name(raw),
                 "duration": _duration_seconds(raw) or 0,
                 "path": str(path),
+                "singles_dir": singles_dir,
                 "seed": seed.get("title", seed["videoId"]),
                 "seed_video_id": seed["videoId"],
                 "hop": hop,
@@ -178,6 +181,7 @@ def discover_queues(
     max_duration: int = 540,
     random_seed: int | None = None,
     dry_run: bool = True,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> dict[str, Any]:
     """Build manifests and .m3u8 playlists from playback queues."""
     yt = YTMusic(headers_path)
@@ -217,6 +221,7 @@ def discover_queues(
             seed_artists,
             max_tracks=remaining,
             hop=0,
+            singles_dir=singles_dir,
         )
 
         # Optional second hop only if we still have room within this queue's slot.
@@ -237,6 +242,7 @@ def discover_queues(
                     seed_artists,
                     max_tracks=remaining_hop,
                     hop=1,
+                    singles_dir=singles_dir,
                 )
                 # Append only tracks not already in this queue by key.
                 for t in hop_tracks:

@@ -24,6 +24,7 @@ from ytm_offline import sync as sync_module
 from ytm_offline import tui as tui_module
 from ytm_offline.batch import run_batch_download
 from ytm_offline.manifest import Manifest
+from ytm_offline.naming import SINGLES_DIR_DEFAULT
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
 from ytm_offline.sync import browser_cookie_file
@@ -310,6 +311,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             max_size=args.max_size,
             dry_run=args.dry_run,
             output_root=str(output_root),
+            singles_dir=args.singles_dir,
         )
 
         manifest_path = output_root / "playlists" / "discover.manifest.json"
@@ -661,6 +663,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             max_per_album=args.max_per_album,
             max_size=args.max_size,
             delay=args.delay,
+            singles_dir=args.singles_dir,
         )
         artists_module.save_manifest(catalog["payload"])
         catalogs.append(catalog)
@@ -847,6 +850,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
         max_duration=args.max_duration,
         random_seed=args.random_seed,
         dry_run=True,
+        singles_dir=args.singles_dir,
     )
 
     print(f"queues manifest: {result['manifest_path']}")
@@ -960,6 +964,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--ascii",
         action="store_true",
         help="use ASCII progress bars in the TUI",
+    )
+    parser.add_argument(
+        "--singles-dir",
+        dest="singles_dir",
+        default=SINGLES_DIR_DEFAULT,
+        help=f"subfolder for singles inside each artist folder (default: {SINGLES_DIR_DEFAULT})",
     )
 
     sub = parser.add_subparsers(dest="command", required=True)

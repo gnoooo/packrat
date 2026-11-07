@@ -22,7 +22,7 @@ from ytm_offline.archive import Archive
 from ytm_offline.batch import run_batch_download
 from ytm_offline.download import estimate_track
 from ytm_offline.manifest import Manifest
-from ytm_offline.naming import parse_playlist_id
+from ytm_offline.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
 
@@ -297,6 +297,7 @@ def run_sync(
                     "path": None,
                     "error": None,
                     "source": args.source,
+                    "singles_dir": getattr(args, "singles_dir", SINGLES_DIR_DEFAULT),
                 }
                 entries.append(entry)
                 continue
@@ -318,6 +319,7 @@ def run_sync(
                 "path": None,
                 "error": None,
                 "source": args.source,
+                "singles_dir": getattr(args, "singles_dir", SINGLES_DIR_DEFAULT),
             }
             entries.append(entry)
             pending_entries.append(entry)

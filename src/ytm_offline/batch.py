@@ -10,6 +10,7 @@ from typing import Any, Callable
 from ytm_offline.archive import Archive
 from ytm_offline.control import Control
 from ytm_offline.download import download_track
+from ytm_offline.naming import SINGLES_DIR_DEFAULT
 
 
 def _emit(
@@ -83,6 +84,8 @@ def run_batch_download(
             "track_num": entry.get("track_num"),
             "duration": entry.get("duration", 0),
             "source": entry.get("source", mode),
+            "release_type": entry.get("release_type"),
+            "singles_dir": entry.get("singles_dir", SINGLES_DIR_DEFAULT),
         }
 
         result = download_track(

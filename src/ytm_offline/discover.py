@@ -12,6 +12,7 @@ from ytmusicapi import YTMusic
 from ytm_offline.archive import Archive
 from ytm_offline.download import estimate_track
 from ytm_offline.manifest import Manifest
+from ytm_offline.naming import SINGLES_DIR_DEFAULT
 from ytm_offline.sizes import format_size, parse_size
 
 
@@ -497,6 +498,7 @@ def run_discover(
     max_size: str | None,
     dry_run: bool,
     output_root: str,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> tuple[Manifest, dict[str, Any]]:
     yt = YTMusic(headers_path)
     archive = Archive(archive_path)
@@ -581,6 +583,7 @@ def run_discover(
                         source=t["source"],
                         container=t["container"],
                         reason=t["reason"],
+                        singles_dir=singles_dir,
                     )
                     continue
                 total_est += est or 0
@@ -595,6 +598,7 @@ def run_discover(
             source=t["source"],
             container=t["container"],
             reason=t["reason"],
+            singles_dir=singles_dir,
         )
 
     summary = {
@@ -654,6 +658,7 @@ def download_pending(
             "album": entry["album"],
             "track_num": None,
             "duration": 0,
+            "singles_dir": entry.get("singles_dir", SINGLES_DIR_DEFAULT),
         }
         print(f"[{i}/{len(pending)}] {track['video_id']} - {track['title']}")
         result = download_track(
