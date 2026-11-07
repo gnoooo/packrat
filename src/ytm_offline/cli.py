@@ -59,6 +59,19 @@ def load_ytmusic(headers_path: str) -> YTMusic:
     return YTMusic(str(p))
 
 
+def cmd_migrate_layout(args: argparse.Namespace) -> int:
+    """Move legacy single folders into the Singles layout."""
+    from ytm_offline import migrate
+
+    return migrate.run_migrate(
+        args.output,
+        dry_run=args.dry_run,
+        yes=args.yes,
+        undo=args.undo,
+        singles_dir=args.singles_dir,
+    )
+
+
 def cmd_auth(args: argparse.Namespace) -> int:
     """Validate ytmusicapi auth and print a short account summary."""
     try:
@@ -976,6 +989,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_auth = sub.add_parser("auth", help="validate ytmusicapi auth")
     p_auth.set_defaults(func=cmd_auth)
+
+    p_migrate = sub.add_parser(
+        "migrate-layout",
+        help="move legacy single folders into the Singles layout (do not run during a download)",
+    )
+    p_migrate.add_argument("--output", "-o", default="music", help="output root directory")
+    p_migrate.add_argument("--dry-run", action="store_true", help="print the plan without moving anything")
+    p_migrate.add_argument("--undo", action="store_true", help="undo the last recorded migration")
+    p_migrate.add_argument("--yes", action="store_true", help="move without asking")
+    p_migrate.set_defaults(func=cmd_migrate_layout)
 
     p_library = sub.add_parser("library", help="list library playlists")
     p_library.add_argument("--limit", type=int, default=25, help="max playlists to show")
