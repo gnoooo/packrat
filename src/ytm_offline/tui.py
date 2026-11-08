@@ -596,12 +596,30 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     except KeyboardInterrupt:
         control.request_stop()
         state.apply(Event("status", {"status": "ABORTED", "reason": "Ctrl-C"}))
+    except Exception as exc:  # UI bug: stop the worker cleanly, no traceback
+        # The worker finishes its current track, writes archive/manifest/
+        # m3u8 and unwinds (deleting any temp cookie file) before exiting.
+        control.request_stop()
+        thread.join(5)
+        path = _latest_log_path()
+        print(f"TUI crashed: {exc.__class__.__name__}: {exc}",
+              file=sys.stderr)
+        print(f"download stopped cleanly{' (cookie temporary files deleted)'
+              if any(k in str(worker_kwargs) for k in ('cookies_from_browser',)) else ''};"
+              f" full log: {path}", file=sys.stderr)
+        return 1
     finally:
         control.request_stop()
         thread.join(5)
     if result_container["exception"]:
         raise result_container["exception"]
     return result_container["return_value"] if result_container["return_value"] is not None else 0
+
+
+def _latest_log_path() -> str:
+    import glob
+    paths = sorted(glob.glob("logs/ytm-offline-*.log"))
+    return paths[-1] if paths else "logs/"
 
 
 def supports_tui() -> bool:

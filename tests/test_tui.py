@@ -107,3 +107,35 @@ def test_snapshot_dataclass_replace_required_fields():
               "elapsed_seconds"):
         assert getattr(snap, f, "MISSING") != "MISSING" or f in (
             "elapsed_seconds",)  # elapsed_seconds always set
+
+
+def test_ui_crash_stops_worker_gracefully(monkeypatch, tmp_path, capsys):
+    # If the UI thread raises, the worker must be told to stop (finishing
+    # its current track) and the user gets a short message with the log
+    # path instead of a raw traceback.
+    monkeypatch.setattr(tui, "supports_tui", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui, "setup_logging", lambda *a, **k: None)
+    monkeypatch.setattr(tui.curses, "wrapper",
+                        lambda ui, *a: (_ for _ in ()).throw(
+                            RuntimeError("ui boom")))
+
+    seen = {"stopped": False}
+
+    def fake_worker(entries=None, event_callback=None, control=None, **kw):
+        import time
+        event_callback({"type": "start",
+                        "payload": {"mode": "test", "total": 3}})
+        for _ in range(200):  # poll like a real worker would
+            if control.should_stop():
+                seen["stopped"] = True
+                return {"summary": "stopped"}
+            time.sleep(0.05)
+        return {"summary": "done"}
+
+    ret = tui.run_tui(fake_worker, {"entries": [1, 2]})
+    assert ret == 1
+    assert seen["stopped"] is True
+    err = capsys.readouterr().err
+    assert "TUI crashed: RuntimeError: ui boom" in err
+    assert "full log:" in err
