@@ -61,10 +61,31 @@ Keys in the TUI:
 - `s` skip current track
 - `q` quit after the current track
 - `l` toggle log panel
+- `a` toggle animations
+- `t` cycle color theme
 - `?` show key help
 - Up/Down / PgUp/PgDn scroll the log
 
-If stdout is not a TTY or the terminal is too small, the tool falls back to plain logging. Use `--ascii` for ASCII progress bars.
+### Themes and visual flags
+
+Four color themes (default `ocean`): `ocean` (cyan→white), `sunset` (orange→white), `matrix` (green→white), `mono` (gray→white). Every subcommand accepts:
+
+- `--theme <name>` — pick the theme (visible only with a 256-color `$TERM`).
+- `--no-anim` — static colors, no waves/spinner (env: `YTM_TUI_ANIM=0`).
+- `--no-color` — monochrome, characters only (env: `NO_COLOR`).
+- `--ascii` — ASCII-only glyphs (bars, box borders, spinner).
+
+The animated renderer needs a 256-color terminal. Under tmux, use `tmux-256color` (`set -g default-terminal "tmux-256color"` in `~/.tmux.conf`).
+
+### Try it without downloading
+
+```bash
+ytm-offline tui-demo --seconds 60
+```
+
+Simulates a ~40-track batch (with a pause/resume window, failures and a final DONE) through the same state/event path. No network, no files, no yt-dlp. Quit with `q`.
+
+If stdout is not a TTY or the terminal is too small, the tool falls back to plain logging.
 
 ## Auth note
 
