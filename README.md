@@ -89,16 +89,29 @@ listing is DISPLAY only — classification stays internal and the grammar,
 counts and default selection are what they were.
 
 ```
+subscribers: 3.7M
+
 A  Albums · 7/9 selected · 57 tracks to download
-■  1 METAL FORTH 2025               3/10   □  3 10 BABYMETAL BUDOKAN 2021      0/13
+■  1 METAL FORTH 2025               3/10   □  3 10 BABYMETAL BUDOKAN 2021     0/13
 □  2 THE OTHER ONE 2023            14/14 ✓
-3/10 = tracks you own / tracks in release   ✓ = all owned   ■ selected   □ not selected
+
+S  Singles & EPs · 1/22 selected · 1 track to download
+□  1 from me to u 2025                  ✓
+
+owned/total = tracks you own / tracks in release   ✓ = all owned   ■ selected   □ not selected
 1 releases with new tracks are unselected by default (live / remix / alternate versions): type 'all' to include them
 Selected: 1 releases · 7 tracks to download
+selection> (Enter = recommended | 'all' = everything incl. tagged | selection set = A[1-3],S[2],-S[4] | 'none' to abort)
 ```
 
 ### Layout
 
+- **Blank lines**: one before every section header (also the first, right
+  after the `subscribers:` line) and one before the legend; nothing else
+  between legend, the note and the `Selected:` total.
+- **Headers are bold** (`\x1b[1m…\x1b[0m`) on a TTY — bold is not a color, so
+  it stays on with `NO_COLOR` or `TERM=dumb` gets plain text; piped output
+  has no escape codes at all. Width measuring ignores ANSI codes.
 - **Columns**: 3 at terminal width >= 100, 2 at 66–99, 1 below; cell width =
   `(width − 2·gap) / columns` (gap 2) capped at 64 per cell. Column-major
   (numbers read downwards); the width is re-read on every render.
@@ -106,10 +119,15 @@ Selected: 1 releases · 7 tracks to download
   The counter is `owned/total` (`3/10`); a fully owned multi-track release
   shows `14/14 ✓` and its whole cell dimmed; a single-track release shows only
   `✓` when owned and nothing when new. Only the TITLE is ever truncated with
-  `…` (index, box, year and counter never are).
+  `…` (index, box, year and counter never are); at least two spaces separate
+  the year from the counter.
 - **Colors**: green `■` when selected, dim `□` otherwise; only on a TTY with
   `NO_COLOR` unset. With `--ascii` (or a non-UTF-8 terminal) the boxes render
   as `[x]`/`[ ]` and `✓`/`·` become `ok`/`|`.
+- **Prompt**: `selection> (Enter = recommended | 'all' = everything incl.
+  tagged | selection set = A[1-3],S[2],-S[4] | 'none' to abort)` — one line
+  under the cursor, truncated with `…` only when the terminal is narrower
+  than the text.
 - **Sections**: `A` = the page's albums section, `S` = "Singles & EPs"
   (EPs live in S but download into the album folder; only `Single` releases
   go to `music/<Artist>/Singles/`). Numbering is per section from 1, newest

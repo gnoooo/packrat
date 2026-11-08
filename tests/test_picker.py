@@ -456,7 +456,8 @@ def test_renderer_header_pluralization(capsys):
     with contextlib.redirect_stdout(buf):
         artists.print_sections(rows, width=100)
     out = buf.getvalue().splitlines()
-    assert out[0] == "A  Albums \u00b7 0/1 selected \u00b7 0 tracks to download"
+    assert out[0] == ""  # blank line before the first header
+    assert out[1] == "A  Albums \u00b7 0/1 selected \u00b7 0 tracks to download"
     s_head = [l for l in out if l.startswith("S ")][0]
     assert s_head == "S  Singles & EPs \u00b7 1/2 selected \u00b7 1 track to download"
     assert "Selected: 1 releases \u00b7 1 track to download" in out
@@ -471,7 +472,7 @@ def test_renderer_notes_and_legend(capsys):
     rows = artists.build_sections(_catalog(releases))
     artists.print_sections(rows, width=200)
     out = capsys.readouterr().out
-    assert "3/10 = tracks you own / tracks in release" in out
+    assert "owned/total = tracks you own / tracks in release" in out
     # the tagged release with 4 new tracks is unselected by default
     note = [l for l in out.splitlines() if "type 'all' to include them" in l][0]
     assert "1 releases with new tracks" in note
@@ -488,12 +489,79 @@ def test_ascii_rendering(capsys):
 
 
 def test_no_color_output_plain(capsys, monkeypatch):
+    # NO_COLOR suppresses color only — bold stays (it is not a color).
     rows = artists.build_sections(_catalog(_plain_rows(2)))
     monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm")
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     artists.print_sections(rows, width=100)
     out = capsys.readouterr().out
+    assert "\x1b[1m" in out
+    assert "\x1b[32m" not in out
+    assert "\x1b[2m" not in out
+
+
+def test_bold_headers_with_fake_tty(capsys, monkeypatch):
+    releases = [
+        _meta(0, "Rel 0", year="2020", tracks=3, new=1),
+        _meta(1, "Rel 1", year="2019", tracks=3, new=1,
+              section="S", mtype="single"),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    artists.print_sections(rows, width=100)
+    tty_lines = capsys.readouterr().out.splitlines()
+
+    artists.print_sections(rows, width=100)  # non-TTY render
+    plain_lines = capsys.readouterr().out.splitlines()
+
+    # headers carry bold codes; every line keeps its visible width
+    assert any(l.startswith("\x1b[1mA  ") for l in tty_lines)
+    assert any(l.startswith("\x1b[1mS  ") for l in tty_lines)
+    for tty, plain in zip(tty_lines, plain_lines):
+        assert artists._dwidth(tty) == artists._dwidth(plain)
+
+
+def test_non_tty_has_no_ansi(capsys, monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    rows = artists.build_sections(_catalog(_plain_rows(2)))
+    artists.print_sections(rows, width=100)
+    out = capsys.readouterr().out
     assert "\x1b[" not in out
+
+
+def test_dwidth_strips_ansi():
+    assert artists._dwidth("\x1b[1mAB\x1b[0m") == 2
+    assert artists._dwidth("\x1b[32m\u25a0\x1b[0m") == 1
+
+
+def test_min_gap_year_counter(capsys):
+    # A full-title cell still keeps >= 2 spaces between year and counter:
+    # e.g. "…Distor… 2019  4/4 ✓".
+    releases = [
+        _meta(0, "Super Distor Distor Distor A Very Long Title Indeed X", year="2019",
+              new=0, tracks=4),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=90)
+    out = capsys.readouterr().out
+    line = [l for l in out.splitlines() if "2019" in l][0]
+    assert "2019  4/4" in line or "2019   4/4" in line
+    # the truncated title ends with the ellipsis before the year
+    assert "…" in line.split("2019")[0]
+
+
+def test_prompt_text_and_truncation():
+    from ytm_offline import cli
+    assert cli._selection_prompt(200) == (
+        "selection> (Enter = recommended | 'all' = everything incl. tagged"
+        " | selection set = A[1-3],S[2],-S[4] | 'none' to abort)"
+    )
+    short = cli._selection_prompt(30)
+    assert short.endswith("\u2026")
+    assert artists._dwidth(short) <= 30
 
 
 def test_no_tags_rendered_but_classification_kept(capsys):

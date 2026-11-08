@@ -582,6 +582,15 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     return 1 if (summary["failed"] or summary["stopped"]) else 0
 
 
+def _selection_prompt(width: int) -> str:
+    """Picker prompt; truncated with … only when the terminal is narrower."""
+    text = (
+        "selection> (Enter = recommended | 'all' = everything incl. tagged"
+        " | selection set = A[1-3],S[2],-S[4] | 'none' to abort)"
+    )
+    return artists_module._dw_truncate(text, width)
+
+
 def cmd_artist(args: argparse.Namespace) -> int:
     """Discover and download one or more artists' full catalogs."""
     specs = list(args.artists)
@@ -702,7 +711,9 @@ def cmd_artist(args: argparse.Namespace) -> int:
             picked: list[dict[str, Any]] | None = None
             while True:
                 try:
-                    answer = input("selection> (Enter = recommended; 'all' = everything incl. tagged; e.g. A[1-3],S[2],-S[4]; 'none' to abort) ").strip()
+                    answer = input(_selection_prompt(
+                        shutil.get_terminal_size((80, 24)).columns
+                    )).strip()
                 except EOFError:
                     break
                 if answer == "":

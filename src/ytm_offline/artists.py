@@ -1397,8 +1397,13 @@ def apply_selection(
     return newer
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _dwidth(text: str) -> int:
-    """Display width in terminal cells (W/F = 2 cells, combining = 0)."""
+    """Display width in terminal cells (W/F = 2 cells, combining = 0).
+    ANSI escape sequences (bold, colors) are ignored."""
+    text = _ANSI_RE.sub("", text)
     total = 0
     for ch in text:
         if unicodedata.combining(ch):
@@ -1413,7 +1418,9 @@ def _dw_pad(text: str, width: int) -> str:
 
 
 def _dw_truncate(text: str, budget: int) -> str:
-    """Truncate to <= budget display cells with …, never splitting a wide char."""
+    """Truncate to <= budget display cells with …, never splitting a wide char.
+    ANSI escape sequences are ignored while measuring."""
+    text = _ANSI_RE.sub("", text)
     if _dwidth(text) <= budget:
         return text
     out = ""
@@ -1488,9 +1495,12 @@ def print_sections(
     if width is None:
         width = shutil.get_terminal_size((80, 24)).columns
     use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    # Bold is not a color: it stays on with NO_COLOR, off for dumb/piped.
+    use_bold = sys.stdout.isatty() and os.environ.get("TERM", "xterm") != "dumb"
+    bold = "\x1b[1m" if use_bold else ""
+    reset = "\x1b[0m" if use_bold or use_color else ""
     dim_c = "\x1b[2m" if use_color else ""
     green = "\x1b[32m" if use_color else ""
-    reset = "\x1b[0m" if use_color else ""
     utf8 = _utf8_fine(ascii_mode)
     sel_box, no_box = ("\u25a0", "\u25a1") if utf8 else ("[x]", "[ ]")
     check = "\u2713" if utf8 else "ok"
@@ -1518,6 +1528,9 @@ def print_sections(
             f"{n_selected}/{len(rows)} selected {dot} {n_new} {word} to download",
             width,
         )
+        if bold:
+            head = f"{bold}{head}{reset}"
+        print()
         print(head)
         pieces: list[list[tuple[dict[str, Any], str]]] = []
         for row in rows:
@@ -1526,13 +1539,13 @@ def print_sections(
             year_s = f" {c['year']}"
             counter = c["counter"]
             budget = max(
-                # one cell is reserved between year and right-edge counter
-                cell_w - _dwidth(left) - _dwidth(year_s) - _dwidth(counter) - 1,
+                # at least two cells between year and right-edge counter
+                cell_w - _dwidth(left) - _dwidth(year_s) - _dwidth(counter) - 2,
                 3,
             )
             text = left + _dw_truncate(c["title"], budget) + year_s
             if counter:
-                pad = cell_w - _dwidth(text) - _dwidth(counter)
+                pad = max(cell_w - _dwidth(text) - _dwidth(counter), 2)
                 text = text + " " * max(0, pad) + counter
                 # Counter leans on the right edge: overwrite any roundoff.
                 text = text if _dwidth(text) == cell_w else _dw_pad(text, cell_w)
@@ -1559,8 +1572,9 @@ def print_sections(
                 out.append(plain)
             print("  ".join(out).rstrip())
     # Under the listing: legend, default-db note, selection total.
+    print()
     legend = _dw_truncate(
-        f"3/10 = tracks you own / tracks in release   {check} = all owned"
+        f"owned/total = tracks you own / tracks in release   {check} = all owned"
         f"   {sel_box} selected   {no_box} not selected",
         width,
     )
