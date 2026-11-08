@@ -591,6 +591,51 @@ def _selection_prompt(width: int) -> str:
     return artists_module._dw_truncate(text, width)
 
 
+def _start_prompt() -> str:
+    """The artist start prompt, truncated when the terminal is narrow."""
+    return artists_module._dw_truncate(
+        "Enter = start | type another selection | q = quit",
+        shutil.get_terminal_size((80, 24)).columns,
+    ).strip()
+
+
+def _print_recap(catalog: dict[str, Any], args: argparse.Namespace) -> None:
+    """Save the manifest and print tagged/estimate recap lines."""
+    totals = catalog["totals"]
+    summary = artists_module.summarize_entries(
+        catalog["entries"], delay=args.delay,
+        measured=totals.get("measured_s_per_track"),
+    )
+    artists_module.save_manifest(catalog["payload"])
+    rule_counts = totals.get("excluded_counts") or {}
+    rule_bits = []
+    for key, value in rule_counts.items():
+        if value:
+            rule_bits.append(("dup" if key == "edition_duplicates" else key, value))
+    # Tagged releases are shown in the picker, deselected by default.
+    if rule_bits:
+        print(
+            "tagged: "
+            + ", ".join(f"{key}={value}" for key, value in rule_bits)
+            + " (all shown, deselected by default)"
+        )
+    if totals.get("skipped_duration"):
+        print(f"outside --duration-window: {totals['skipped_duration']}")
+    time_label = f"~{summary['est_time_seconds'] // 60} min"
+    if summary["est_source"] == "measured":
+        time_label += f" (measured {summary['measured_s_per_track']:.1f} s/track)"
+    else:
+        # No runs.jsonl history yet: fall back to the measured batch
+        # rate 18 s/track (7 s delay + ~11 s download), not the
+        # duration model.
+        eta = summary["new_tracks"] * 18
+        time_label = f"~{eta // 60} min (default estimate)"
+    print(
+        f"recap: {summary['new_tracks']} new tracks | {summary['est_human']} | {time_label}"
+    )
+    print(f"manifest: {catalog['manifest_path']}", end="\n\n")
+
+
 def cmd_artist(args: argparse.Namespace) -> int:
     """Discover and download one or more artists' full catalogs."""
     specs = list(args.artists)
@@ -744,49 +789,44 @@ def cmd_artist(args: argparse.Namespace) -> int:
             if catalog is None:
                 print("nothing selected; manifest untouched for this artist.")
                 continue
-        totals = catalog["totals"]
-        summary = artists_module.summarize_entries(
-            catalog["entries"], delay=args.delay,
-            measured=totals.get("measured_s_per_track"),
-        )
-        artists_module.save_manifest(catalog["payload"])
-        rule_counts = totals.get("excluded_counts") or {}
-        rule_bits = []
-        for key, value in rule_counts.items():
-            if value:
-                rule_bits.append(("dup" if key == "edition_duplicates" else key, value))
-        # Tagged releases are shown in the picker, deselected by default.
-        if rule_bits:
-            print(
-                "tagged: "
-                + ", ".join(f"{key}={value}" for key, value in rule_bits)
-                + " (all shown, deselected by default)"
-            )
-        if totals.get("skipped_duration"):
-            print(f"outside --duration-window: {totals['skipped_duration']}")
-        time_label = f"~{summary['est_time_seconds'] // 60} min"
-        if summary["est_source"] == "measured":
-            time_label += f" (measured {summary['measured_s_per_track']:.1f} s/track)"
-        else:
-            # No runs.jsonl history yet: fall back to the measured batch
-            # rate 18 s/track (7 s delay + ~11 s download), not the
-            # duration model.
-            eta = summary["new_tracks"] * 18
-            time_label = f"~{eta // 60} min (default estimate)"
-        print(
-            f"recap: {summary['new_tracks']} new tracks | {summary['est_human']} | {time_label}"
-        )
-        print(f"manifest: {catalog['manifest_path']}", end="\n\n")
+        _print_recap(catalog, args)
+        # DISPLAY/flow only: Enter starts the (later) batch download,
+        # a typed selection re-runs the picker math for this artist,
+        # 'q' quits without downloading.
+        if sys.stdin.isatty() and not args.dry_run and not args.yes:
+            answer = input(_start_prompt()).strip()
+            while answer not in ("", "q", "quit"):
+                try:
+                    tokens = artists_module.parse_selection(answer)
+                except ValueError as exc:
+                    print(f"bad selection: {exc}; e.g. A[1-3],S[2],-S[4]")
+                    answer = input(_start_prompt()).strip()
+                    continue
+                new_catalog = artists_module.apply_selection(
+                    catalog, sections, tokens,
+                    headers_path=args.headers,
+                    output_root=output_root,
+                    archive_path=args.archive,
+                    duration_window=args.duration_window,
+                    singles_dir=args.singles_dir,
+                    delay=args.delay,
+                )
+                if new_catalog is None:
+                    print("nothing selected; manifest untouched for this artist.")
+                else:
+                    catalog = new_catalog
+                    catalogs[-1] = catalog
+                    _print_recap(catalog, args)
+                answer = input(_start_prompt()).strip()
+            if answer.lower() in ("q", "quit"):
+                print("not downloading.")
+                return 0
 
     if args.dry_run:
         print("dry-run: manifest written, no downloads.")
         return 0
 
-    approved = args.yes
-    if not approved and sys.stdin.isatty():
-        answer = input("download now? [y/N] ").strip().lower()
-        approved = answer in ("y", "yes")
-    if not approved:
+    if not args.yes and not sys.stdin.isatty():
         print("not downloading (use --yes to skip the prompt)")
         return 0
 

@@ -152,6 +152,11 @@ Selection grammar (letters are case-insensitive):
 - `-S[4]` — exclude; combine freely: `A[1-3],S[2],-S[4]`
 - `none` / `q` — abort without touching the manifest
 
+After each recap the run waits on
+`Enter = start | type another selection | q = quit`: Enter starts the
+download (with `--tui` in the curses UI), a new selection re-picks for
+that artist, `q` quits without downloading. `--yes` skips both prompts.
+
 The recap, manifest and download totals always come from one counting
 function (`summarize_entries`/`owned_key`). The `--include-live`,
 `--include-remixes`, `--include-compilations`, `--albums-only` and

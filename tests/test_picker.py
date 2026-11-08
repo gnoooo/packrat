@@ -609,6 +609,98 @@ def _cmd_artist_args(tmp_path):
     )
 
 
+def _interactive_env(monkeypatch, tmp_path, releases, users):
+    """Assemble a cd_artist dry environment: fake yt, single artist, fed input."""
+    import ytm_offline.cli as cli
+
+    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr(
+        "ytm_offline.artists.search_artists",
+        lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
+    )
+    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: users.pop(0))
+    released = releases + [
+        _meta(1, "A Single", mtype="single", section="S", new=1, tracks=1)
+    ]
+    catalog = _catalog(released, _kept_entries())
+    catalog["manifest_path"] = str(tmp_path / "manifest.json")
+    catalog["payload"]["manifest_path"] = catalog["manifest_path"]
+    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *a, **k: catalog)
+    return catalog
+
+
+def test_artist_start_prompt_quit(monkeypatch, tmp_path):
+    import ytm_offline.cli as cli
+
+    releases = [_meta(0, "An Album", new=2)]
+    catalog = _interactive_env(
+        monkeypatch, tmp_path, releases, ["", "q"]  # selection Enter, then q
+    )
+    calls = []
+    monkeypatch.setattr("ytm_offline.artists.download_artist",
+                        lambda **kw: calls.append(kw) or {"summary": {}})
+    args = _cmd_artist_args(tmp_path)
+    args.dry_run = False
+    args.yes = False
+    assert cli.cmd_artist(args) == 0
+    assert calls == []  # q quits without downloading
+
+
+def test_artist_start_prompt_reselect_then_start(monkeypatch, tmp_path, capsys):
+    import ytm_offline.cli as cli
+
+    releases = [_meta(0, "An Album", new=2)]
+    catalog = _interactive_env(
+        monkeypatch, tmp_path, releases,
+        ["", "S[1]", ""]  # default selection, re-pick the single, start
+    )
+    downloads = []
+    monkeypatch.setattr(
+        "ytm_offline.artists.download_artist",
+        lambda **kw: downloads.append(kw) or {
+            "summary": {"downloaded": 1, "archived": 0, "skipped_size": 0,
+                        "failed": 0, "stopped": 0},
+            "manifest_path": "m", "m3u8_dir": "p", "m3u8_paths": [],
+        },
+    )
+    args = _cmd_artist_args(tmp_path)
+    args.dry_run = False
+    args.yes = False
+    assert cli.cmd_artist(args) == 0
+    assert len(downloads) == 1
+    assert downloads[0]["label"] == "Artist"
+    out = capsys.readouterr().out
+    # initial recap counts both release entries; the reselection (S[1])
+    # recomputes to the single's 1 track and re-saves the manifest.
+    assert out.count("recap: 3 new tracks") == 1
+    assert out.count("recap: 1 new tracks") == 1
+
+
+def test_artist_yes_skips_start_prompt(monkeypatch, tmp_path):
+    import ytm_offline.cli as cli
+
+    releases = [_meta(0, "An Album", new=2)]
+    catalog = _interactive_env(
+        monkeypatch, tmp_path, releases,
+        [""]  # only the selection prompt is answered
+    )
+    downloads = []
+    monkeypatch.setattr(
+        "ytm_offline.artists.download_artist",
+        lambda **kw: downloads.append(kw) or {
+            "summary": {"downloaded": 2, "archived": 0, "skipped_size": 0,
+                        "failed": 0, "stopped": 0},
+            "manifest_path": "m", "m3u8_dir": "p", "m3u8_paths": [],
+        },
+    )
+    args = _cmd_artist_args(tmp_path)
+    args.dry_run = False
+    args.yes = True
+    assert cli.cmd_artist(args) == 0
+    assert len(downloads) == 1
+
+
 def test_cmd_artist_interactive_scope_has_no_top_song_coverage(
     tmp_path, monkeypatch: pytest.MonkeyPatch,
 ):
