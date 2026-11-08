@@ -694,43 +694,40 @@ def cmd_artist(args: argparse.Namespace) -> int:
         sections = artists_module.build_sections(catalog)
         if sys.stdin.isatty():
             artists_module.print_sections(sections)
-            picked = None
-            while picked is None:
+            picked: list[dict[str, Any]] | None = None
+            while True:
                 try:
-                    answer = input("selection> (Enter = all new; e.g. A[1-3],S[2],T; 'none' to abort) ").strip()
+                    answer = input("selection> (Enter = recommended; 'all' = everything incl. tagged; e.g. A[1-3],S[2],-S[4]; 'none' to abort) ").strip()
                 except EOFError:
-                    picked = None
                     break
                 if answer == "":
-                    picked = None
+                    picked = []  # default selection
                     break
                 if answer.lower() in ("none", "q", "quit"):
-                    picked = []
                     break
                 try:
                     picked = artists_module.parse_selection(answer)
                     break
                 except ValueError as exc:
-                    print(f"bad selection token {exc}; e.g. A[1-3],S[2],T[1-5]")
+                    print(f"bad selection: {exc}; e.g. A[1-3],S[2],-S[4]")
                     continue
-            if picked == []:
+            if picked is None:
                 print("nothing selected; manifest untouched for this artist.")
                 continue
-            if picked:
-                catalog = artists_module.apply_selection(
-                    catalog,
-                    sections,
-                    picked,
-                    headers_path=args.headers,
-                    output_root=output_root,
-                    archive_path=args.archive,
-                    duration_window=args.duration_window,
-                    singles_dir=args.singles_dir,
-                    delay=args.delay,
-                )
-                if catalog is None:
-                    print("nothing selected; manifest untouched for this artist.")
-                    continue
+            catalog = artists_module.apply_selection(
+                catalog,
+                sections,
+                picked,
+                headers_path=args.headers,
+                output_root=output_root,
+                archive_path=args.archive,
+                duration_window=args.duration_window,
+                singles_dir=args.singles_dir,
+                delay=args.delay,
+            )
+            if catalog is None:
+                print("nothing selected; manifest untouched for this artist.")
+                continue
         totals = catalog["totals"]
         summary = artists_module.summarize_entries(
             catalog["entries"], delay=args.delay,

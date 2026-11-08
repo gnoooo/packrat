@@ -1065,115 +1065,174 @@ def interactive_pick(candidates: list[dict[str, Any]]) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Interactive release picker (A/S/T/L/R/D sections, "A[1-3],S[2],T" grammar).
+# Interactive release picker (the two YouTube Music release sections:
+# A = Albums, S = Singles & EPs).
 
-SECTION_LETTERS = ("T", "A", "S", "L", "R", "D")
+SECTION_LETTERS = ("A", "S")
 _SECTION_TITLES = {
-    "T": "top songs",
-    "A": "albums",
-    "S": "singles/EPs",
-    "L": "live (skipped)",
-    "R": "remixes (skipped)",
-    "D": "other skipped/useless releases",
+    "A": "Albums",
+    "S": "Singles & EPs",
 }
-
-_TOKEN_RE = re.compile(r"^([ATSRLD])(?:\[(.+)\]|((?:\d+(?:-\d+)?)(?:,\d+(?:-\d+)?)*)?)?$")
-_SCAN_RE = re.compile(r"[ATSRLD](?:\[[^\]]*\]|\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)?", re.IGNORECASE)
 
 
 def build_sections(catalog: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Numbered picker rows per section from a build_catalog result.
+    """Numbered picker rows for the two release sections a build_catalog made.
 
-    T top songs are individual tracks; A/S are kept releases; L/R/D are
-    skipped releases (still selectable — selecting one re-resolves it).
+    Mirrors the YouTube Music artist page: every release appears exactly once
+    (albums section -> A, singles section -> S); tagged releases stay visible.
+    Numbered newest year first, then title; stable across runs.
     """
     payload = catalog["payload"]
     sections: dict[str, list[dict[str, Any]]] = {k: [] for k in SECTION_LETTERS}
-    for e in payload["entries"]:
-        if e.get("release_type") == "top":
-            sections["T"].append({"kind": "track", "entry": e})
     for meta in payload["releases"]:
-        row = {"kind": "release", "meta": meta}
-        reason = str(meta.get("reason", ""))
-        if meta.get("status") == "kept":
-            target = sections["A"] if str(meta.get("type", "album")) == "album" else sections["S"]
-        elif reason == "live":
-            target = sections["L"]
-        elif reason == "remix":
-            target = sections["R"]
-        else:
-            target = sections["D"]
-        target.append(row)
+        letter = str(meta.get("section") or "")
+        if letter not in sections:
+            # Older manifests without 'section': single kind -> S, else A.
+            letter = "S" if str(meta.get("type", "")) == "single" else "A"
+        sections[letter].append({"kind": "release", "meta": meta})
+
+    def year_key(row: dict[str, Any]) -> int:
+        try:
+            return int(str(row["meta"].get("year") or 0)[:4])
+        except ValueError:
+            return 0
+
+    for letter, rows in sections.items():
+        rows.sort(key=lambda r: (-year_key(r), str(r["meta"]["title"]).casefold()))
+        for i, row in enumerate(rows, start=1):
+            row["n"] = i
+            meta = row["meta"]
+            row["selected"] = (
+                meta.get("status") == "kept"
+                and not meta.get("tags")
+                and int(meta.get("new_tracks") or 0) >= 1
+            )
     return sections
 
+def parse_selection(
+    text: str,
+    *,
+    valid: tuple[str, ...] = ("A", "S"),
+) -> list[dict[str, Any]]:
+    """Parse the picker grammar into tokens.
 
-def parse_selection(text: str) -> list[tuple[str, list[int] | None]]:
-    """Parse 'A[1-3],S[2],T' (letters case-insensitive, a bare letter = all).
-
-    Raises ValueError on any bad token; (letter, None) means the whole section.
+    Token: '-?[AS]([ranges]|[*])?' — 'A' / 'A[*]' = whole section,
+    'A[1-3]' range, 'A[1,3]', 'A[3-]' open range, '-S[4]' exclusion,
+    letters case-insensitive. 'all' = everything. Any unknown section
+    letter raises ``unknown section 'T' (valid: A, S)``. Each token is
+    ``{'letter': 'A'|'S', 'spec': [(lo, hi|None), ...] | None,
+    'exclude': bool}``; spec None means the whole section.
     """
     s = str(text or "").strip()
-    out: list[tuple[str, list[int] | None]] = []
-    pos = 0
-    scanned = 0
-    for m in _SCAN_RE.finditer(s):
-        gap = s[pos:m.start()]
-        if gap.strip(" ,"):
-            raise ValueError(gap.strip())
-        tok = m.group(0).upper()
-        m2 = _TOKEN_RE.match(tok)
-        if not m2:
-            raise ValueError(tok)
-        letter = m2.group(1)
-        spec = m2.group(2)
-        if spec is None:
-            spec = m2.group(3)
-        pos = m.end()
-        scanned += 1
-        if spec is None:
-            out.append((letter, None))
-            continue
-        indices: list[int] = []
-        for part in spec.split(","):
+    if s.lower() == "all":
+        return [{"letter": letter, "spec": None, "exclude": False} for letter in valid]
+
+    def ranges(body: str) -> list[tuple[int, int | None]]:
+        spec: list[tuple[int, int | None]] = []
+        for part in body.split(","):
+            part = part.strip()
+            if part.isdigit():
+                spec.append((int(part), int(part)))
+                continue
             if "-" in part:
-                lo, hi = part.split("-", 1)
-                if not (lo.isdigit() and hi.isdigit()):
-                    raise ValueError(tok)
-                indices.extend(range(int(lo), int(hi) + 1))
-            elif part.isdigit():
-                indices.append(int(part))
-            else:
-                raise ValueError(tok)
-        out.append((letter, indices))
-    tail = s[pos:]
-    if tail.strip(" ,"):
-        raise ValueError(tail.strip())
-    if not scanned:
+                lo, _, hi = part.partition("-")
+                if lo.strip().isdigit():
+                    spec.append((int(lo), int(hi) if hi.strip().isdigit() else None))
+                    continue
+            raise ValueError(f"bad range '{part}'")
+        return spec
+
+    out: list[dict[str, Any]] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        while i < n and s[i] in " ,":
+            i += 1
+        if i >= n:
+            break
+        exclude = False
+        if s[i] == "-":
+            exclude = True
+            i += 1
+        if i >= n or s[i].upper() not in valid:
+            bad = s[i] if i < n else "<end>"
+            if bad.isalpha():
+                raise ValueError(f"unknown section '{bad}' (valid: {', '.join(valid)})")
+            raise ValueError(f"bad selection token '{s[i:i + 8] or s.strip()}'")
+        letter = s[i].upper()
+        i += 1
+        spec: list[tuple[int, int | None]] | None = None
+        if i < n and s[i] == "*":
+            i += 1
+        elif i < n and s[i] == "[":
+            j = s.find("]", i)
+            if j < 0:
+                raise ValueError(f"unterminated '[...]' in '{s.strip()}'")
+            body = s[i + 1:j].strip()
+            if body != "*":
+                spec = ranges(body)
+            i = j + 1
+        out.append({"letter": letter, "spec": spec, "exclude": exclude})
+    if not out:
         raise ValueError("(empty)")
     return out
 
 
+def _token_rows(
+    sections: dict[str, list[dict[str, Any]]],
+    token: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Rows a token addresses; out-of-range indices silently dropped."""
+    rows = sections.get(token["letter"], [])
+    spec = token.get("spec")
+    if spec is None:
+        return list(rows)
+    picked: list[dict[str, Any]] = []
+    for lo, hi in spec:
+        end = len(rows) if hi is None else hi
+        for i in range(lo, end + 1):
+            if 1 <= i <= len(rows):
+                picked.append(rows[i - 1])
+    return picked
+
+
 def chosen_rows(
     sections: dict[str, list[dict[str, Any]]],
-    tokens: list[tuple[str, list[int] | None]],
+    tokens: list[dict[str, Any]],
+    *,
+    use_default: bool = True,
 ) -> list[dict[str, Any]]:
-    """Expand tokens to flat row list (kept order, later tokens dedupe)."""
-    rows: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    for letter, indices in tokens:
-        for i in indices if indices is not None else range(1, len(sections[letter]) + 1):
-            if 1 <= i <= len(sections[letter]):
-                row = sections[letter][i - 1]
-                if id(row) not in seen:
-                    seen.add(id(row))
-                    rows.append(row)
-    return rows
+    """Expand tokens to rows in display order (A then S).
+
+    With no include token and use_default, the default selection rows come
+    first; include tokens add, exclusion tokens subtract. Empty -> [].
+    """
+    picked: dict[int, dict[str, Any]] = {}
+    if not any(not t.get("exclude") for t in tokens) and use_default:
+        for rows in sections.values():
+            for row in rows:
+                if row.get("selected"):
+                    picked[id(row)] = row
+    for token in tokens:
+        rows = _token_rows(sections, token)
+        if token.get("exclude"):
+            for row in rows:
+                picked.pop(id(row), None)
+        else:
+            for row in rows:
+                picked[id(row)] = row
+    out: list[dict[str, Any]] = []
+    for rows in sections.values():
+        for row in rows:
+            if id(row) in picked:
+                out.append(row)
+    return out
 
 
 def apply_selection(
     catalog: dict[str, Any],
     sections: dict[str, list[dict[str, Any]]],
-    tokens: list[tuple[str, list[int] | None]],
+    tokens: list[dict[str, Any]],
     *,
     headers_path: str,
     output_root: pathlib.Path,
@@ -1184,8 +1243,9 @@ def apply_selection(
 ) -> dict[str, Any] | None:
     """Apply a picker selection; returns an updated catalog or None if empty.
 
-    Kept releases reuse their already-classified entries. Skipped releases
-    (L/R/D) are resolved now with the SAME counting rules (owned_key).
+    Kept releases reuse their already-classified entries; tagged (excluded)
+    releases are resolved with the SAME counting rules (owned_key), from the
+    run's _resolve_cache when available.
     """
     rows = chosen_rows(sections, tokens)
     if not rows:
@@ -1202,40 +1262,50 @@ def apply_selection(
     def window_ok(duration: int) -> bool:
         return not duration_window or 90 <= duration <= 540
 
-    # Top + already-kept release entries first.
+    # Already-kept release entries first.
     for row in rows:
-        if row["kind"] == "track":
-            entry = row["entry"]
-            selected_entries.append(entry)
-            owned_keys.add(owned_key(artist_name, entry["title"]))
-        else:
-            meta = row["meta"]
-            for entry in payload["entries"]:
-                if entry.get("release_row") == meta.get("row"):
-                    selected_entries.append(entry)
-                    owned_keys.add(owned_key(artist_name, entry["title"]))
-            selected_meta_rows.add(meta.get("row", -1))
-
-    # Skipped releases selected through L/R/D: resolve and classify now.
-    yt = disk_keys = None
-    for row in rows:
-        if row["kind"] != "release" or row["meta"].get("status") == "kept":
-            continue
         meta = row["meta"]
-        if yt is None:
-            if not pathlib.Path(headers_path).exists():
-                raise FileNotFoundError(headers_path)
-            yt = YTMusic(headers_path)
-            disk_keys = disk_owned_keys(output_root)
+        if meta.get("status") != "kept":
+            continue
+        for entry in payload["entries"]:
+            if entry.get("release_row") == meta.get("row"):
+                selected_entries.append(entry)
+                owned_keys.add(owned_key(artist_name, entry["title"]))
+        selected_meta_rows.add(meta.get("row", -1))
+
+    # Tagged/excluded releases: resolve and classify now.
+    yt = disk_keys = None
+    cache = catalog.get("_resolve_cache") or {}
+    for row in rows:
+        meta = row["meta"]
+        if meta.get("status") == "kept":
+            continue
+        bid = meta.get("browse_id", "")
+        if bid in cache:
+            tracks = cache[bid]
+            if disk_keys is None:
+                disk_keys = disk_owned_keys(output_root)
+        else:
+            if yt is None:
+                if not pathlib.Path(headers_path).exists():
+                    raise FileNotFoundError(headers_path)
+                yt = YTMusic(headers_path)
+                disk_keys = disk_owned_keys(output_root)
+            release = {
+                "browseId": bid,
+                "title": meta.get("title", ""),
+                "year_int": meta.get("year"),
+                "kind": meta.get("type", "album"),
+            }
+            tracks = resolve_release_tracks(yt, release)
+        if tracks is None:
+            continue
         release = {
-            "browseId": meta.get("browse_id", ""),
+            "browseId": bid,
             "title": meta.get("title", ""),
             "year_int": meta.get("year"),
             "kind": meta.get("type", "album"),
         }
-        tracks = resolve_release_tracks(yt, release)
-        if tracks is None:
-            continue
         for track in tracks:
             duration = track.get("duration_seconds", 0)
             if not window_ok(duration):
