@@ -1179,7 +1179,37 @@ def build_parser() -> argparse.ArgumentParser:
     p_albums.add_argument("--download", action="store_true", help="download after building manifest (default: dry-run)")
     p_albums.set_defaults(func=cmd_discover_albums)
 
+    p_tuidemo = sub.add_parser("tui-demo", help="watch the TUI with a simulated download batch (no network, no files)")
+    p_tuidemo.add_argument("--seconds", type=float, default=60.0, help="target duration of the simulated batch")
+    p_tuidemo.set_defaults(func=cmd_tui_demo)
+
+    # Visual flags for every TUI-capable subcommand.
+    for _p in sub.choices.values():
+        have = {o for a in getattr(_p, "_actions", []) for o in getattr(a, "option_strings", [])}
+        if "--theme" not in have:
+            _p.add_argument("--theme", default="ocean", help="TUI color theme (ocean/sunset/matrix/mono)")
+        if "--no-anim" not in have:
+            _p.add_argument("--no-anim", action="store_true", help="disable TUI animations")
+        if "--no-color" not in have:
+            _p.add_argument("--no-color", action="store_true", help="disable TUI colors")
+        if "--ascii" not in have:
+            _p.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
+
     return parser
+
+
+def cmd_tui_demo(args: argparse.Namespace) -> int:
+    """Simulated batch driven through the real State/Event path."""
+    from ytm_offline import tui
+
+    return tui.run_tui(
+        tui._demo_worker,
+        {"seconds": float(args.seconds)},
+        mode="tui-demo",
+        ascii_mode=args.ascii,
+        no_anim=args.no_anim,
+        no_color=args.no_color,
+    )
 
 
 _NEEDS_HEADERS = {"auth", "library", "sync", "discover", "discover-phase4", "discover-queues", "discover-albums", "radio", "artist"}
@@ -1192,6 +1222,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command in _NEEDS_HEADERS and not args.headers:
         print("--headers or YTM_HEADERS is required for this command", file=sys.stderr)
         return 1
+
+    from ytm_offline import tui as _tui
+
+    _tui.set_visual_options(getattr(args, "theme", "ocean"), getattr(args, "no_color", False))
 
     return args.func(args)
 
