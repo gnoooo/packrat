@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import curses
 
+import pytest
+
 from ytm_offline import tui_glyphs as tg
 from ytm_offline import tui_theme as tt
+from ytm_offline.events import Event, State
 from ytm_offline import tui as tui_mod
 from ytm_offline.events import State
 
@@ -96,7 +99,9 @@ def test_render_smoke_no_exceptions(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     frame = {"mode": "running", "phase": 0.13, "thin_phase": 0.44, "breath": 0.5,
              "flash": False, "sweep": None, "history": ()}
-    state = _fake_state()
+    # The UI renders SNAPSHOT copies (plain State.__new__ instances) —
+    # rendering the live object would hide snapshot-only crashes.
+    state = _fake_state().snapshot()
     vis = _visual_no_color()
     for h, w in ((24, 80), (50, 200)):
         screen = FakeScreen(h, w)
@@ -106,6 +111,39 @@ def test_render_smoke_no_exceptions(monkeypatch):
         for y, x, text in calls:
             assert 0 <= x < w, (y, x, text)
             assert 0 <= y < h
+            assert x + tg.display_width(text) <= w
+
+
+@pytest.mark.parametrize("mode", ["running", "waiting", "paused", "stopping",
+                                  "done", "aborted"])
+@pytest.mark.parametrize("glyph", ["fancy", "ascii"])
+@pytest.mark.parametrize("theme", ["ocean", "sunset", "matrix", "mono"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_render_smoke_all_modes_snapshot(monkeypatch, mode, glyph, theme, failed):
+    # Bug: the first TUI frame rendered snap.eta_seconds() on a snapshot
+    # whose class had no _lock -> AttributeError. Smoke-render every UI
+    # mode from a snapshot so snapshot-only breaks can never return.
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state()
+    state.apply(Event("status", {"status": mode.upper()}))
+    if failed:
+        state.apply(Event("track_done", {"status": "failed", "video_id": "vF",
+                                         "title": "Fail Song", "error": "x",
+                                         "retryable": False, "bytes": 0}))
+    snap = state.snapshot()
+    pal = tt.Palette(tt.THEMES[theme], tt.TIER_NONE)
+    colors = {k: 0 for k in tt.COLOR_KEYS}
+    vis = tui_mod.Visual(tg.GLYPHS[glyph], pal, colors,
+                         lambda idx, bold=False: 0, False, tt.TIER_NONE)
+    for h, w in ((24, 80), (50, 200)):
+        screen = FakeScreen(h, w)
+        frame = {"mode": mode, "phase": 0.1, "thin_phase": 0.4, "breath": 0.5,
+                 "flash": failed, "sweep": None, "history": ()}
+        tui_mod._draw_all(screen, snap, vis, None, False, 0, False, frame)
+        calls = _all_calls(screen)
+        assert calls, f"nothing drawn: mode={mode} glyph={glyph} theme={theme}"
+        for y, x, text in calls:
+            assert 0 <= y < h and 0 <= x < w
             assert x + tg.display_width(text) <= w
 
 

@@ -160,22 +160,36 @@ class State:
 
     def recent_track_rate(self) -> float:
         """Tracks per second over the last 20 completed downloads."""
-        with self._lock:
-            if len(self._track_times) < 2:
-                return 0.0
-            deltas = [
-                b - a for a, b in zip(list(self._track_times)[:-1], list(self._track_times)[1:])
-            ]
-            if not deltas:
-                return 0.0
-            return len(deltas) / sum(deltas)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            return _track_rate(self._track_times)
+        with lock:
+            return _track_rate(self._track_times)
 
     def eta_seconds(self) -> int | None:
-        with self._lock:
-            remaining = self.total - self.done
-            if remaining <= 0:
-                return 0
-            rate = self.recent_track_rate()
-            if rate <= 0:
-                return None
-            return int(remaining / rate)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            return _eta(self.total, self.done, _track_rate(self._track_times))
+        with lock:
+            return _eta(self.total, self.done,
+                        _track_rate(self._track_times))
+
+
+def _track_rate(track_times) -> float:
+    """Tracks per second over completion timestamps (len < 2 -> 0.0)."""
+    times = list(track_times)
+    if len(times) < 2:
+        return 0.0
+    deltas = [b - a for a, b in zip(times[:-1], times[1:]) if b > a]
+    if not deltas:
+        return 0.0
+    return len(deltas) / sum(deltas)
+
+
+def _eta(total: int, done: int, rate: float) -> int | None:
+    remaining = total - done
+    if remaining <= 0:
+        return 0
+    if rate <= 0:
+        return None
+    return int(remaining / rate)

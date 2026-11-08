@@ -59,3 +59,51 @@ def test_redact():
     assert "Cookie:" in out
     assert "Authorization:" in out
     assert "SAPISID=" in out
+
+
+def _running_state():
+    """A State with a realistic running download applied."""
+    from ytm_offline import events as ev
+
+    state = ev.State(mode="artist")
+    state.apply(ev.Event("start", {"mode": "artist", "total": 10,
+                                  "total_est_bytes": 30000}))
+    for i in range(4):
+        state.apply(ev.Event("track_start",
+                             {"video_id": f"v{i}", "title": f"T{i}",
+                              "artist": "A", "album": "B", "source": "s",
+                              "stage": "downloading"}))
+        state.apply(ev.Event("track_done", {"status": "downloaded",
+                                            "bytes": 1000}))
+    state.apply(ev.Event("delay", {"remaining": 3.0}))
+    return state
+
+
+def test_snapshot_methods_do_not_touch_a_lock():
+    # The UI renders snapshots (plain copies without _lock); every
+    # method the UI calls must work on a snapshot or the TUI crashes on
+    # its first frame (bug: eta_seconds raised AttributeError on _lock).
+    from ytm_offline import events as ev
+
+    state = _running_state()
+    snap = state.snapshot()
+    assert state.eta_seconds() is not None
+    for method in ("eta_seconds", "recent_track_rate"):
+        val = getattr(snap, method)()  # must not raise
+        assert val is not None or method != "eta_seconds"
+    assert snap.recent_track_rate() > 0.0
+    assert snap.eta_seconds() == state.eta_seconds()
+
+
+def test_snapshot_dataclass_replace_required_fields():
+    from ytm_offline import events as ev
+
+    state = _running_state()
+    snap = state.snapshot()
+    # All fields the UI reads must exist on the copy.
+    for f in ("mode", "status", "total", "done", "downloaded", "archived",
+              "skipped_size", "failed", "retries", "current",
+              "total_bytes_downloaded", "log_lines", "recent_failures",
+              "elapsed_seconds"):
+        assert getattr(snap, f, "MISSING") != "MISSING" or f in (
+            "elapsed_seconds",)  # elapsed_seconds always set
