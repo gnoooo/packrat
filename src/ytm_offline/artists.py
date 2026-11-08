@@ -1427,94 +1427,165 @@ def _dw_truncate(text: str, budget: int) -> str:
     return out.rstrip() + "…"
 
 
-def _cell_parts(row: dict[str, Any]) -> tuple[str, str, str]:
-    """(prefix, title, suffix) of one picker cell.
+def _utf8_fine(ascii_mode: bool) -> bool:
+    """False when stdout (or --ascii) cannot render ■/□/✓/·."""
+    if ascii_mode:
+        return False
+    enc = sys.stdout.encoding or "utf-8"
+    try:
+        "\u25a0\u25a1\u2713\u00b7".encode(enc)
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
 
-    Cell shape: '[x] 12 TITLE (2019) 14t +3'; 't ✓' when everything is
-    owned; an EP is marked 'EP'; tagged releases carry [tag] at the end.
-    Index and counts are never truncated (only the title is).
+
+def _cell_info(
+    row: dict[str, Any], *, sel_box: str, no_box: str, check: str,
+) -> dict[str, Any]:
+    """Parts of one picker cell: box, index, title, year, counter.
+
+    counter = owned/total (e.g. '3/10'), '14/14 *check*' when fully
+    owned, '✓'/'' for single-track releases; no tags in the cell —
+    classification stays internal. Only the title is ever truncated.
     """
     meta = row["meta"]
-    box = "[x]" if row.get("selected") else "[ ]"
+    selected = bool(row.get("selected"))
     year = str(meta.get("year") or "?")[:4]
     tracks = meta.get("tracks")
     new = int(meta.get("new_tracks") or 0)
     if meta.get("unavailable") or tracks is None:
         counter = "?"
-    elif new:
-        counter = f"{tracks}t +{new}"
     else:
-        counter = f"{tracks}t ✓"
-    tags = list(meta.get("tags") or [])
-    if str(meta.get("type")) == "ep" and "ep" not in [t.lower() for t in tags]:
-        tags.insert(0, "EP")
-    if meta.get("unavailable") and "unavailable" not in tags:
-        tags.append("unavailable")
-    prefix = f"{box} {row.get('n', 0):>2} "
-    suffix = f" ({year}) {counter}" + "".join(f" [{tag}]" for tag in tags)
-    return prefix, str(meta.get("title") or "?"), suffix
+        total = int(tracks or 0)
+        owned = max(0, total - new)
+        if total == 1:
+            counter = check if owned else ""
+        else:
+            counter = f"{owned}/{total}" + (f" {check}" if owned == total else "")
+    return {
+        "box": sel_box if selected else no_box,
+        "idx": f"{row.get('n', 0):>2}",
+        "title": str(meta.get("title") or "?"),
+        "year": year,
+        "counter": counter,
+        "selected": selected,
+        # Fully owned releases are dimmed (never selected by default).
+        "dim": counter.endswith(check),
+    }
 
 
 def print_sections(
     sections: dict[str, list[dict[str, Any]]],
     *,
     width: int | None = None,
+    ascii_mode: bool = False,
 ) -> None:
-    """ls-style picker menu: columns adapt to the terminal width, filled
-    top to bottom. Widths are measured in screen cells so Japanese titles
-    stay aligned. ANSI colors only on a TTY with NO_COLOR unset.
+    """Column-major picker menu. 3 columns at width >= 100, 2 at >= 66,
+    else 1; cell width = (width - 2*gap) // columns capped at 64. Widths
+    are measured in screen cells so Japanese titles stay aligned; only
+    the title is truncated. ANSI colors only on a TTY with NO_COLOR unset.
     """
     if width is None:
         width = shutil.get_terminal_size((80, 24)).columns
     use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
-    dim = "\x1b[2m" if use_color else ""
+    dim_c = "\x1b[2m" if use_color else ""
+    green = "\x1b[32m" if use_color else ""
     reset = "\x1b[0m" if use_color else ""
+    utf8 = _utf8_fine(ascii_mode)
+    sel_box, no_box = ("\u25a0", "\u25a1") if utf8 else ("[x]", "[ ]")
+    check = "\u2713" if utf8 else "ok"
+    dot = "\u00b7" if utf8 else "|"
+    gap = 2
+    if width >= 100:
+        columns = 3
+    elif width >= 66:
+        columns = 2
+    else:
+        columns = 1
+    cell_w = min((width - 2 * gap) // columns, 64)
     for letter in SECTION_LETTERS:
         rows = sections.get(letter) or []
         if not rows:
             continue
-        parts = [_cell_parts(row) for row in rows]
-        natural = max(_dwidth(p + t + s) for p, t, s in parts)
-        cell_w = min(max(natural, 26), 46, max(width, 26))
-        # A long tag must not overflow the cell: widen it so index, counts
-        # and tag always stay visible next to a truncated title.
-        cell_w = max(cell_w, max(_dwidth(p) + _dwidth(s) + 3 for p, _, s in parts))
-        cells: list[tuple[str, bool]] = []
-        for row, (prefix, title, suffix) in zip(rows, parts):
-            budget = max(cell_w - _dwidth(prefix) - _dwidth(suffix), 3)
-            text = prefix + _dw_truncate(title, budget) + suffix
-            cells.append((text, bool(row.get("selected"))))
-        if width < 40:
-            columns = 1
-        else:
-            columns = max(1, min(6, width // (cell_w + 2)))
-        rows_per_col = ceil(len(cells) / columns)
-        n_selected = sum(1 for _, selected in cells if selected)
+        n_selected = sum(1 for r in rows if r.get("selected"))
         n_new = sum(
-            int(row["meta"].get("new_tracks") or 0)
-            for row, (_, selected) in zip(rows, cells)
-            if selected
+            int(r["meta"].get("new_tracks") or 0)
+            for r in rows if r.get("selected")
         )
-        header = f"{letter}  {_SECTION_TITLES[letter]} ({len(rows)})"
-        tail = f" - {n_selected} selected - {n_new} new"
-        if _dwidth(header + tail) <= width:
-            print(header + tail)
-        else:
-            print(header)
-        slots: list[list[tuple[str, bool] | None]] = [
+        word = "track" if n_new == 1 else "tracks"
+        head = _dw_truncate(
+            f"{letter}  {_SECTION_TITLES[letter]} {dot} "
+            f"{n_selected}/{len(rows)} selected {dot} {n_new} {word} to download",
+            width,
+        )
+        print(head)
+        pieces: list[list[tuple[dict[str, Any], str]]] = []
+        for row in rows:
+            c = _cell_info(row, sel_box=sel_box, no_box=no_box, check=check)
+            left = f"{c['box']} {c['idx']} "
+            year_s = f" {c['year']}"
+            counter = c["counter"]
+            budget = max(
+                # one cell is reserved between year and right-edge counter
+                cell_w - _dwidth(left) - _dwidth(year_s) - _dwidth(counter) - 1,
+                3,
+            )
+            text = left + _dw_truncate(c["title"], budget) + year_s
+            if counter:
+                pad = cell_w - _dwidth(text) - _dwidth(counter)
+                text = text + " " * max(0, pad) + counter
+                # Counter leans on the right edge: overwrite any roundoff.
+                text = text if _dwidth(text) == cell_w else _dw_pad(text, cell_w)
+            pieces.append((c, _dw_pad(text, cell_w)))
+        rows_per_col = ceil(len(pieces) / columns)
+        slots: list[list[tuple[dict[str, Any], str] | None]] = [
             [None] * columns for _ in range(rows_per_col)
         ]
-        for i, (text, selected) in enumerate(cells):
-            slots[i % rows_per_col][i // rows_per_col] = (text, selected)
+        for i, item in enumerate(pieces):
+            slots[i % rows_per_col][i // rows_per_col] = item
         for line_cells in slots:
-            pieces = []
+            out = []
             for cell in line_cells:
                 if cell is None:
                     continue
-                text, selected = cell
-                padded = _dw_pad(text, cell_w)
-                if dim and not selected:
-                    pieces.append(f"{dim}{padded}{reset}")
-                else:
-                    pieces.append(padded)
-            print("  ".join(pieces).rstrip())
+                c, plain = cell
+                if c["dim"]:
+                    out.append(f"{dim_c}{plain}{reset}" if dim_c else plain)
+                    continue
+                wbox = len(c["box"])
+                color = green if c["selected"] else dim_c
+                if color:
+                    plain = color + plain[:wbox] + reset + plain[wbox:]
+                out.append(plain)
+            print("  ".join(out).rstrip())
+    # Under the listing: legend, default-db note, selection total.
+    legend = _dw_truncate(
+        f"3/10 = tracks you own / tracks in release   {check} = all owned"
+        f"   {sel_box} selected   {no_box} not selected",
+        width,
+    )
+    print(legend)
+    unselected_new = sum(
+        1
+        for rows in sections.values()
+        for r in rows
+        if int(r["meta"].get("new_tracks") or 0) >= 1 and not r.get("selected")
+    )
+    if unselected_new:
+        print(_dw_truncate(
+            f"{unselected_new} releases with new tracks are unselected by"
+            " default (live / remix / alternate versions):"
+            " type 'all' to include them",
+            width,
+        ))
+    sel_rows = [
+        r for rows in sections.values() for r in rows if r.get("selected")
+    ]
+    sel_tracks = sum(
+        int(r["meta"].get("new_tracks") or 0) for r in sel_rows
+    )
+    word = "track" if sel_tracks == 1 else "tracks"
+    print(_dw_truncate(
+        f"Selected: {len(sel_rows)} releases {dot} {sel_tracks} {word} to download",
+        width,
+    ))

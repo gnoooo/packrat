@@ -698,7 +698,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             print(f"subscribers: {subs}")
         sections = artists_module.build_sections(catalog)
         if sys.stdin.isatty():
-            artists_module.print_sections(sections)
+            artists_module.print_sections(sections, ascii_mode=args.ascii)
             picked: list[dict[str, Any]] | None = None
             while True:
                 try:

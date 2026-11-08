@@ -270,9 +270,10 @@ def test_print_sections_smoke(capsys):
     catalog, rows = _kept_fixture()
     artists.print_sections(rows, width=100)
     out = capsys.readouterr().out
-    assert "A  Albums (" in out
-    assert "S  Singles & EPs (" in out
-    assert "[x]  1 An Album" in out
+    assert "A  Albums ·" in out
+    assert "S  Singles & EPs ·" in out
+    assert "■  1 An Album" in out
+    assert "● 2 A Single" not in out
 
 
 def _plain_rows(n: int = 4) -> list[dict]:
@@ -282,14 +283,22 @@ def _plain_rows(n: int = 4) -> list[dict]:
     ]
 
 
+def _columns_of(width: int) -> int:
+    return 3 if width >= 100 else 2 if width >= 66 else 1
+
+
+def _cell_w(width: int) -> int:
+    return min((width - 4) // _columns_of(width), 64)
+
+
 def test_renderer_column_major_and_width(capsys):
     rows = artists.build_sections(_catalog(_plain_rows(4)))
     artists.print_sections(rows, width=80)
     out = capsys.readouterr().out
     lines = out.splitlines()
-    # cell width ~26 clamp, gap 2 -> 2 columns at width 80; column-major
-    # fill: line 1 = rows 1 and 3, line 2 = rows 2 and 4.
-    s_block = lines[lines.index("A  Albums (4) - 2 selected - 2 new") + 1:]
+    # 2 columns at width 80, column-major fill: rows 1 and 3 on line 1.
+    s_block = lines[lines.index("A  Albums · 2/4 selected · 2 tracks to download") + 1:]
+    # Column-major: line 1 holds rows 1 and 3.
     assert "Rel 0" in s_block[0] and "Rel 2" in s_block[0]
     assert "Rel 1" in s_block[1] and "Rel 3" in s_block[1]
     for line in lines:
@@ -297,7 +306,7 @@ def test_renderer_column_major_and_width(capsys):
     assert "\x1b[" not in out  # no colors off-tty
 
 
-@pytest.mark.parametrize("width", [40, 80, 120, 200])
+@pytest.mark.parametrize("width", [40, 66, 80, 100, 120, 200])
 def test_renderer_no_line_overflows(width: int, capsys):
     releases = [
         _meta(0, "A Super Long Album Title Which Definitely Needs Truncating Somewhere",
@@ -314,9 +323,8 @@ def test_renderer_no_line_overflows(width: int, capsys):
     assert len(lines) > 1
     for line in lines:
         assert artists._dwidth(line.rstrip()) <= width
-    # truncated titles keep counts (counts never truncated); wide-char
-    # splitting is covered by test_dw_truncate_never_splits_wide
-    assert "(2024)" in out and "14t" in out
+    # truncated titles keep index/year/counter; counter right-aligned.
+    assert "2024" in out and "9/14" in out
     assert "\x1b[" not in out  # no-color output reads fine
 
 
@@ -328,6 +336,97 @@ def test_dw_truncate_never_splits_wide():
     assert artists._dw_truncate(text, 99) == text
     # combining accents count as zero cells
     assert artists._dwidth("cafe\u0301") == 4
+    # box glyphs are one display cell each (DELL-ambiguous, not wide)
+    assert artists._dwidth("\u25a0") == 1
+    assert artists._dwidth("\u25a1") == 1
+
+
+@pytest.mark.parametrize("width", [40, 66, 80, 100, 120, 200])
+def test_renderer_columns(width: int, capsys):
+    rows = artists.build_sections(_catalog(_plain_rows(7)))
+
+    def cells_at(width: int) -> int:
+        artists.print_sections(rows, width=width)
+        out = capsys.readouterr().out
+        body = [
+            l for l in out.splitlines()
+            if l.startswith("\u25a0") or l.startswith("\u25a1")
+        ]
+        cols = 3 if width >= 100 else 2 if width >= 66 else 1
+        cw = min((width - 4) // cols, 64)
+        # Count cells on the first body line: every cell except the last
+        # is exactly cw + 2 display cells wide.
+        bglyph = (cw + 2) * "\u00b7"
+        # gaps sit at k*(cw+2)-2 .. k*(cw+2)-1; count boundaries present
+        line = body[0]
+        n_cells = 1
+        for k in range(1, cols):
+            gap = line[k * (cw + 2) - 2:k * (cw + 2)]
+            if artists._dwidth(line) > k * (cw + 2) + 2 and gap == "  ":
+                n_cells += 1
+        return n_cells
+
+    assert cells_at(200) == 3
+    assert cells_at(120) == 3
+    assert cells_at(100) == 3
+    assert cells_at(80) == 2
+    assert cells_at(66) == 2
+    assert cells_at(40) == 1
+
+
+def test_renderer_column_major_order(capsys):
+    rows = artists.build_sections(_catalog(_plain_rows(7)))
+    artists.print_sections(rows, width=100)  # 3 columns, 3 lines
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "Rel " in l]
+    # numbers read downwards: first line = rows 1, 4, 7
+    assert "Rel 0" in lines[0] and "Rel 3" in lines[0] and "Rel 6" in lines[0]
+    assert "Rel 1" in lines[1] and "Rel 4" in lines[1]
+    assert "Rel 2" in lines[2] and "Rel 5" in lines[2]
+
+
+def test_renderer_right_aligned_counters(capsys):
+    releases = [
+        _meta(0, "One", new=2, tracks=10),
+        _meta(1, "Two", new=0, tracks=14),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=100)  # cell_w = 32
+    out = capsys.readouterr().out
+    body = [l for l in out.splitlines() if "One" in l or "Two" in l][0]
+    cw = min((100 - 4) // 3, 64)
+    # counter '8/10' flush with the cell's right edge; fully owned gets 14/14 \u2713
+    assert body[:cw].rstrip().endswith("8/10")
+    assert body[cw + 2:cw + 40].rstrip().endswith("14/14 \u2713")
+
+
+def test_renderer_single_track_cells(capsys):
+    releases = [
+        _meta(0, "Owned Single", mtype="single", section="S", new=0, tracks=1),
+        _meta(1, "New Single", mtype="single", section="S", new=1, tracks=1),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=100)
+    out = capsys.readouterr().out
+    line = [l for l in out.splitlines()
+            if l.startswith("\u25a0") or l.startswith("\u25a1")][0]
+    new_part, owned_part = line.split("New Single 2020", 1)[1].split("Owned Single", 1)
+    # owned single-track: only a check mark; new single-track: nothing
+    assert owned_part.rstrip().endswith("\u2713")
+    assert "\u2713" not in new_part
+
+
+def test_renderer_fully_owned_dimmed(capsys, monkeypatch):
+    releases = [
+        _meta(0, "All Owned", new=0, tracks=14),
+        _meta(1, "Has New", new=3, tracks=10),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    artists.print_sections(rows, width=100)
+    out = capsys.readouterr().out
+    # fully owned multi-track cell dimmed, selected box green
+    assert "\x1b[2m\u25a1" in out and "\x1b[32m\u25a0" in out
 
 
 def test_renderer_japanese_alignment(capsys):
@@ -336,23 +435,19 @@ def test_renderer_japanese_alignment(capsys):
         _meta(1, "AB", year="2019", tracks=3, new=1),
     ]
     rows = artists.build_sections(_catalog(releases))
-    artists.print_sections(rows, width=60)
+    artists.print_sections(rows, width=80)  # 2 columns, cell width 38
     out = capsys.readouterr().out
-    for line in out.splitlines():
-        assert artists._dwidth(line.rstrip()) <= 60
-    # 2 columns, column-major: one line holds both cells; the second cell
-    # starts at the same DISPLAY column on every line even though cell 1
-    # contains two wide characters.
-    body = [l for l in out.splitlines() if l.startswith("[x]")]
-    assert len(body) == 1
-    second = body[0].index("[x]", 3)
-    assert artists._dwidth(body[0][:second]) == 28  # cell 26 + gap 2
+    body = [l for l in out.splitlines() if l.startswith("\u25a0")]
+    cw = (80 - 4) // 2
+    # second cell starts at the same DISPLAY column even with wide chars in cell 1
+    second = body[0].index("\u25a0", 3)
+    assert artists._dwidth(body[0][:second]) == cw + 2
 
 
-def test_renderer_header_counts():
+def test_renderer_header_pluralization(capsys):
     releases = [
-        _meta(0, "One", new=2),
-        _meta(1, "Two", new=0),
+        _meta(0, "One", section="S", mtype="single", new=1, tracks=2),
+        _meta(1, "Two", section="S", mtype="single", new=0, tracks=3),
         _meta(2, "Three", section="A", status="excluded", new=0, tags=["live"]),
     ]
     rows = artists.build_sections(_catalog(releases))
@@ -360,39 +455,59 @@ def test_renderer_header_counts():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         artists.print_sections(rows, width=100)
-    head = buf.getvalue().splitlines()[0]
-    assert head == "A  Albums (3) - 1 selected - 2 new"
+    out = buf.getvalue().splitlines()
+    assert out[0] == "A  Albums \u00b7 0/1 selected \u00b7 0 tracks to download"
+    s_head = [l for l in out if l.startswith("S ")][0]
+    assert s_head == "S  Singles & EPs \u00b7 1/2 selected \u00b7 1 track to download"
+    assert "Selected: 1 releases \u00b7 1 track to download" in out
 
 
-def test_dup_tag_uses_section_letter_and_index():
+def test_renderer_notes_and_legend(capsys):
     releases = [
-        _meta(0, "An Album", section="A", new=2),
-        _meta(1, "Live Single", mtype="single", section="S", status="excluded",
-              new=0, tags=["dup of An Album"], reason="dup of An Album"),
-        _meta(2, "An Album (Deluxe)", section="A", status="excluded", new=0,
-              tags=["dup of An Album"], reason="dup of An Album"),
+        _meta(0, "Good Album", new=2),
+        _meta(1, "Tagged Live", section="A", status="excluded", new=4,
+              tags=["live"], reason="live"),
     ]
     rows = artists.build_sections(_catalog(releases))
-    assert rows["A"][0]["n"] == 1
-    assert rows["A"][1]["meta"]["tags"] == ["dup of A1"]
-    assert rows["S"][0]["meta"]["tags"] == ["dup of A1"]
-
-
-def test_renderer_single_column_long_tag_cell_fits(capsys):
-    releases = [
-        _meta(0, "A Very Long Album Title That Will Eventually Need Truncating",
-              year="2024", tracks=14, new=5),
-        _meta(1, "Not Dyn Other", section="A", status="excluded", tracks=12,
-              new=0, tags=["dup of A Very Long Album Title That Will Eventually Need Truncating"]),
-    ]
-    rows = artists.build_sections(_catalog(releases))
-    artists.print_sections(rows, width=40)  # single column
+    artists.print_sections(rows, width=200)
     out = capsys.readouterr().out
-    assert "dup of A1" in out  # short tag visible
-    for line in out.splitlines():
-        assert artists._dwidth(line.rstrip()) <= 40
-        if "dup of" in line:  # index, counts, tag always visible
-            assert "[ ]" in line and "(2020)" in line and "12t" in line
+    assert "3/10 = tracks you own / tracks in release" in out
+    # the tagged release with 4 new tracks is unselected by default
+    note = [l for l in out.splitlines() if "type 'all' to include them" in l][0]
+    assert "1 releases with new tracks" in note
+    assert "Selected: 1 releases \u00b7 2 tracks to download" in out
+
+
+def test_ascii_rendering(capsys):
+    releases = [_meta(0, "One", new=2, tracks=10)]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=100, ascii_mode=True)
+    out = capsys.readouterr().out
+    assert "[x]" in out and "\u25a0" not in out and "\u2713" not in out
+    assert "ok = all owned" in out
+
+
+def test_no_color_output_plain(capsys, monkeypatch):
+    rows = artists.build_sections(_catalog(_plain_rows(2)))
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    artists.print_sections(rows, width=100)
+    out = capsys.readouterr().out
+    assert "\x1b[" not in out
+
+
+def test_no_tags_rendered_but_classification_kept(capsys):
+    releases = [
+        _meta(0, "Base", new=2),
+        _meta(1, "Base (Deluxe)", section="A", status="excluded", new=0,
+              tags=["live", "dup of Base"], reason="live, dup of Base"),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=100)
+    out = capsys.readouterr().out
+    assert "[live]" not in out and "dup of" not in out and "[remix]" not in out
+    # classification still internal: default selection skipped the tagged row
+    assert not rows["A"][1]["selected"]
 
 
 def _cmd_artist_args(tmp_path):
