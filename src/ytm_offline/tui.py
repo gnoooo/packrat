@@ -282,6 +282,15 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
                           vis, frame["mode"], frame["thin_phase"], frame["breath"],
                           frame.get("sweep"), curses.A_BOLD, thin=True)
         written = set()
+    elif snap.status.startswith("WAITING"):
+        # Between tracks: show what finished and what is up next (bug d).
+        finished = truncate(snap.last_finished, max(10, w - 10))
+        _safe_addstr(win, 1, 0, f"│ {vis.g.get('done', '+')} finished: {finished}", 0)
+        if snap.next_title:
+            nxt = truncate(snap.next_title, max(10, w - 14))
+            _safe_addstr(win, 2, 0,
+                         f"│ {vis.g.get('play', '>')} next: {nxt}", curses.A_BOLD)
+        written = {1, 2}
     _empty_border_rows(win, h, written, vis)
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
@@ -654,6 +663,7 @@ def _demo_worker(event_callback=None, control=None, seconds: float = 60.0,
     artists = ("Demo Artist A", "Demo Artist B", "The Demo Bros")
     albums = ("Demo Album I", "Demo Album II")
     total = 40
+    titles = tuple(f"Demo Track {i + 1:02d}" for i in range(total))
     sizes = [rng.randint(3, 12) * 1024 * 1024 for _ in range(total)]
 
     def emit(ev_type: str, payload: dict | None = None) -> None:
@@ -709,9 +719,10 @@ def _demo_worker(event_callback=None, control=None, seconds: float = 60.0,
                                 "title": title, "bytes": size, "error": None,
                                 "retryable": False})
         emit("log", {"message": f"demo: finished {title}"})
+        nxt = titles[i + 1] if i + 1 < total else ""
         for rem in (0.5, 0.4, 0.3, 0.2, 0.1):
             if stopped():
                 return
-            emit("delay", {"remaining": rem})
+            emit("delay", {"remaining": rem, "finished": title, "next": nxt})
             time.sleep(0.05)
     emit("done", {"reason": "demo finished"})

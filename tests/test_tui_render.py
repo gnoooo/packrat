@@ -8,9 +8,13 @@ import pytest
 
 from ytm_offline import tui_glyphs as tg
 from ytm_offline import tui_theme as tt
+import pathlib
+import tempfile
+from unittest import mock as _mock
+
+from ytm_offline import events as ev
 from ytm_offline.events import Event, State
 from ytm_offline import tui as tui_mod
-from ytm_offline.events import State
 
 
 def test_anim_mode_mapping():
@@ -222,3 +226,63 @@ def test_overall_bar_capped(monkeypatch):
     assert width_chars, "no bar drawn"
     assert max(width_chars) <= 100
     assert max(width_chars) == 100  # at w=200/300 the cap is reached
+
+
+def test_waiting_panel_shows_finished_and_next():
+    # bug: 'now playing' was empty while WAITING between tracks.
+    g = tg.GLYPHS["fancy"]
+    state = State(mode="test")
+    state.apply(ev.Event("start", {"mode": "test", "total": 10,
+                                   "total_est_bytes": 50000}))
+    state.apply(ev.Event("track_done", {"status": "downloaded",
+                                        "video_id": "v9", "title": "Done One",
+                                        "bytes": 1000}))
+    state.apply(ev.Event("delay", {"remaining": 4.2,
+                                   "finished": "Done One", "next": "Next Two"}))
+    snap = state.snapshot()
+    win = FakeScreen(6, 100)
+    _draw = tui_mod._draw_current
+    frame = {"mode": "waiting", "phase": 0.0, "thin_phase": 0.0,
+             "breath": 0.5, "flash": False, "sweep": None, "history": ()}
+    _draw(win, snap, _visual_no_color(), frame)
+    texts = " ".join(t for _, _, t in win.addstr_calls)
+    assert "finished: Done One" in texts
+    assert "next: Next Two" in texts
+
+
+def test_delay_event_carries_titles():
+    from ytm_offline import batch, events as ev
+    monkey = __import__("unittest.mock", fromlist=["patch"])
+    with monkey.patch.object(batch, "download_track", autospec=True) as dl:
+        dl.return_value = __import__("ytm_offline.download", fromlist=["x"]).DownloadResult(
+            status="downloaded", filepath=None)
+        seen = []
+        entries = [
+            {"video_id": "a", "title": "First", "artist": "A", "duration": 5},
+            {"video_id": "b", "title": "Second", "artist": "A", "duration": 5},
+        ]
+        batch.run_batch_download(
+            entries, output_root=pathlib.Path(tempfile.gettempdir()) / "delay-test",
+            event_callback=seen.append, delay=0.4, mode="test")
+    delays = [e for e in seen if e["type"] == "delay"]
+    assert delays, "expected delay events"
+    first = delays[0]["payload"]
+    assert first["finished"] == "First" and first["next"] == "Second"
+    state = ev.State()
+    for e in seen:
+        state.apply(ev.Event(e["type"], e["payload"]))
+    assert state.last_finished == "First" and state.next_title == "Second"
+
+
+def test_empty_waiting_panel_keeps_frame():
+    # No last_finished info yet (old manifests) -> only borders, no crash.
+    g = tg.GLYPHS["fancy"]
+    state = State(mode="test")
+    state.apply(ev.Event("delay", {"remaining": 3.0}))
+    snap = state.snapshot()
+    win = FakeScreen(6, 100)
+    frame = {"mode": "waiting", "phase": 0.0, "thin_phase": 0.0,
+             "breath": 0.5, "flash": False, "sweep": None, "history": ()}
+    tui_mod._draw_current(win, snap, _visual_no_color(), frame)
+    texts = [t for _, _, t in win.addstr_calls]
+    assert texts[0].startswith(g["tl"]) and texts[-1].startswith(g["bl"])

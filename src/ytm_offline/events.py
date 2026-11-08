@@ -54,6 +54,8 @@ class State:
         self.total_est_bytes = 0
         self.max_size_bytes: int | None = None
         self.current = CurrentTrack()
+        self.last_finished: str = ""
+        self.next_title: str = ""
         self.recent_failures: collections.deque[dict[str, Any]] = collections.deque(
             maxlen=20
         )
@@ -122,6 +124,9 @@ class State:
                 self.current = CurrentTrack()
             elif event.type == "delay":
                 self.status = f"WAITING {p.get('remaining', 0):.1f}s"
+                if p.get("finished") is not None:
+                    self.last_finished = str(p["finished"])
+                self.next_title = str(p.get("next", ""))
             elif event.type == "bytes":
                 self.total_bytes_downloaded = p.get("total", self.total_bytes_downloaded)
             elif event.type == "log":
@@ -152,6 +157,8 @@ class State:
             snap.total_est_bytes = self.total_est_bytes
             snap.max_size_bytes = self.max_size_bytes
             snap.current = dataclasses.replace(self.current)
+            snap.last_finished = self.last_finished
+            snap.next_title = self.next_title
             snap.recent_failures = collections.deque(self.recent_failures, maxlen=20)
             snap.log_lines = collections.deque(self.log_lines, maxlen=200)
             snap._track_times = collections.deque(self._track_times, maxlen=20)

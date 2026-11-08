@@ -138,6 +138,7 @@ def run_batch_download(
 
         if i < len(entries) and not stop_early and not (control and control.should_stop()):
             if delay > 0:
+                remaining_next = entries[i].get("title", "")
                 slept = 0.0
                 step = 0.2
                 while slept < delay:
@@ -145,7 +146,15 @@ def run_batch_download(
                         stop_early = True
                         break
                     remaining = max(0.0, delay - slept)
-                    _emit(event_callback, "delay", {"remaining": remaining})
+                    _emit(
+                        event_callback,
+                        "delay",
+                        {
+                            "remaining": remaining,
+                            "finished": entry.get("title", ""),
+                            "next": remaining_next,
+                        },
+                    )
                     time.sleep(min(step, remaining))
                     slept += step
 
