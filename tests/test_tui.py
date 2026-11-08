@@ -139,3 +139,34 @@ def test_ui_crash_stops_worker_gracefully(monkeypatch, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "TUI crashed: RuntimeError: ui boom" in err
     assert "full log:" in err
+
+
+def test_batch_start_carries_est_bytes(monkeypatch):
+    # bug: TUI showed 'downloaded 9.3 MB / est 0.0 B' — start event must
+    # carry the manifest estimate (same numbers as summarize_entries).
+    from ytm_offline import batch, events as ev
+
+    monkeypatch.setattr(
+        batch,
+        "download_track",
+        lambda *a, **k: __import__("ytm_offline.download", fromlist=["x"]).DownloadResult(
+            status="downloaded", filepath=None
+        ),
+    )
+    entries = [
+        {"video_id": f"v{i}", "title": f"T{i}", "artist": "A",
+         "duration": 100, "est_size": est}
+        for i, est in enumerate((1000, 2000, 3000), start=1)
+    ]
+    seen = []
+    batch.run_batch_download(
+        entries, output_root=ev.__file__ and __import__("pathlib").Path(
+            __import__("tempfile").gettempdir()) / "batch-est-test",
+        event_callback=lambda d: seen.append(d), delay=0.0, mode="test",
+    )
+    start = [d for d in seen if d["type"] == "start"][0]
+    assert start["payload"]["total_est_bytes"] == 6000
+    state = ev.State()
+    for d in seen:
+        state.apply(ev.Event(d["type"], d["payload"]))
+    assert state.total_est_bytes == 6000

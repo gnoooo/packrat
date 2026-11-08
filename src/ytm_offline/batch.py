@@ -56,6 +56,7 @@ def run_batch_download(
             "mode": mode,
             "total": len(entries),
             "max_size_bytes": max_size,
+            "total_est_bytes": sum((e.get("est_size") or 0) for e in entries),
         },
     )
 
