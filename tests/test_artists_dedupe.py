@@ -169,3 +169,36 @@ def test_scope_all_does_not_duplicate_top_song_in_catalog(
     video_ids = [e["video_id"] for e in entries]
     assert video_ids == ["top1", "album2"]
     assert catalog["totals"]["already_owned"] == 1
+
+
+def test_dedupe_editions_numbered_variants_are_separate_releases():
+    # [DAY 1] vs [DAY 2] (and Part/Vol/Disc/any number) are different
+    # releases, not edition duplicates.
+    releases = [
+        {"title": "Legend – Metal Galaxy [DAY 1]", "browseId": "b1", "year": "2020"},
+        {"title": "Legend – Metal Galaxy [DAY 2]", "browseId": "b2", "year": "2020"},
+        {"title": "Saga Part 1", "browseId": "b3", "year": "2019"},
+        {"title": "Saga Part 2", "browseId": "b4", "year": "2019"},
+        {"title": "Anthology Vol. 2", "browseId": "b5", "year": "2018"},
+        {"title": "Anthology", "browseId": "b6", "year": "2018"},
+        {"title": "Album (Deluxe)", "browseId": "b7", "year": "2017"},
+        {"title": "Album", "browseId": "b8", "year": "2017"},
+    ]
+    kept, dropped = artists_module.dedupe_editions(releases)
+    kept_ids = {r["browseId"] for r in kept}
+    assert {"b1", "b2", "b3", "b4", "b5", "b6", "b8"} <= kept_ids
+    dropped_ids = {r["browseId"] for r, _ in dropped}
+    # Deluxe remains an edition duplicate; [DAY n]/Part/Vol stay.
+    assert dropped_ids == {"b7"}
+
+
+def test_dedupe_editions_numbered_parenthetical_false_positive():
+    # An edition-word suffix containing a number ("2011 Remaster") still
+    # lists as its own release by the number rule.
+    kept, dropped = artists_module.dedupe_editions(
+        [
+            {"title": "Attack", "browseId": "a1", "year": "1972"},
+            {"title": "Attack (2011 Remaster)", "browseId": "a2", "year": "2011"},
+        ]
+    )
+    assert len(kept) == 2 and not dropped

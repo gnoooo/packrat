@@ -221,6 +221,28 @@ def _base_title(title: str) -> str:
     return _normalize(base).strip()
 
 
+_MARKER_RE = re.compile(r"\b(day|part|vol|volume|disc)\b", re.IGNORECASE)
+
+
+def _variant_stamp(title: str) -> str:
+    """The suffix stripped by _base_title, normalized ("" if none)."""
+    removed: list[str] = []
+    stripped = re.sub(
+        r"[\(\[].*?[\)\]]", lambda m: removed.append(m.group(0)) or "", str(title),
+        count=1,
+    )
+    return _normalize(" ".join(removed)).strip()
+
+
+def _differs_by_edition(stamp: str) -> bool:
+    """True when a stripped suffix marks a separate release, not an edition.
+
+    '[DAY 1]' vs '[DAY 2]', 'Part 3', 'Vol. 2', '(Disc 1)' are different
+    releases; parenthetical numbers or markers always disqualify the dup.
+    """
+    return bool(stamp) and (any(ch.isdigit() for ch in stamp) or bool(_MARKER_RE.search(stamp)))
+
+
 def _edition_score(title: str) -> int:
     t = str(title).lower()
     return sum(1 for w in _EDITION_WORDS if w in t)
@@ -237,7 +259,13 @@ def dedupe_editions(
     groups: dict[str, list[dict[str, Any]]] = {}
     order: list[str] = []
     for release in releases:
-        base = _base_title(release.get("title", ""))
+        title = str(release.get("title", ""))
+        base = _base_title(title)
+        # '[DAY 1]' vs '[DAY 2]' style suffixes mark separate releases,
+        # not editions of one album.
+        stamp = _variant_stamp(title)
+        if _differs_by_edition(stamp):
+            base = f"{base}::{stamp}"
         if base not in groups:
             groups[base] = []
             order.append(base)
