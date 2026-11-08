@@ -667,6 +667,11 @@ def cmd_artist(args: argparse.Namespace) -> int:
     output_root = pathlib.Path(args.output)
     for chosen in resolved:
         print(f"resolving catalog for {chosen['browseId']} ...")
+        # With the interactive picker the download set is the picked rows
+        # only, so pending top songs must not count as coverage: with
+        # scope="all" their titles seed owned_keys and releases can show
+        # "already owned"/[x] for tracks this run would never download.
+        scope = "albums" if (args.scope == "all" and sys.stdin.isatty()) else args.scope
         catalog = artists_module.build_catalog(
             args.headers,
             chosen["browseId"],
@@ -678,7 +683,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             albums_only=args.albums_only,
             no_singles=args.no_singles,
             duration_window=args.duration_window,
-            scope=args.scope,
+            scope=scope,
             top_limit=args.top_limit,
             max_per_album=args.max_per_album,
             max_size=args.max_size,

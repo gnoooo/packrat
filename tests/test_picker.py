@@ -362,3 +362,83 @@ def test_renderer_header_counts():
         artists.print_sections(rows, width=100)
     head = buf.getvalue().splitlines()[0]
     assert head == "A  Albums (3) - 1 selected - 2 new"
+
+
+def _cmd_artist_args(tmp_path):
+    import argparse
+    return argparse.Namespace(
+        artists=["BABYMETAL"],
+        from_file=None,
+        pick=None,
+        headers=None if False else "hdrs",
+        output=str(tmp_path),
+        archive=str(tmp_path / ".archive"),
+        include_live=False,
+        include_compilations=False,
+        include_remixes=False,
+        albums_only=False,
+        no_singles=False,
+        duration_window=False,
+        scope="all",
+        top_limit=None,
+        max_per_album=None,
+        max_size=None,
+        delay=0.0,
+        singles_dir="Singles",
+        dry_run=True,
+        yes=False,
+        tui=False,
+        ascii=False,
+        cookies=None,
+        cookies_from_browser=None,
+        browser_profile=None,
+    )
+
+
+def test_cmd_artist_interactive_scope_has_no_top_song_coverage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+):
+    # fix: pending top songs must not seed owned_keys when the picker
+    # decides the download set — scope stays "albums" for the picker flow.
+    import ytm_offline.cli as cli
+
+    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr(
+        "ytm_offline.artists.search_artists",
+        lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
+    )
+    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: True)
+    captured: dict = {}
+    sentinel = RuntimeError("stop before anything real happens")
+
+    def fake_build_catalog(headers, bid, root, archive, scope=None, **kw):
+        captured["scope"] = scope
+        raise sentinel
+
+    monkeypatch.setattr(cli.artists_module, "build_catalog", fake_build_catalog)
+    args = _cmd_artist_args(tmp_path)
+    with pytest.raises(RuntimeError, match="stop before"):
+        cli.cmd_artist(args)
+    assert captured["scope"] == "albums"
+
+
+def test_cmd_artist_noninteractive_keeps_scope(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    import ytm_offline.cli as cli
+
+    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr(
+        "ytm_offline.artists.search_artists",
+        lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
+    )
+    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: False)
+    captured: dict = {}
+    sentinel = RuntimeError("stop")
+
+    def fake_build_catalog(headers, bid, root, archive, scope=None, **kw):
+        captured["scope"] = scope
+        raise sentinel
+
+    monkeypatch.setattr(cli.artists_module, "build_catalog", fake_build_catalog)
+    with pytest.raises(RuntimeError, match="stop"):
+        cli.cmd_artist(_cmd_artist_args(tmp_path))
+    assert captured["scope"] == "all"
