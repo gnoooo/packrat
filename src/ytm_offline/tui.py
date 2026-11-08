@@ -1,18 +1,28 @@
-"""Curses TUI for ytm_offline downloads."""
+"""Curses TUI for ytm_offline downloads — themed, animated renderer.
+
+Render layer only: the downloader/pipeline, events/State schema and Control
+semantics are untouched. Colors come from tui_theme, glyphs from tui_glyphs.
+"""
 
 from __future__ import annotations
 
 import curses
 import os
+import random
 import sys
 import threading
 import time
 import traceback
+from collections import deque
 from typing import Any, Callable
 
+from ytm_offline import tui_glyphs as tg
+from ytm_offline import tui_theme as tt
 from ytm_offline.control import Control
 from ytm_offline.events import Event, State
 from ytm_offline.logging_config import RingBufferHandler, redact, setup_logging
+
+FANCY = tg.GLYPHS["fancy"]
 
 
 def format_duration(seconds: float) -> str:
@@ -36,205 +46,324 @@ def format_bytes(n: int | None) -> str:
 
 
 def render_bar(width: int, percent: float, ascii_mode: bool = False) -> str:
+    """Unicode bar now uses the 1/8-cell glyph engine; ascii keeps brackets."""
+    if ascii_mode:
+        return _render_bar_ascii(width, percent)
+    return tg.bar(FANCY, width, percent)
+
+
+def _render_bar_ascii(width: int, percent: float) -> str:
     if width <= 0:
         return ""
     percent = max(0.0, min(100.0, percent))
     filled = int(width * percent / 100)
-    if ascii_mode:
-        return "[" + "#" * filled + "-" * (width - filled) + "]"
-    # Unicode block characters.
-    frac = (width * percent / 100) - filled
-    if frac > 0.66 and filled < width:
-        mid = "\u2588"
-    elif frac > 0.33 and filled < width:
-        mid = "\u2584"
-    else:
-        mid = ""
-    bar = "\u2588" * filled + mid
-    # Pad with light shade.
-    pad = width - len(bar)
-    if pad > 0:
-        bar += "\u2591" * pad
-    return bar
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
 def truncate(text: str, width: int) -> str:
-    if width <= 0:
-        return ""
+    """Redact and cut to a display width, ellipsis when it fits."""
     text = redact(str(text))
-    if len(text) <= width:
-        return text
     if width <= 3:
-        return text[:width]
-    return text[: width - 1] + "\u2026"
+        return text[: width]
+    if tg.display_width(text) <= width:
+        return text
+    return tg.clip_width(text, width - 1) + "…"
+
+
+# --- visual options (CLI-wide flag set once in main()) ----------------------
+
+_visual_state = {"theme": "ocean", "no_color": False}
+
+
+def set_visual_options(theme: str = "ocean", no_color: bool = False) -> None:
+    """Single place the CLI passes its visual flags; run_tui call sites unchanged."""
+    if theme in tt.THEMES:
+        _visual_state["theme"] = theme
+    _visual_state["no_color"] = bool(no_color)
+
+
+def anim_mode(status: str) -> str:
+    if status.startswith("WAITING"):
+        return "waiting"
+    if status in ("PAUSED", "STOPPING", "DONE"):
+        return status.lower()
+    if status in ("STOPPED", "ABORTED"):
+        return "aborted"
+    return "running"
+
+
+# --- drawing primitives -----------------------------------------------------
 
 
 def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
     try:
-        win.addstr(y, x, text, attr)
+        h, w = win.getmaxyx()
+        if y < 0 or y >= h or x >= w:
+            return
+        win.addstr(y, x, tg.clip_width(text, w - x), attr)
     except curses.error:
         pass
 
 
-def _draw_header(
-    win,
-    state: State,
-    ascii_mode: bool,
-    colors: dict[str, int],
-) -> None:
-    h, w = win.getmaxyx()
-    mode = truncate(state.mode, 30)
-    status = state.status
-    status_color = colors.get("cyan", 0)
+class Visual:
+    """One theme+tier snapshot; built at start and on every theme switch."""
+
+    def __init__(self, glyphs, pal, colors, attr, no_anim: bool, tier: str) -> None:
+        self.g = glyphs
+        self.pal = pal
+        self.colors = colors
+        self.attr = attr
+        self.no_anim = no_anim
+        self.tier = tier
+
+    def wave_attr(self, x: float, phase: float) -> int:
+        idx, bold = self.pal.attr_for_intensity(tt.wave_intensity(x, phase))
+        return self.attr(idx, bold) if idx >= 0 else 0
+
+    def breathe_attr(self, breath: float) -> int:
+        idx, bold = self.pal.attr_for_intensity(breath)
+        return self.attr(idx, bold) if idx >= 0 else 0
+
+
+def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> Visual:
+    import curses as _cur
+
+    glyphs = tg.pick_set(force_ascii=ascii_mode)
+    has_colors = _cur.has_colors()
+    no_color = tt.no_color_requested() or _visual_state.get("no_color")
+    tier = tt.select_tier(has_colors, _cur.COLORS if has_colors else 0, no_color)
+    theme = tt.THEMES.get(theme_name, tt.THEMES["ocean"])
+    pal = tt.Palette(theme, tier)
+    colors: dict[str, int] = {k: 0 for k in tt.COLOR_KEYS}
+
+    def plain_attr(idx: int, bold: bool = False) -> int:
+        return _cur.A_BOLD if bold else 0
+
+    attr: Callable[[int, bool], int] = plain_attr
+    if tier != tt.TIER_NONE:
+        try:
+            _cur.start_color()
+            pairs = tt.activate(pal)
+
+            def themed_attr(idx: int, bold: bool = False, _pairs: dict = pairs) -> int:
+                a = _cur.color_pair(_pairs.get(idx, 0))
+                return a | _cur.A_BOLD if bold else a
+
+            attr = themed_attr
+            colors = {k: (attr(idx) if idx >= 0 else 0) for k, idx in pal.static.items()}
+        except _cur.error:
+            attr = plain_attr
+            colors = {k: 0 for k in tt.COLOR_KEYS}
+    return Visual(glyphs, pal, colors, attr, no_anim, tier)
+
+
+def _cell_attr(vis: Visual, i: int, mode: str, phase: float, breath: float,
+               sweep: float | None, filled: bool, width: int) -> int:
+    if not filled:
+        return vis.colors.get("dim", 0)
+    if mode == "running":
+        return vis.wave_attr(i, phase)
+    if mode == "waiting":
+        return vis.breathe_attr(breath)
+    if mode == "paused":
+        return vis.colors.get("dim", 0)
+    if mode == "stopping":
+        return vis.colors.get("warning", 0)
+    if mode == "done":
+        if sweep is not None and sweep < 1.0 and abs(i - sweep * width) < 1:
+            return vis.attr(231, True)
+        return vis.colors.get("success", 0)
+    return vis.colors.get("error", 0)
+
+
+def _draw_themed_line(win, y: int, prefix: str, body: str, suffix: str, vis: Visual,
+                      mode: str, phase: float, breath: float, sweep: float | None,
+                      base_attr: int = 0, thin: bool = False) -> None:
+    """prefix + per-cell colored body + suffix; bar cells get the wave."""
+    if vis.tier == tt.TIER_NONE or not body:
+        _safe_addstr(win, y, 0, prefix + body + suffix, base_attr)
+        return
+    _safe_addstr(win, y, 0, prefix, base_attr)
+    fill = str(vis.g["thin_fill"] if thin else vis.g["bar_fill"])
+    edge = {str(vis.g["thin_edge"])} if thin and vis.g["thin_edge"] else set(str(vis.g["bar_edge"]))
+    fill_set = {fill} | edge
+    x = tg.display_width(prefix)
+    for i, ch in enumerate(body):
+        if ch in fill_set:
+            _safe_addstr(win, y, x, ch, _cell_attr(vis, i, mode, phase, breath, sweep, True, len(body)))
+        else:
+            _safe_addstr(win, y, x, ch, base_attr)
+        x += tg.char_width(ch)
+    _safe_addstr(win, y, x, suffix, base_attr)
+
+
+def _spark_rates(history: tuple[tuple[float, int], ...]) -> list[float]:
+    """Per-second byte-rate deltas from (ts, total_bytes) samples."""
+    buckets: dict[int, int] = {}
+    for ts, total in history:
+        buckets[int(ts)] = total
+    stamps = sorted(buckets)
+    return [max(0, buckets[b] - buckets[a]) for a, b in zip(stamps, stamps[1:])]
+
+
+# --- panels -----------------------------------------------------------------
+
+
+def _draw_header(win, snap: State, vis: Visual) -> None:
+    status = snap.status
+    colors = vis.colors
     if status == "DONE":
-        status_color = colors.get("green", 0)
+        sattr = colors.get("success", 0)
     elif status in ("STOPPED", "ABORTED"):
-        status_color = colors.get("red", 0)
+        sattr = colors.get("error", 0)
+    elif status == "STOPPING":
+        sattr = colors.get("stopping", 0)
     elif status.startswith("WAITING"):
-        status_color = colors.get("yellow", 0)
-    elapsed = format_duration(state.elapsed_seconds)
-    line = f" ytm-offline  |  {mode}  |  {status}  |  elapsed {elapsed}"
-    _safe_addstr(win, 0, 0, truncate(line, w - 1).ljust(w - 1), status_color | curses.A_BOLD)
+        sattr = colors.get("warning", 0)
+    else:
+        sattr = colors.get("info", 0)
+    line = f" ytm-offline  |  {snap.mode[:30]}  |  {status}  |  elapsed {format_duration(snap.elapsed_seconds)}"
+    _safe_addstr(win, 0, 0, line, curses.A_BOLD)
+    pos = line.find(status)
+    if pos >= 0:
+        _safe_addstr(win, 0, pos, status, sattr | curses.A_BOLD)
 
 
-def _draw_overall(
-    win,
-    state: State,
-    ascii_mode: bool,
-    colors: dict[str, int],
-) -> None:
+def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    if state.total <= 0:
-        _safe_addstr(win, 0, 0, " overall: resolving tracks...", colors.get("cyan", 0))
+    if snap.total <= 0:
+        _safe_addstr(win, 0, 0, " overall: resolving tracks...", curses.A_BOLD)
         return
-    pct = 100 * state.done / state.total if state.total else 0
     bar_w = max(10, w - 40)
-    bar = render_bar(bar_w, pct, ascii_mode)
-    eta = state.eta_seconds()
-    eta_str = format_duration(eta) if eta is not None else "--:--"
-    line = f" {state.done}/{state.total} {bar} {pct:5.1f}%  ETA {eta_str}"
-    _safe_addstr(win, 0, 0, truncate(line, w - 1), colors.get("cyan", 0))
+    pct = snap.done / snap.total * 100
+    eta = snap.eta_seconds()
+    eta_s = "…" if eta is None else format_duration(eta)
+    prefix = f" {snap.done}/{snap.total} "
+    body = tg.bar(vis.g, bar_w, pct)
+    suffix = f" {pct:5.1f}%  ETA {eta_s}"
+    _draw_themed_line(win, 0, prefix, body, suffix, vis, frame["mode"], frame["phase"],
+                      frame["breath"], frame.get("sweep"), curses.A_BOLD)
+    base = f" downloaded {format_bytes(snap.total_bytes_downloaded)} / est {format_bytes(snap.total_est_bytes)}"
+    if snap.max_size_bytes:
+        base += f" / max {format_bytes(snap.max_size_bytes)}"
+    line = base
+    avail = w - 1 - tg.display_width(base) - 2
+    if avail >= 8:
+        rates = _spark_rates(frame["history"])
+        line += "  " + tg.sparkline(vis.g, rates, min(30, avail))
+    _safe_addstr(win, 1, 0, line, vis.colors.get("info", 0))
 
-    size_line = (
-        f" downloaded {format_bytes(state.total_bytes_downloaded)}"
-        f" / est {format_bytes(state.total_est_bytes)}"
-    )
-    if state.max_size_bytes:
-        size_line += f" / max {format_bytes(state.max_size_bytes)}"
-    _safe_addstr(win, 1, 0, truncate(size_line, w - 1), colors.get("cyan", 0))
 
-
-def _draw_current(
-    win,
-    state: State,
-    ascii_mode: bool,
-    colors: dict[str, int],
-) -> None:
+def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    cur = state.current
+    cur = snap.current
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "now playing"),
+                 vis.colors.get("info", 0) | curses.A_BOLD)
     if not cur.video_id:
-        _safe_addstr(win, 0, 0, " current: idle".ljust(w - 1), colors.get("cyan", 0))
-        for y in range(1, h - 1):
-            _safe_addstr(win, y, 0, " " * (w - 1))
         return
-
-    title = truncate(cur.title, w - 12)
-    artist = truncate(cur.artist, w - 12)
-    album = truncate(cur.album, w - 12)
-    source = truncate(cur.source, w - 12)
-    stage = cur.stage or "resolving"
-    _safe_addstr(win, 0, 0, f" {title}", curses.A_BOLD)
-    _safe_addstr(win, 1, 0, f" {artist} - {album}")
-    _safe_addstr(win, 2, 0, f" source: {source}  |  stage: {stage}")
-
-    pct = cur.percent or 0.0
+    _safe_addstr(win, 1, 0, f" {truncate(cur.title, w - 4)}", curses.A_BOLD)
+    _safe_addstr(win, 2, 0, f" {truncate(cur.artist + ' - ' + cur.album, w - 4)}", 0)
+    _safe_addstr(win, 3, 0,
+                 f" source: {truncate(cur.source, max(8, w // 3))}  |  stage: {cur.stage}", 0)
     bar_w = max(10, w - 40)
-    bar = render_bar(bar_w, pct, ascii_mode)
-    speed = cur.speed or ""
-    eta = format_duration(cur.eta_seconds) if cur.eta_seconds is not None else "--:--"
-    line = f" {pct:5.1f}% {bar} {speed}  ETA {eta}"
-    _safe_addstr(win, 3, 0, truncate(line, w - 1), colors.get("green", 0))
-
+    pct = max(0.0, min(100.0, cur.percent))
+    eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
+    suffix = f" {cur.speed}  ETA {eta}" if cur.speed else f" ETA {eta}"
     if cur.total_bytes:
-        size_line = f" {format_bytes(cur.downloaded_bytes)} / {format_bytes(cur.total_bytes)}"
-        _safe_addstr(win, 4, 0, truncate(size_line, w - 1))
+        suffix += f"  {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
+    _draw_themed_line(win, 4, f" {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
+                      vis, frame["mode"], frame["thin_phase"], frame["breath"],
+                      frame.get("sweep"), curses.A_BOLD, thin=True)
 
 
-def _draw_counters(
-    win,
-    state: State,
-    colors: dict[str, int],
-) -> None:
+def _draw_counters(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    consec = state.consecutive_retryable
-    consec_color = colors.get("green", 0)
-    if consec == 2:
-        consec_color = colors.get("yellow", 0)
-    elif consec >= 3:
-        consec_color = colors.get("red", 0)
-
-    line1 = (
-        f" downloaded {state.downloaded}"
-        f"  archived {state.archived}"
-        f"  skipped-size {state.skipped_size}"
-        f"  failed {state.failed}"
-        f"  retries {state.retries}"
-    )
-    _safe_addstr(win, 0, 0, truncate(line1, w - 1))
-    line2 = f" consecutive retryable errors: {consec}/3"
-    _safe_addstr(win, 1, 0, truncate(line2, w - 1), consec_color | curses.A_BOLD)
+    line = f" downloaded {snap.downloaded}  archived {snap.archived}  skipped-size {snap.skipped_size}  failed {snap.failed}  retries {snap.retries}"
+    attr0 = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else 0
+    _safe_addstr(win, 0, 0, line, attr0)
+    c = snap.consecutive_retryable
+    if c >= 3:
+        attr1 = vis.colors.get("error", 0) | curses.A_BOLD
+    elif c == 2:
+        attr1 = vis.colors.get("warning", 0) | curses.A_BOLD
+    else:
+        attr1 = vis.colors.get("success", 0)
+    _safe_addstr(win, 1, 0, f" consecutive retryable errors: {c}/3", attr1)
 
 
-def _draw_failures(
-    win,
-    state: State,
-    colors: dict[str, int],
-) -> None:
+def _draw_failures(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    _safe_addstr(win, 0, 0, " recent failures".ljust(w - 1), curses.A_UNDERLINE)
+    heading = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else curses.A_BOLD
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "recent failures"), heading)
     y = 1
-    for fail in list(state.recent_failures)[-max(1, h - 2) :]:
-        if y >= h - 1:
-            break
-        text = f" {truncate(fail.get('title', ''), w // 2)}: {truncate(fail.get('reason', ''), w // 2 - 4)}"
-        _safe_addstr(win, y, 0, truncate(text, w - 1), colors.get("red", 0))
+    half = max(4, (w - 2) // 2)
+    for fail in reversed(list(snap.recent_failures)[-(max(0, h - 2)):]):
+        title = truncate(str(fail.get("title", "")), half)
+        reason = truncate(str(fail.get("reason", "")), max(4, half - 4))
+        _safe_addstr(win, y, 0, f" {title}: {reason}", vis.colors.get("error", 0))
         y += 1
+        if y >= h:
+            break
 
 
-def _draw_log(
-    win,
-    state: State,
-    ring_handler: RingBufferHandler | None,
-    log_offset: int,
-    colors: dict[str, int],
-) -> None:
+def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> None:
     h, w = win.getmaxyx()
-    _safe_addstr(win, 0, 0, " log".ljust(w - 1), curses.A_UNDERLINE)
-    lines = list(state.log_lines)
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "log"), curses.A_BOLD)
+    lines: list[str] = []
     if ring_handler is not None:
         try:
-            lines = ring_handler.lines(500)
+            lines = list(ring_handler.lines(500))
         except Exception:
-            pass
-    if log_offset:
-        lines = lines[-(len(lines) - log_offset) :]
-    visible = h - 2
+            lines = []
+    if not lines:
+        lines = list(snap.log_lines)
+    if log_offset and log_offset < len(lines):
+        lines = lines[: len(lines) - log_offset]
+    elif log_offset >= len(lines):
+        lines = []
+    visible = max(0, h - 2)
     for i, line in enumerate(lines[-visible:]):
-        y = 1 + i
-        if y >= h - 1:
-            break
-        _safe_addstr(win, y, 0, truncate(redact(line), w - 1))
+        _safe_addstr(win, i + 1, 0, " " + truncate(line, w - 3), 0)
 
 
-def _draw_footer(win, show_log: bool, colors: dict[str, int]) -> None:
+def _draw_footer(win, vis: Visual) -> None:
     h, w = win.getmaxyx()
-    help_text = " p pause/resume  s skip  q quit  l log  ? help "
-    _safe_addstr(win, 0, 0, help_text.ljust(w - 1), curses.A_REVERSE)
+    help_text = " p pause/resume  s skip  q quit  l log  a anim  t theme  ? help "
+    _safe_addstr(win, 0, 0, help_text.ljust(max(0, w - 1)), curses.A_REVERSE)
 
 
-def _layout(stdscr, show_log: bool) -> tuple[Any, Any, Any, Any, Any, Any]:
+def _draw_help(stdscr, vis: Visual) -> None:
     h, w = stdscr.getmaxyx()
-    # Header 1, overall 2, current 5, counters 2, failures variable, log variable, footer 1.
+    bw = min(56, max(0, w - 4))
+    bh = 9
+    if bw <= 2 or h < bh:
+        return
+    y0 = max(0, (h - bh) // 2)
+    x0 = max(0, (w - bw) // 2)
+    win = stdscr.derwin(bh, bw, y0, x0)
+    if win is None:
+        return
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, bw, "help"), curses.A_BOLD)
+    rows = [
+        " p / space   pause or resume",
+        " s           skip current track",
+        " l           toggle log view (arrows scroll)",
+        " a           animation on/off",
+        " t           next theme",
+        " ?           toggle this help",
+        " q           quit (finishes current track)",
+    ]
+    for i, row in enumerate(rows, start=1):
+        _safe_addstr(win, i, 0, row, 0)
+    _safe_addstr(win, bh - 1, 0, tg.panel_bottom(vis.g, bw), curses.A_BOLD)
+    win.noutrefresh()
+
+
+# --- layout + frame ---------------------------------------------------------
+
+
+def _layout(stdscr, show_log: bool):
+    h, w = stdscr.getmaxyx()
     header_h = 1
     overall_h = 2
     current_h = 5
@@ -269,91 +398,69 @@ def _layout(stdscr, show_log: bool) -> tuple[Any, Any, Any, Any, Any, Any]:
     return header, overall, current, counters, failures, log, footer
 
 
-def _draw_all(
-    stdscr,
-    state: State,
-    control: Control,
-    ring_handler: RingBufferHandler | None,
-    colors: dict[str, int],
-    ascii_mode: bool,
-    show_log: bool,
-    log_offset: int,
-) -> None:
-    stdscr.erase()
+def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
+              log_offset: int, help_mode: bool, frame: dict) -> None:
     h, w = stdscr.getmaxyx()
+    stdscr.erase()
     if h < 12 or w < 40:
-        _safe_addstr(stdscr, 0, 0, "terminal too small")
-        stdscr.refresh()
+        _safe_addstr(stdscr, 0, 0, "terminal too small", curses.A_BOLD)
+        stdscr.noutrefresh()
+        curses.doupdate()
         return
-
-    layout = _layout(stdscr, show_log)
-    if layout[0] is None:
-        _safe_addstr(stdscr, 0, 0, "terminal too small for layout")
-        stdscr.refresh()
+    header, overall, current, counters, failures, log, footer = _layout(stdscr, show_log)
+    if header is None:
+        _safe_addstr(stdscr, 0, 0, "terminal too small for layout", curses.A_BOLD)
+        stdscr.noutrefresh()
+        curses.doupdate()
         return
-
-    header, overall, current, counters, failures, log, footer = layout
-    _draw_header(header, state, ascii_mode, colors)
-    _draw_overall(overall, state, ascii_mode, colors)
-    _draw_current(current, state, ascii_mode, colors)
-    _draw_counters(counters, state, colors)
-    _draw_failures(failures, state, colors)
+    _draw_header(header, snap, vis)
+    _draw_overall(overall, snap, vis, frame)
+    _draw_current(current, snap, vis, frame)
+    _draw_counters(counters, snap, vis, frame)
+    _draw_failures(failures, snap, vis, frame)
     if show_log and log:
-        _draw_log(log, state, ring_handler, log_offset, colors)
-    _draw_footer(footer, show_log, colors)
-
-    stdscr.refresh()
-
-
-def _init_colors() -> dict[str, int]:
-    colors: dict[str, int] = {}
-    if not curses.has_colors():
-        return colors
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_GREEN, -1)
-    curses.init_pair(2, curses.COLOR_YELLOW, -1)
-    curses.init_pair(3, curses.COLOR_RED, -1)
-    curses.init_pair(4, curses.COLOR_CYAN, -1)
-    colors["green"] = curses.color_pair(1)
-    colors["yellow"] = curses.color_pair(2)
-    colors["red"] = curses.color_pair(3)
-    colors["cyan"] = curses.color_pair(4)
-    return colors
+        _draw_log(log, snap, vis, ring_handler, log_offset)
+    _draw_footer(footer, vis)
+    for win in (header, overall, current, counters, failures, footer):
+        win.noutrefresh()
+    if show_log and log:
+        log.noutrefresh()
+    if help_mode:
+        _draw_help(stdscr, vis)
+    stdscr.noutrefresh()
+    curses.doupdate()
 
 
-def _handle_keys(
-    stdscr,
-    control: Control,
-    state: State,
-    show_log: bool,
-    log_offset: int,
-) -> tuple[bool, bool, int]:
-    """Return (continue_running, show_log, log_offset)."""
+# --- keys -------------------------------------------------------------------
+
+
+def _handle_keys(stdscr, control: Control, state: State,
+                 show_log: bool, log_offset: int, help_mode: bool):
+    """Existing keys keep their behavior; a adds anim toggle, t cycles theme."""
+    action = ""
     try:
         key = stdscr.getch()
     except curses.error:
-        return True, show_log, log_offset
-
+        return True, show_log, log_offset, help_mode, action
     if key == -1:
-        return True, show_log, log_offset
-
+        return True, show_log, log_offset, help_mode, action
     if key in (ord("q"), ord("Q")):
         control.request_stop()
         state.apply(Event("status", {"status": "STOPPING", "reason": "user quit"}))
-        return True, show_log, log_offset
-    if key in (ord("p"), ord("P"), ord(" ")):
-        paused = control.toggle_pause()
-        status = "PAUSED" if paused else "RUNNING"
-        state.apply(Event("status", {"status": status}))
+    elif key in (ord("p"), ord("P"), 32):
+        control.toggle_pause()
+        state.apply(Event("status", {"status": "PAUSED" if control.paused else "RUNNING"}))
     elif key in (ord("s"), ord("S")):
         control.request_skip()
     elif key in (ord("l"), ord("L")):
         show_log = not show_log
         log_offset = 0
-    elif key in (ord("?"),):
-        # Help toggle handled by showing footer; could show overlay later.
-        pass
+    elif key in (ord("a"), ord("A")):
+        action = "toggle_anim"
+    elif key in (ord("t"), ord("T")):
+        action = "next_theme"
+    elif key == 63:  # ?
+        help_mode = not help_mode
     elif key == curses.KEY_UP:
         log_offset = max(0, log_offset - 1)
     elif key == curses.KEY_DOWN:
@@ -363,51 +470,95 @@ def _handle_keys(
     elif key == curses.KEY_NPAGE:
         log_offset += 10
     elif key == curses.KEY_RESIZE:
-        pass
+        action = "resize"
+    return True, show_log, log_offset, help_mode, action
 
-    return True, show_log, log_offset
+
+# --- main loop --------------------------------------------------------------
 
 
-def _ui(
-    stdscr,
-    state: State,
-    control: Control,
-    ring_handler: RingBufferHandler | None,
-    ascii_mode: bool,
-) -> None:
+def _ui(stdscr, state: State, control: Control, ring_handler, ascii_mode: bool,
+        no_anim: bool | None = None) -> None:
     stdscr.nodelay(True)
     stdscr.timeout(100)
     curses.curs_set(0)
-    colors = _init_colors()
-    show_log = False
+    if no_anim is None:
+        no_anim = os.environ.get("YTM_TUI_ANIM") == "0"
+    vis = _build_visual(stdscr, _visual_state["theme"], ascii_mode, no_anim)
+    show_log = help_mode = False
     log_offset = 0
+    history: deque[tuple[float, int]] = deque(maxlen=240)
+    last_failed = 0
+    last_fail_ts = 0.0
+    done_ts: float | None = None
+    last_hist = 0.0
+    prev_sig: tuple | None = None
+    order = list(tt.THEMES)
 
     while True:
-        _draw_all(stdscr, state, control, ring_handler, colors, ascii_mode, show_log, log_offset)
-        cont, show_log, log_offset = _handle_keys(stdscr, control, state, show_log, log_offset)
+        snap = state.snapshot()  # the ONE per-frame state copy
+        now = time.monotonic()
+        mode = anim_mode(snap.status)
+        animating = not vis.no_anim and mode in ("running", "waiting")
+        if snap.failed > last_failed:
+            last_failed = snap.failed
+            last_fail_ts = now
+        if snap.status == "DONE" and done_ts is None:
+            done_ts = now
+        sweep = None if done_ts is None else (now - done_ts) / 1.5
+        if now - last_hist >= 0.25:
+            history.append((now, snap.total_bytes_downloaded))
+            last_hist = now
+        sig = (
+            snap.status, snap.done, snap.failed, snap.total_bytes_downloaded,
+            snap.current.percent, show_log, log_offset, help_mode,
+            len(snap.recent_failures), vis.no_anim, _visual_state["theme"],
+            None if sweep is None else int(sweep * 20),
+        )
+        if animating or sig != prev_sig:
+            frame = {
+                "mode": mode,
+                "phase": tt.wave_phase(now, 0.8),
+                "thin_phase": tt.wave_phase(now, 1.6) + 0.3,
+                "breath": tt.breathe(now, 0.4),
+                "flash": bool(last_fail_ts and (now - last_fail_ts) < 0.4),
+                "sweep": sweep,
+                "history": tuple(history),
+            }
+            _draw_all(stdscr, snap, vis, ring_handler, show_log, log_offset, help_mode, frame)
+            prev_sig = sig
+        stdscr.timeout(100 if animating else 250)
+        cont, show_log, log_offset, help_mode, action = _handle_keys(
+            stdscr, control, state, show_log, log_offset, help_mode)
+        if action == "toggle_anim":
+            vis.no_anim = not vis.no_anim
+            prev_sig = None
+        elif action == "next_theme":
+            nxt = order[(order.index(_visual_state["theme"]) + 1) % len(order)]
+            _visual_state["theme"] = nxt
+            vis = _build_visual(stdscr, nxt, ascii_mode, vis.no_anim)
+            prev_sig = None
+        elif action == "resize":
+            prev_sig = None
         if not cont:
             break
-        if state.status in ("DONE", "STOPPED", "ABORTED"):
-            # Keep rendering briefly then wait for q.
-            stdscr.timeout(1000)
-            key = stdscr.getch()
+        if snap.status in ("DONE", "STOPPED", "ABORTED"):
+            sweep_done = sweep is not None and sweep >= 1.0
+            stdscr.timeout(100 if not sweep_done else 1000)
+            try:
+                key = stdscr.getch()
+            except curses.error:
+                key = -1
             if key in (ord("q"), ord("Q"), 27):
                 break
             if key == curses.KEY_RESIZE:
-                continue
-        time.sleep(0.05)
+                prev_sig = None
 
 
-def _worker_target(
-    worker_func: Callable[..., Any],
-    worker_kwargs: dict[str, Any],
-    state: State,
-    control: Control,
-    result_container: dict[str, Any],
-) -> None:
-    def event_callback(event_dict: dict[str, Any]) -> None:
-        event = Event(event_dict.get("type", "log"), event_dict.get("payload", {}))
-        state.apply(event)
+def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
+                   control: Control, result_container: dict) -> None:
+    def event_callback(event: dict) -> None:
+        state.apply(Event(event["type"], event.get("payload") or {}))
 
     kwargs = dict(worker_kwargs)
     kwargs["event_callback"] = event_callback
@@ -415,53 +566,116 @@ def _worker_target(
     try:
         result_container["return_value"] = worker_func(**kwargs)
     except Exception as exc:
-        reason = f"worker crashed: {exc}"
-        state.apply(Event("stopped", {"reason": reason}))
+        state.apply(Event("stopped", {"reason": f"worker crashed: {exc}"}))
         result_container["exception"] = exc
         result_container["traceback"] = traceback.format_exc()
-    else:
-        if state.status not in ("STOPPED", "ABORTED"):
-            state.apply(Event("done", {"reason": "finished"}))
+        return
+    if state.status not in ("STOPPED", "ABORTED"):
+        state.apply(Event("done", {"reason": "finished"}))
 
 
-def run_tui(
-    worker_func: Callable[..., Any],
-    worker_kwargs: dict[str, Any],
-    mode: str = "",
-    ascii_mode: bool = False,
-) -> Any:
-    """Run a download worker with the curses TUI. Falls back to plain logging if not a TTY."""
-    if not sys.stdout.isatty():
+def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
+            ascii_mode: bool = False, no_anim: bool = False, no_color: bool = False) -> int:
+    """Run worker under the TUI; plain logging fallback when stdout is no TTY."""
+    if not supports_tui():
         print("stdout is not a TTY; falling back to plain logging", file=sys.stderr)
         return worker_func(**worker_kwargs)
-
-    # Ensure log directory exists.
     os.makedirs("logs", exist_ok=True)
     ring_handler = setup_logging(tui_active=True)
     state = State(mode=mode)
     control = Control()
-    result_container: dict[str, Any] = {}
-
-    worker = threading.Thread(
+    result_container: dict[str, Any] = {"return_value": None, "exception": None}
+    thread = threading.Thread(
         target=_worker_target,
         args=(worker_func, worker_kwargs, state, control, result_container),
         daemon=True,
     )
-    worker.start()
-
+    thread.start()
     try:
-        curses.wrapper(_ui, state, control, ring_handler, ascii_mode)
+        curses.wrapper(_ui, state, control, ring_handler, ascii_mode, True if no_anim else None)
     except KeyboardInterrupt:
         control.request_stop()
         state.apply(Event("status", {"status": "ABORTED", "reason": "Ctrl-C"}))
     finally:
         control.request_stop()
-        worker.join(timeout=5.0)
-
-    if result_container.get("exception"):
+        thread.join(5)
+    if result_container["exception"]:
         raise result_container["exception"]
-    return result_container.get("return_value", 1)
+    return result_container["return_value"] if result_container["return_value"] is not None else 0
 
 
 def supports_tui() -> bool:
     return sys.stdout.isatty()
+
+
+# --- demo worker (no network, no files, no yt-dlp) ---------------------------
+
+
+def _demo_worker(event_callback=None, control=None, seconds: float = 60.0,
+                 seed: int = 7) -> None:
+    """tui-demo: simulated batch through the same State/Event path."""
+    rng = random.Random(seed)
+    artists = ("Demo Artist A", "Demo Artist B", "The Demo Bros")
+    albums = ("Demo Album I", "Demo Album II")
+    total = 40
+    sizes = [rng.randint(3, 12) * 1024 * 1024 for _ in range(total)]
+
+    def emit(ev_type: str, payload: dict | None = None) -> None:
+        if event_callback:
+            event_callback({"type": ev_type, "payload": payload or {}})
+
+    def stopped() -> bool:
+        if control and control.should_stop():
+            emit("stopped", {"reason": "demo stopped"})
+            return True
+        return False
+
+    emit("start", {"total": total, "total_est_bytes": sum(sizes),
+                   "max_size_bytes": max(sizes)})
+    budget = max(0.8, seconds / 44)
+    ticks = 8
+    for i in range(total):
+        if stopped():
+            return
+        title = f"Demo Track {i + 1:02d}"
+        emit("log", {"message": f"demo: resolving {title}"})
+        emit("track_start", {"video_id": f"demo{i:03d}", "title": title,
+                             "artist": rng.choice(artists), "album": rng.choice(albums),
+                             "source": "artist:Demo", "stage": "resolving"})
+        if i == 8 and control:
+            # One pause/resume window so PAUSED visuals get some screen time.
+            control.pause()
+            emit("status", {"status": "PAUSED"})
+            time.sleep(2.0)
+            control.resume()
+            emit("status", {"status": "RUNNING"})
+        speed_mb = rng.uniform(4, 12)
+        size = sizes[i]
+        for tick in range(1, ticks + 1):
+            if control and control.should_skip():
+                emit("log", {"message": "demo: skipped track"})
+                break
+            time.sleep(budget / ticks)
+            emit("track_progress", {
+                "stage": "downloading",
+                "percent": min(100.0, tick / ticks * 100),
+                "downloaded_bytes": int(size * tick / ticks),
+                "total_bytes": size,
+                "speed": f"{speed_mb:.1f} MiB/s",
+                "eta_seconds": int((ticks - tick) * budget / ticks),
+            })
+        if i in (20, 21):
+            emit("track_done", {"status": "failed", "video_id": f"demo{i:03d}",
+                                "title": title, "error": "demo: simulated failure (2/3)",
+                                "retryable": True, "bytes": 0})
+        else:
+            emit("track_done", {"status": "downloaded", "video_id": f"demo{i:03d}",
+                                "title": title, "bytes": size, "error": None,
+                                "retryable": False})
+        emit("log", {"message": f"demo: finished {title}"})
+        for rem in (0.5, 0.4, 0.3, 0.2, 0.1):
+            if stopped():
+                return
+            emit("delay", {"remaining": rem})
+            time.sleep(0.05)
+    emit("done", {"reason": "demo finished"})

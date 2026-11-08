@@ -46,6 +46,19 @@ def truncate_width(text: str, width: int) -> str:
     return cut + "." * min(fill, 3)
 
 
+def clip_width(text: str, width: int) -> str:
+    """Cut to at most `width` display columns (no padding, no wide-char split)."""
+    out = ""
+    used = 0
+    for ch in text:
+        w = char_width(ch)
+        if used + w > width:
+            break
+        out += ch
+        used += w
+    return out
+
+
 # --- charsets ---------------------------------------------------------------
 
 GLYPHS: dict[str, dict[str, object]] = {
