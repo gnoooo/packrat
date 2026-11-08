@@ -85,6 +85,9 @@ def _fake_state() -> State:
                                  "title": "Song Three", "error": "demo failure 2",
                                  "retryable": True, "bytes": 0}))
     state.apply(ev("log", {"message": "hello from the fake log"}))
+    state.apply(ev("track_start", {"video_id": "v1", "title": "Song One",
+                                   "artist": "Artist", "album": "Album",
+                                   "source": "artist:Artist", "stage": "downloading"}))
     return state
 
 
@@ -164,3 +167,58 @@ def test_spark_rates():
     history = ((1.5, 0), (1.8, 100), (2.5, 300), (3.5, 700))
     rates = tui_mod._spark_rates(history)
     assert rates == [200, 400]  # 1s buckets: 100@1s -> 300@2s -> 700@3s
+
+
+def test_panels_have_complete_frames(monkeypatch):
+    # Bug: panels drew only their top border/title line; side and bottom
+    # borders were missing and panels rendered as empty boxes.
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    g = tg.GLYPHS["fancy"]
+    state = _fake_state().snapshot()  # failures > 0, current track set
+    vis = _visual_no_color()
+    screen = FakeScreen(24, 80)
+    # show_log=True so the log panel is part of the layout too.
+    tui_mod._draw_all(screen, state, vis, None, True, 0, False,
+                      {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                       "breath": 0.5, "flash": False, "sweep": None,
+                       "history": ()})
+    framed = [c for c in screen.children if c._h >= 3]
+    assert len(framed) >= 3, f"expected several framed panels, {len(framed)}"
+    for child in framed:
+        h = child._h
+        texts_y: dict[int, str] = {}
+        for y, x, text in child.addstr_calls:
+            if x <= 1:
+                texts_y.setdefault(y, text)
+        # top border on row 0, bottom border on the last row
+        assert texts_y.get(0, "").startswith(g["tl"]), texts_y
+        assert texts_y.get(h - 1, "").startswith(g["bl"]), texts_y
+        # every interior row starts with the vertical border
+        for y in range(1, h - 1):
+            assert texts_y.get(y, "").startswith(g["v"]), (y, texts_y)
+
+
+def test_overall_bar_capped(monkeypatch):
+    # Bug: the overall progress bar was the whole terminal width; it must
+    # be capped (<= 100 cells wide per item 2 of the spec).
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state()
+    state.apply(Event("track_done", {"status": "downloaded", "video_id": "vA",
+                                     "title": "A", "bytes": 100}))
+    assert state.total > 0
+    vis = _visual_no_color()
+    win = FakeScreen(2, 200)
+    tui_mod._draw_overall(win, state, vis, {"mode": "running", "phase": 0.1,
+                                            "thin_phase": 0.4, "breath": 0.5,
+                                            "flash": False, "sweep": None,
+                                            "history": ()})
+    big = FakeScreen(2, 300)
+    tui_mod._draw_overall(big, state, vis, {"mode": "running", "phase": 0.1,
+                                            "thin_phase": 0.4, "breath": 0.5,
+                                            "flash": False, "sweep": None,
+                                            "history": ()})
+    texts = [t for _, _, t in win.addstr_calls] + [t for _, _, t in big.addstr_calls]
+    width_chars = [t.count(tg.GLYPHS["fancy"]["bar_fill"]) for t in texts]
+    assert width_chars, "no bar drawn"
+    assert max(width_chars) <= 100
+    assert max(width_chars) == 100  # at w=200/300 the cap is reached

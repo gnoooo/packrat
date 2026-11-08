@@ -234,7 +234,7 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     if snap.total <= 0:
         _safe_addstr(win, 0, 0, " overall: resolving tracks...", curses.A_BOLD)
         return
-    bar_w = max(10, w - 40)
+    bar_w = max(10, min(100, w - 40))
     pct = snap.done / snap.total * 100
     eta = snap.eta_seconds()
     eta_s = "…" if eta is None else format_duration(eta)
@@ -254,33 +254,45 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     _safe_addstr(win, 1, 0, line, vis.colors.get("info", 0))
 
 
+def _empty_border_rows(win, h: int, written: set[int], vis: Visual) -> None:
+    """Panels that may be content-empty still get complete left borders."""
+    for y in range(1, h - 1):
+        if y not in written:
+            _safe_addstr(win, y, 0, vis.g.get("v", "|"), 0)
+
+
 def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
     cur = snap.current
     _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "now playing"),
                  vis.colors.get("info", 0) | curses.A_BOLD)
-    if not cur.video_id:
-        return
-    _safe_addstr(win, 1, 0, f" {truncate(cur.title, w - 4)}", curses.A_BOLD)
-    _safe_addstr(win, 2, 0, f" {truncate(cur.artist + ' - ' + cur.album, w - 4)}", 0)
-    _safe_addstr(win, 3, 0,
-                 f" source: {truncate(cur.source, max(8, w // 3))}  |  stage: {cur.stage}", 0)
-    bar_w = max(10, w - 40)
-    pct = max(0.0, min(100.0, cur.percent))
-    eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
-    suffix = f" {cur.speed}  ETA {eta}" if cur.speed else f" ETA {eta}"
-    if cur.total_bytes:
-        suffix += f"  {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
-    _draw_themed_line(win, 4, f" {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
-                      vis, frame["mode"], frame["thin_phase"], frame["breath"],
-                      frame.get("sweep"), curses.A_BOLD, thin=True)
+    written = {1, 2, 3, 4}
+    if cur.video_id:
+        _safe_addstr(win, 1, 0, f"│ {truncate(cur.title, w - 4)}", curses.A_BOLD)
+        _safe_addstr(win, 2, 0, f"│ {truncate(cur.artist + ' - ' + cur.album, w - 4)}", 0)
+        _safe_addstr(win, 3, 0,
+                     f"│ source: {truncate(cur.source, max(8, w // 3))}  |  stage: {cur.stage}", 0)
+        bar_w = max(10, w - 40)
+        pct = max(0.0, min(100.0, cur.percent))
+        eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
+        suffix = f" {cur.speed}  ETA {eta}" if cur.speed else f" ETA {eta}"
+        if cur.total_bytes:
+            suffix += f"  {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
+        _draw_themed_line(win, 4, f"│ {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
+                          vis, frame["mode"], frame["thin_phase"], frame["breath"],
+                          frame.get("sweep"), curses.A_BOLD, thin=True)
+        written = set()
+    _empty_border_rows(win, h, written, vis)
+    _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
 def _draw_counters(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    line = f" downloaded {snap.downloaded}  archived {snap.archived}  skipped-size {snap.skipped_size}  failed {snap.failed}  retries {snap.retries}"
+    line = f"│ downloaded {snap.downloaded}  archived {snap.archived}  skipped-size {snap.skipped_size}  failed {snap.failed}  retries {snap.retries}"
     attr0 = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else 0
-    _safe_addstr(win, 0, 0, line, attr0)
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "status"),
+                 vis.colors.get("info", 0) | curses.A_BOLD)
+    _safe_addstr(win, 1, 0, line, attr0)
     c = snap.consecutive_retryable
     if c >= 3:
         attr1 = vis.colors.get("error", 0) | curses.A_BOLD
@@ -288,7 +300,8 @@ def _draw_counters(win, snap: State, vis: Visual, frame: dict) -> None:
         attr1 = vis.colors.get("warning", 0) | curses.A_BOLD
     else:
         attr1 = vis.colors.get("success", 0)
-    _safe_addstr(win, 1, 0, f" consecutive retryable errors: {c}/3", attr1)
+    _safe_addstr(win, 2, 0, f"│ consecutive retryable errors: {c}/3", attr1)
+    _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
 def _draw_failures(win, snap: State, vis: Visual, frame: dict) -> None:
@@ -296,14 +309,16 @@ def _draw_failures(win, snap: State, vis: Visual, frame: dict) -> None:
     heading = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else curses.A_BOLD
     _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "recent failures"), heading)
     y = 1
-    half = max(4, (w - 2) // 2)
+    half = max(4, (w - 4) // 2)
     for fail in reversed(list(snap.recent_failures)[-(max(0, h - 2)):]):
         title = truncate(str(fail.get("title", "")), half)
         reason = truncate(str(fail.get("reason", "")), max(4, half - 4))
-        _safe_addstr(win, y, 0, f" {title}: {reason}", vis.colors.get("error", 0))
+        _safe_addstr(win, y, 0, f"│ {title}: {reason}", vis.colors.get("error", 0))
         y += 1
-        if y >= h:
+        if y >= h - 1:
             break
+    _empty_border_rows(win, h, set(range(1, y)), vis)
+    _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
 def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> None:
@@ -322,8 +337,11 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
     elif log_offset >= len(lines):
         lines = []
     visible = max(0, h - 2)
-    for i, line in enumerate(lines[-visible:]):
-        _safe_addstr(win, i + 1, 0, " " + truncate(line, w - 3), 0)
+    shown = lines[-visible:]
+    for i, line in enumerate(shown):
+        _safe_addstr(win, i + 1, 0, "│ " + truncate(line, w - 4), 0)
+    _empty_border_rows(win, h, set(range(1, 1 + len(shown))), vis)
+    _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
 def _draw_footer(win, vis: Visual) -> None:
@@ -366,8 +384,8 @@ def _layout(stdscr, show_log: bool):
     h, w = stdscr.getmaxyx()
     header_h = 1
     overall_h = 2
-    current_h = 5
-    counters_h = 2
+    current_h = 6
+    counters_h = 4
     footer_h = 1
     remaining = h - (header_h + overall_h + current_h + counters_h + footer_h)
     if remaining < 6:
