@@ -685,49 +685,73 @@ def cmd_artist(args: argparse.Namespace) -> int:
             delay=args.delay,
             singles_dir=args.singles_dir,
         )
-        artists_module.save_manifest(catalog["payload"])
         catalogs.append(catalog)
 
         print(f"artist: {catalog['artist']}")
         subs = catalog.get("subscribers")
         if subs:
             print(f"subscribers: {subs}")
-        for meta in catalog["payload"]["releases"]:
-            title = f"{meta['title']} ({meta.get('year') or '?'}, {meta.get('type', '?')})"
-            if meta["status"] == "kept":
-                print(f"  KEEP {title}: {meta['tracks']} tracks, {meta['new_tracks']} new")
-            elif meta["reason"] == "unavailable":
-                print(f"  SKIP {title}: unavailable")
-            else:
-                print(f"  skip {title}: {meta['reason']}")
+        sections = artists_module.build_sections(catalog)
+        if sys.stdin.isatty():
+            artists_module.print_sections(sections)
+            picked = None
+            while picked is None:
+                try:
+                    answer = input("selection> (Enter = all new; e.g. A[1-3],S[2],T; 'none' to abort) ").strip()
+                except EOFError:
+                    picked = None
+                    break
+                if answer == "":
+                    picked = None
+                    break
+                if answer.lower() in ("none", "q", "quit"):
+                    picked = []
+                    break
+                try:
+                    picked = artists_module.parse_selection(answer)
+                    break
+                except ValueError as exc:
+                    print(f"bad selection token {exc}; e.g. A[1-3],S[2],T[1-5]")
+                    continue
+            if picked == []:
+                print("nothing selected; manifest untouched for this artist.")
+                continue
+            if picked:
+                catalog = artists_module.apply_selection(
+                    catalog,
+                    sections,
+                    picked,
+                    headers_path=args.headers,
+                    output_root=output_root,
+                    archive_path=args.archive,
+                    duration_window=args.duration_window,
+                    singles_dir=args.singles_dir,
+                    delay=args.delay,
+                )
+                if catalog is None:
+                    print("nothing selected; manifest untouched for this artist.")
+                    continue
         totals = catalog["totals"]
-        print(
-            f"kept releases: {totals['releases_kept']}  excluded: {totals['releases_excluded']}"
+        summary = artists_module.summarize_entries(
+            catalog["entries"], delay=args.delay,
+            measured=totals.get("measured_s_per_track"),
         )
-        print(f"new tracks: {totals['new_tracks']}  already owned: {totals['already_owned']}")
+        artists_module.save_manifest(catalog["payload"])
+        kept_counts = catalog["payload"].get("releases") or []
+        kept_now = sum(1 for m in kept_counts if m.get("status") == "kept")
+        rule_bits = [f"{k}={v}" for k, v in (totals.get("excluded_counts") or {}).items() if v]
+        if rule_bits:
+            print(f"kept releases: {kept_now}  excluded by rule: {', '.join(rule_bits)}")
         if totals.get("skipped_duration"):
             print(f"outside --duration-window: {totals['skipped_duration']}")
-        rule_bits = [f"{k}={v}" for k, v in totals["excluded_counts"].items() if v]
-        if rule_bits:
-            print(f"excluded by rule: {', '.join(rule_bits)}")
-        print(f"estimated size: {totals['est_human']}")
-        if totals.get("est_source") == "measured":
-            print(
-                f"estimated time: ~{totals['est_time_seconds'] // 60} min "
-                f"(measured {totals['measured_s_per_track']:.1f} s/track)"
-            )
+        time_label = f"~{summary['est_time_seconds'] // 60} min"
+        if summary["est_source"] == "measured":
+            time_label += f" (measured {summary['measured_s_per_track']:.1f} s/track)"
         else:
-            print(
-                f"estimated time: ~{totals['est_time_seconds'] // 60} min "
-                "(duration model; no measured throughput yet)"
-            )
-        top_totals = catalog["payload"].get("top_songs")
-        if top_totals:
-            print(
-                f"top songs: {top_totals['new_tracks']} new, "
-                f"{top_totals['already_owned']} owned, "
-                f"{top_totals['est_human']}"
-            )
+            time_label += " (duration model; no measured throughput yet)"
+        print(
+            f"recap: {summary['new_tracks']} new tracks | {summary['est_human']} | {time_label}"
+        )
         print(f"manifest: {catalog['manifest_path']}", end="\n\n")
 
     if args.dry_run:

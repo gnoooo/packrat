@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import shutil
+from itertools import zip_longest
+from math import ceil
 from typing import Any
 
 from ytmusicapi import YTMusic
@@ -706,35 +709,18 @@ def build_catalog(
         if release["browseId"] not in track_counts:
             continue  # already reported (unavailable)
         new_in_release = 0
+        meta_row = len(release_meta)
         for track, year, key in classified[release["browseId"]]:
             if key in owned_keys:
                 already_owned += 1
                 continue
             owned_keys.add(key)
-            duration = track.get("duration_seconds", 0)
-            est = heuristic_size(duration) if duration else 0
             new_in_release += 1
             new_tracks += 1
-            entries.append(
-                {
-                    "video_id": track["video_id"],
-                    "title": track["title"],
-                    "artist": track["artist"] or artist_name,
-                    "album": release.get("title", ""),
-                    "track_num": track.get("track_num"),
-                    "duration": duration,
-                    "est_size": est,
-                    "status": "pending",
-                    "path": None,
-                    "error": None,
-                    "source": f"artist:{artist_name}",
-                    "release_year": year,
-                    "release_type": release.get("kind", "album"),
-                    "singles_dir": singles_dir,
-                }
-            )
+            entries.append(_entry_for(track, release, artist_name, singles_dir=singles_dir, release_row=meta_row))
         release_meta.append(
             {
+                "row": meta_row,
                 **_release_summary(release),
                 "status": "kept",
                 "tracks": track_counts[release["browseId"]],
@@ -823,6 +809,36 @@ def _release_summary(release: dict[str, Any]) -> dict[str, Any]:
         "title": release.get("title", ""),
         "year": release.get("year_int") or release.get("year"),
         "type": release.get("kind") or release.get("type"),
+        "browse_id": release.get("browseId", ""),
+    }
+
+
+def _entry_for(
+    track: dict[str, Any],
+    release: dict[str, Any],
+    artist_name: str,
+    *,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
+    release_row: int | None = None,
+) -> dict[str, Any]:
+    """Manifest entry dict for one pending release track."""
+    duration = track.get("duration_seconds", 0)
+    return {
+        "video_id": track["video_id"],
+        "title": track["title"],
+        "artist": track.get("artist") or artist_name,
+        "album": release.get("title", ""),
+        "track_num": track.get("track_num"),
+        "duration": duration,
+        "est_size": heuristic_size(duration) if duration else 0,
+        "status": "pending",
+        "path": None,
+        "error": None,
+        "source": f"artist:{artist_name}",
+        "release_year": _release_year(release),
+        "release_type": release.get("kind", "album"),
+        "singles_dir": singles_dir,
+        "release_row": release_row,
     }
 
 
@@ -990,3 +1006,274 @@ def interactive_pick(candidates: list[dict[str, Any]]) -> int | None:
     if answer.isdigit() and 1 <= int(answer) <= len(candidates):
         return int(answer) - 1
     return None
+
+
+# ---------------------------------------------------------------------------
+# Interactive release picker (A/S/T/L/R/D sections, "A[1-3],S[2],T" grammar).
+
+SECTION_LETTERS = ("T", "A", "S", "L", "R", "D")
+_SECTION_TITLES = {
+    "T": "top songs",
+    "A": "albums",
+    "S": "singles/EPs",
+    "L": "live (skipped)",
+    "R": "remixes (skipped)",
+    "D": "other skipped/useless releases",
+}
+
+_TOKEN_RE = re.compile(r"^([ATSRLD])(?:\[(.+)\]|((?:\d+(?:-\d+)?)(?:,\d+(?:-\d+)?)*)?)?$")
+_SCAN_RE = re.compile(r"[ATSRLD](?:\[[^\]]*\]|\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)?", re.IGNORECASE)
+
+
+def build_sections(catalog: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Numbered picker rows per section from a build_catalog result.
+
+    T top songs are individual tracks; A/S are kept releases; L/R/D are
+    skipped releases (still selectable — selecting one re-resolves it).
+    """
+    payload = catalog["payload"]
+    sections: dict[str, list[dict[str, Any]]] = {k: [] for k in SECTION_LETTERS}
+    for e in payload["entries"]:
+        if e.get("release_type") == "top":
+            sections["T"].append({"kind": "track", "entry": e})
+    for meta in payload["releases"]:
+        row = {"kind": "release", "meta": meta}
+        reason = str(meta.get("reason", ""))
+        if meta.get("status") == "kept":
+            target = sections["A"] if str(meta.get("type", "album")) == "album" else sections["S"]
+        elif reason == "live":
+            target = sections["L"]
+        elif reason == "remix":
+            target = sections["R"]
+        else:
+            target = sections["D"]
+        target.append(row)
+    return sections
+
+
+def parse_selection(text: str) -> list[tuple[str, list[int] | None]]:
+    """Parse 'A[1-3],S[2],T' (letters case-insensitive, a bare letter = all).
+
+    Raises ValueError on any bad token; (letter, None) means the whole section.
+    """
+    s = str(text or "").strip()
+    out: list[tuple[str, list[int] | None]] = []
+    pos = 0
+    scanned = 0
+    for m in _SCAN_RE.finditer(s):
+        gap = s[pos:m.start()]
+        if gap.strip(" ,"):
+            raise ValueError(gap.strip())
+        tok = m.group(0).upper()
+        m2 = _TOKEN_RE.match(tok)
+        if not m2:
+            raise ValueError(tok)
+        letter = m2.group(1)
+        spec = m2.group(2)
+        if spec is None:
+            spec = m2.group(3)
+        pos = m.end()
+        scanned += 1
+        if spec is None:
+            out.append((letter, None))
+            continue
+        indices: list[int] = []
+        for part in spec.split(","):
+            if "-" in part:
+                lo, hi = part.split("-", 1)
+                if not (lo.isdigit() and hi.isdigit()):
+                    raise ValueError(tok)
+                indices.extend(range(int(lo), int(hi) + 1))
+            elif part.isdigit():
+                indices.append(int(part))
+            else:
+                raise ValueError(tok)
+        out.append((letter, indices))
+    tail = s[pos:]
+    if tail.strip(" ,"):
+        raise ValueError(tail.strip())
+    if not scanned:
+        raise ValueError("(empty)")
+    return out
+
+
+def chosen_rows(
+    sections: dict[str, list[dict[str, Any]]],
+    tokens: list[tuple[str, list[int] | None]],
+) -> list[dict[str, Any]]:
+    """Expand tokens to flat row list (kept order, later tokens dedupe)."""
+    rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for letter, indices in tokens:
+        for i in indices if indices is not None else range(1, len(sections[letter]) + 1):
+            if 1 <= i <= len(sections[letter]):
+                row = sections[letter][i - 1]
+                if id(row) not in seen:
+                    seen.add(id(row))
+                    rows.append(row)
+    return rows
+
+
+def apply_selection(
+    catalog: dict[str, Any],
+    sections: dict[str, list[dict[str, Any]]],
+    tokens: list[tuple[str, list[int] | None]],
+    *,
+    headers_path: str,
+    output_root: pathlib.Path,
+    archive_path: str | pathlib.Path,
+    duration_window: bool = False,
+    singles_dir: str = SINGLES_DIR_DEFAULT,
+    delay: float = 7.0,
+) -> dict[str, Any] | None:
+    """Apply a picker selection; returns an updated catalog or None if empty.
+
+    Kept releases reuse their already-classified entries. Skipped releases
+    (L/R/D) are resolved now with the SAME counting rules (owned_key).
+    """
+    rows = chosen_rows(sections, tokens)
+    if not rows:
+        return None
+    payload = catalog["payload"]
+    artist_name = payload["artist"]
+    archive = Archive(archive_path)
+
+    # Seed owned keys with what the user is keeping, nothing else.
+    selected_entries: list[dict[str, Any]] = []
+    owned_keys: set[tuple[str, str]] = set()
+    selected_meta_rows: set[int] = set()
+
+    def window_ok(duration: int) -> bool:
+        return not duration_window or 90 <= duration <= 540
+
+    # Top + already-kept release entries first.
+    for row in rows:
+        if row["kind"] == "track":
+            entry = row["entry"]
+            selected_entries.append(entry)
+            owned_keys.add(owned_key(artist_name, entry["title"]))
+        else:
+            meta = row["meta"]
+            for entry in payload["entries"]:
+                if entry.get("release_row") == meta.get("row"):
+                    selected_entries.append(entry)
+                    owned_keys.add(owned_key(artist_name, entry["title"]))
+            selected_meta_rows.add(meta.get("row", -1))
+
+    # Skipped releases selected through L/R/D: resolve and classify now.
+    yt = disk_keys = None
+    for row in rows:
+        if row["kind"] != "release" or row["meta"].get("status") == "kept":
+            continue
+        meta = row["meta"]
+        if yt is None:
+            if not pathlib.Path(headers_path).exists():
+                raise FileNotFoundError(headers_path)
+            yt = YTMusic(headers_path)
+            disk_keys = disk_owned_keys(output_root)
+        release = {
+            "browseId": meta.get("browse_id", ""),
+            "title": meta.get("title", ""),
+            "year_int": meta.get("year"),
+            "kind": meta.get("type", "album"),
+        }
+        tracks = resolve_release_tracks(yt, release)
+        if tracks is None:
+            continue
+        for track in tracks:
+            duration = track.get("duration_seconds", 0)
+            if not window_ok(duration):
+                continue
+            key = owned_key(artist_name, track["title"])
+            video_id = track["video_id"]
+            if (
+                video_id in archive
+                or owned_file_exists(output_root, track, release)
+                or key in disk_keys
+                or key in owned_keys
+            ):
+                owned_keys.add(key)
+                continue
+            owned_keys.add(key)
+            selected_entries.append(
+                _entry_for(track, release, artist_name, singles_dir=singles_dir)
+            )
+        selected_meta_rows.add(meta.get("row", -1))
+
+    if not selected_entries:
+        return None
+    for meta in payload["releases"]:
+        meta["selected"] = meta.get("row") in selected_meta_rows
+    measured = runs.last_measured(output_root)
+    summary = summarize_entries(selected_entries, delay=delay, measured=measured)
+    payload["entries"] = selected_entries
+    payload["totals"] = summary
+    newer = {
+        "manifest_path": catalog["manifest_path"],
+        "payload": payload,
+        "artist": catalog["artist"],
+        "subscribers": catalog.get("subscribers", ""),
+        "label": catalog["label"],
+        "totals": {
+            **{k: v for k, v in catalog["totals"].items()
+               if k in ("releases_kept", "releases_excluded", "already_owned",
+                        "skipped_duration", "excluded_counts", "max_size")},
+            **summary,
+        },
+        "entries": selected_entries,
+    }
+    return newer
+
+
+def _short_duration(seconds: int) -> str:
+    seconds = int(seconds or 0)
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def print_sections(
+    sections: dict[str, list[dict[str, Any]]],
+    *,
+    width: int | None = None,
+) -> None:
+    """Column-listed picker menu; L/R/D shows why each release was skipped."""
+    if width is None:
+        width = shutil.get_terminal_size((80, 24)).columns
+    half = max(min(width // 2 - 4, 44), 20)
+    for letter in SECTION_LETTERS:
+        rows = sections[letter]
+        if not rows:
+            print(f"{letter}. {_SECTION_TITLES[letter]} (none)")
+            continue
+        n_new = 0
+        lines: list[str] = []
+        for i, row in enumerate(rows, start=1):
+            if row["kind"] == "track":
+                e = row["entry"]
+                n_new += 1
+                label = (
+                    f"{e['title']}  {_short_duration(e.get('duration') or 0)}"
+                    f"  ~{format_size(e.get('est_size') or 0)}"
+                )
+            else:
+                meta = row["meta"]
+                title = f"{meta['title']} ({meta.get('year') or '?'}, {meta.get('type', '?')})"
+                if meta.get("status") == "kept":
+                    label = (
+                        f"{title}  {meta.get('tracks', '?')} tracks, "
+                        f"{meta.get('new_tracks', 0)} new"
+                    )
+                elif str(meta.get("reason", "")) == "unavailable":
+                    label = f"{title}  unavailable"
+                else:
+                    label = f"{title}  {meta.get('reason', 'excluded')}"
+            lines.append(f"   {i}) {label}")
+        cols = ceil(len(lines) / 2) if len(lines) > 8 else len(lines)
+        head = f"{letter}. {_SECTION_TITLES[letter]} ({len(rows)})"
+        if len(lines) == cols:
+            print(f"{head}")
+            print("\n".join(lines))
+        else:
+            left, right = lines[:cols], lines[cols:]
+            print(f"{head}")
+            for l, r in zip_longest(left, right, fillvalue=""):
+                print(l.ljust(half + 6), r)
