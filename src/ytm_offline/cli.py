@@ -43,8 +43,15 @@ def _redact(msg: object) -> str:
     return text
 
 
+HEADERS_CONFIG_PATH = "~/.config/ytmusic-composer/browser.json"
+
+
 def _headers_default() -> str | None:
-    return os.environ.get("YTM_HEADERS")
+    env = os.environ.get("YTM_HEADERS")
+    if env:
+        return env
+    p = pathlib.Path(HEADERS_CONFIG_PATH).expanduser()
+    return str(p) if p.exists() else None
 
 
 def _cookies_default() -> str | None:
@@ -951,7 +958,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--headers",
         default=_headers_default(),
-        help="path to ytmusicapi browser-headers JSON auth file (env: YTM_HEADERS)",
+        help="path to ytmusicapi browser-headers JSON auth file (env: YTM_HEADERS; default: ~/.config/ytmusic-composer/browser.json)",
     )
     parser.add_argument(
         "--cookies",

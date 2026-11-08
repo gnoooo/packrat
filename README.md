@@ -24,16 +24,16 @@ Project skeleton and auth validation are in place. The next gate is downloading 
 
 ## Environment variables
 
-- `YTM_HEADERS` — path to the ytmusicapi browser-headers JSON file.
+- `YTM_HEADERS` — path to the ytmusicapi browser-headers JSON file (defaults to `~/.config/ytmusic-composer/browser.json` when it exists).
 - `YTM_COOKIES` — path to the Netscape cookies.txt file for yt-dlp.
 
 These can be overridden with `--headers` and `--cookies`.
 
 ## Quick start
 
-Validate auth:
+Validate auth (`--headers` defaults to `~/.config/ytmusic-composer/browser.json` when it exists, or set the `YTM_HEADERS` env var):
 ```bash
-ytm-offline --headers ~/.config/ytmusic-composer/browser.json auth
+ytm-offline auth
 ```
 
 List library playlists:
