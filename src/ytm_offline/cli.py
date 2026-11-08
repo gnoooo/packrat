@@ -739,11 +739,18 @@ def cmd_artist(args: argparse.Namespace) -> int:
             measured=totals.get("measured_s_per_track"),
         )
         artists_module.save_manifest(catalog["payload"])
-        kept_counts = catalog["payload"].get("releases") or []
-        kept_now = sum(1 for m in kept_counts if m.get("status") == "kept")
-        rule_bits = [f"{k}={v}" for k, v in (totals.get("excluded_counts") or {}).items() if v]
+        rule_counts = totals.get("excluded_counts") or {}
+        rule_bits = []
+        for key, value in rule_counts.items():
+            if value:
+                rule_bits.append(("dup" if key == "edition_duplicates" else key, value))
+        # Tagged releases are shown in the picker, deselected by default.
         if rule_bits:
-            print(f"kept releases: {kept_now}  excluded by rule: {', '.join(rule_bits)}")
+            print(
+                "tagged: "
+                + ", ".join(f"{key}={value}" for key, value in rule_bits)
+                + " (all shown, deselected by default)"
+            )
         if totals.get("skipped_duration"):
             print(f"outside --duration-window: {totals['skipped_duration']}")
         time_label = f"~{summary['est_time_seconds'] // 60} min"
