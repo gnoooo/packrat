@@ -14,6 +14,7 @@ from ytm_offline.batch import run_batch_download
 from ytm_offline.discover import _normalize
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, is_single, track_path
 from ytm_offline.playlist import write_m3u8
+from ytm_offline import runs
 from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
 
@@ -313,7 +314,7 @@ def _dedupe_top_versions(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for track in tracks:
         artists = track.get("artists") or []
         artist = artists[0].get("name") if artists else ""
-        key = (_normalize(artist), _normalize(track["title"]))
+        key = owned_key(artist, track["title"])
         if key not in groups:
             groups[key] = []
             order.append(key)
@@ -374,6 +375,59 @@ def get_top_songs(yt: YTMusic, artist_id: str, limit: int | None = None) -> dict
     }
 
 
+def owned_key(artist_name: str, title: str) -> tuple[str, str]:
+    """The ONE dedupe key for owned-ness: catalog artist + base song title.
+
+    Uses _base_title so album versions and "(feat. X)" / live / single
+    versions of the same song collapse to the same key.
+    """
+    return (_normalize(artist_name or ""), _base_title(title or ""))
+
+
+def disk_owned_keys(output_root: pathlib.Path) -> set[tuple[str, str]]:
+    """Normalized (artist, title) keys for audio files already on disk.
+
+    Derived from paths under output_root/<Artist>/<Album>/NN - Title.m4a
+    (or <Artist>/<file> for legacy singles). This is the ONE owned-check
+    used by top songs and releases alike — filenames only, never auth data.
+    """
+    keys: set[tuple[str, str]] = set()
+    root = pathlib.Path(output_root)
+    if not root.exists():
+        return keys
+    for p in root.rglob("*.m4a"):
+        parent = p.parent
+        artist_dir = parent.parent.name if parent.parent != root else parent.name
+        title = re.sub(r"^\d+\s*-\s*", "", p.stem)
+        keys.add(owned_key(artist_dir, title))
+    return keys
+
+
+def summarize_entries(
+    entries: list[dict[str, Any]],
+    *,
+    delay: float = 7.0,
+    measured: float | None = None,
+) -> dict[str, Any]:
+    """THE counting function: recap and manifest both derive from this."""
+    est_bytes = sum(e.get("est_size") or 0 for e in entries)
+    total_seconds = sum(e.get("duration") or 0 for e in entries)
+    if measured:
+        est_time = len(entries) * measured
+        source = "measured"
+    else:
+        est_time = len(entries) * delay + total_seconds
+        source = "duration-model"
+    return {
+        "new_tracks": len(entries),
+        "est_bytes": est_bytes,
+        "est_human": format_size(est_bytes),
+        "est_time_seconds": int(est_time),
+        "est_source": source,
+        "measured_s_per_track": measured,
+    }
+
+
 def build_top_songs(
     yt: YTMusic,
     browse_id: str,
@@ -383,12 +437,17 @@ def build_top_songs(
     top_limit: int | None = None,
     max_per_album: int | None = None,
     singles_dir: str = SINGLES_DIR_DEFAULT,
+    disk_keys: set[tuple[str, str]] | None = None,
+    reserve_keys: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build pending entries for an artist's top songs with owned-dedupe."""
     discography = get_top_songs(yt, browse_id, limit=top_limit)
     artist_name = discography["artist"]
     archive = Archive(archive_path)
     output_root.mkdir(parents=True, exist_ok=True)
+    if disk_keys is None:
+        disk_keys = disk_owned_keys(output_root)
+    reserve = reserve_keys or set()
 
     counts: dict[str, int] = {"alternates": 0, "max_per_album": 0}
     capacity: dict[str, int] = {}
@@ -398,7 +457,9 @@ def build_top_songs(
     total_est = 0
 
     for track in _dedupe_top_versions(discography["tracks"]):
-        key = (_normalize(track["artist"] or artist_name), _normalize(track["title"]))
+        # Owned-ness is keyed on the CATALOG artist + base title so that
+        # "(feat. X)" / live alternates match the album/single on disk.
+        key = owned_key(artist_name, track["title"])
         if key in seen_keys:
             counts["alternates"] += 1
             continue
@@ -412,9 +473,7 @@ def build_top_songs(
                 counts["max_per_album"] += 1
                 continue
             capacity[track["album_id"]] = used + 1
-        owned = video_id in archive or owned_key_misses(
-            output_root, track, artist_name
-        )
+        owned = video_id in archive or key in disk_keys or key in reserve
         if owned:
             already_owned += 1
             continue
@@ -458,19 +517,6 @@ def build_top_songs(
         },
         "top_versions_skipped": sum(counts.values()),
     }
-
-
-def owned_key_misses(output_root: pathlib.Path, track: dict[str, Any], artist_name: str) -> bool:
-    """Heuristic disk check when the top-song has no album folder name."""
-    album = track.get("album") or ""
-    if not album:
-        return False
-    probe = {
-        "artist": track.get("artist") or artist_name,
-        "title": track["title"],
-        "track_num": None,
-    }
-    return owned_file_exists(output_root, probe, {"title": album})
 
 
 def _parse_duration(text: Any) -> int | None:
@@ -537,8 +583,9 @@ def build_catalog(
     Does not write anything; the caller saves the manifest.
     """
     yt = YTMusic(headers_path)
-    top = (
-        build_top_songs(
+    disk_keys = disk_owned_keys(output_root)
+    if scope == "top-songs":
+        top = build_top_songs(
             yt,
             browse_id,
             archive_path=archive_path,
@@ -546,26 +593,27 @@ def build_catalog(
             top_limit=top_limit,
             max_per_album=max_per_album,
             singles_dir=singles_dir,
+            disk_keys=disk_keys,
         )
-        if scope in ("top-songs", "all")
-        else None
-    )
-    if scope == "top-songs":
-        discography = {"releases": [], "name": (top or {}).get("artist", ""), "subscribers": ""}
+        discography = {"releases": [], "name": top["artist"], "subscribers": ""}
+        kept: list[dict[str, Any]] = []
+        dropped: list[tuple[dict[str, Any], str]] = []
     else:
+        top = None
         discography = get_discography(yt, browse_id)
-    releases = discography["releases"]
     artist_name = discography["name"] or (top or {}).get("artist", "")
+    releases = discography["releases"]
 
     kept, excluded = filter_releases(
-        releases,
+        kept if scope == "top-songs" else releases,
         include_live=include_live,
         include_compilations=include_compilations,
         include_remixes=include_remixes,
         albums_only=albums_only,
         no_singles=no_singles,
     )
-    kept, dropped = dedupe_editions(kept)
+    if scope != "top-songs":
+        kept, dropped = dedupe_editions(kept)
     excluded["edition_duplicates"] = len(dropped)
     excluded.update(top["excluded_counts"] if top else {})
     kept_ids = {r["browseId"] for r in kept}
@@ -582,12 +630,7 @@ def build_catalog(
     already_owned = 0
     skipped_duration = 0
     new_tracks = 0
-    total_est = 0
     owned_keys: set[tuple[str, str]] = set()
-    if top:
-        # Top songs come first; a catalog track equal to a top song is a dup.
-        for t in top["entries"]:
-            owned_keys.add((_normalize(t["artist"]), _normalize(t["title"])))
     kept_map = {r["browseId"]: r for r in kept}
 
     # Report all releases not surviving filtering/deduping.
@@ -604,6 +647,13 @@ def build_catalog(
     def window_ok(duration: int) -> bool:
         return not duration_window or 90 <= duration <= 540
 
+    classified: dict[str, list[tuple[dict[str, Any], int, tuple[str, str]]]] = {
+        r["browseId"]: [] for r in kept
+    }
+    track_counts: dict[str, int] = {}
+
+    # Pass A: resolve releases, decide owned (archive id / disk path / key).
+    # Owned keys seed owned_keys so top songs dedupe against the real catalog.
     for release in kept:
         tracks = resolve_release_tracks(yt, release)
         if tracks is None:
@@ -612,30 +662,62 @@ def build_catalog(
                 {**_release_summary(release), "status": "excluded", "reason": "unavailable"}
             )
             continue
+        track_counts[release["browseId"]] = len(tracks)
         year = _release_year(release)
-        new_in_release = 0
         for track in tracks:
-            key = (_normalize(track["artist"] or artist_name), _normalize(track["title"]))
-            video_id = track["video_id"]
             duration = track.get("duration_seconds", 0)
             if not window_ok(duration):
                 skipped_duration += 1
                 continue
+            key = owned_key(artist_name, track["title"])
+            video_id = track["video_id"]
             if (
                 video_id in archive
                 or owned_file_exists(output_root, track, release)
-                or key in owned_keys
+                or key in disk_keys
             ):
+                already_owned += 1
+                owned_keys.add(key)
+                continue
+            classified[release["browseId"]].append((track, year, key))
+
+    if scope == "all":
+        top = build_top_songs(
+            yt,
+            browse_id,
+            archive_path=archive_path,
+            output_root=output_root,
+            top_limit=top_limit,
+            max_per_album=max_per_album,
+            singles_dir=singles_dir,
+            disk_keys=disk_keys,
+            reserve_keys=owned_keys,
+        )
+        excluded.update(top["excluded_counts"])
+
+    if top:
+        # Top songs come first; a catalog track equal to a top song is a dup.
+        for t in top["entries"]:
+            owned_keys.add(owned_key(artist_name, t["title"]))
+
+    # Pass B: form release entries; rows that dup a selected top song are
+    # counted as owned-duplicates and dropped.
+    for release in kept:
+        if release["browseId"] not in track_counts:
+            continue  # already reported (unavailable)
+        new_in_release = 0
+        for track, year, key in classified[release["browseId"]]:
+            if key in owned_keys:
                 already_owned += 1
                 continue
             owned_keys.add(key)
+            duration = track.get("duration_seconds", 0)
             est = heuristic_size(duration) if duration else 0
-            total_est += est
             new_in_release += 1
             new_tracks += 1
             entries.append(
                 {
-                    "video_id": video_id,
+                    "video_id": track["video_id"],
                     "title": track["title"],
                     "artist": track["artist"] or artist_name,
                     "album": release.get("title", ""),
@@ -655,7 +737,7 @@ def build_catalog(
             {
                 **_release_summary(release),
                 "status": "kept",
-                "tracks": len(tracks),
+                "tracks": track_counts[release["browseId"]],
                 "new_tracks": new_in_release,
             }
         )
@@ -667,13 +749,13 @@ def build_catalog(
         # Top songs first, then the rest of the catalog, deduped via owned_keys.
         all_entries = top["entries"] + entries
         already_owned += top["totals"]["already_owned"]
-        total_est += top["totals"]["est_bytes"]
         top_totals = top["totals"]
     else:
         all_entries = entries
         top_totals = None
     total_seconds = sum(e["duration"] for e in all_entries)
-    est_time = len(all_entries) * delay + total_seconds
+    measured = runs.last_measured(output_root)
+    summary = summarize_entries(all_entries, delay=delay, measured=measured)
     payload = {
         "command": "artist",
         "artist": artist_name,
@@ -686,6 +768,7 @@ def build_catalog(
         "scope": scope,
         "top_songs": top_totals,
         "max_size": parse_size(max_size) if max_size else None,
+        "totals": summary,
     }
     return {
         "manifest_path": manifest_path,
@@ -696,13 +779,10 @@ def build_catalog(
         "totals": {
             "releases_kept": len(kept_ids),
             "releases_excluded": len(releases) - len(kept),
-            "new_tracks": len(all_entries),
+            **summary,
             "already_owned": already_owned,
             "skipped_duration": skipped_duration,
             "excluded_counts": excluded_counts,
-            "est_bytes": total_est,
-            "est_human": format_size(total_est),
-            "est_time_seconds": int(est_time),
             "max_size": payload["max_size"],
         },
         "entries": all_entries,

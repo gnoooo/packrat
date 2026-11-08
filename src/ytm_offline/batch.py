@@ -11,6 +11,7 @@ from ytm_offline.archive import Archive
 from ytm_offline.control import Control
 from ytm_offline.download import download_track
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
+from ytm_offline import runs
 
 
 def _emit(
@@ -46,6 +47,7 @@ def run_batch_download(
     """
     if archive is None and archive_path is not None:
         archive = Archive(archive_path)
+    started = time.monotonic()
 
     _emit(
         event_callback,
@@ -153,6 +155,15 @@ def run_batch_download(
 
     if save_callback is not None:
         save_callback(entries)
+
+    downloaded_count = sum(1 for e in entries if e.get("status") == "downloaded")
+    runs.record_run(
+        output_root,
+        mode=mode,
+        tracks=len(entries),
+        downloaded=downloaded_count,
+        seconds=time.monotonic() - started,
+    )
 
     _emit(
         event_callback,

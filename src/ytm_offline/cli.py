@@ -711,7 +711,16 @@ def cmd_artist(args: argparse.Namespace) -> int:
         if rule_bits:
             print(f"excluded by rule: {', '.join(rule_bits)}")
         print(f"estimated size: {totals['est_human']}")
-        print(f"estimated time: ~{totals['est_time_seconds'] // 60} min")
+        if totals.get("est_source") == "measured":
+            print(
+                f"estimated time: ~{totals['est_time_seconds'] // 60} min "
+                f"(measured {totals['measured_s_per_track']:.1f} s/track)"
+            )
+        else:
+            print(
+                f"estimated time: ~{totals['est_time_seconds'] // 60} min "
+                "(duration model; no measured throughput yet)"
+            )
         top_totals = catalog["payload"].get("top_songs")
         if top_totals:
             print(
