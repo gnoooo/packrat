@@ -77,6 +77,49 @@ Four color themes (default `ocean`): `ocean` (cyan→white), `sunset` (orange→
 
 The animated renderer needs a 256-color terminal. Under tmux, use `tmux-256color` (`set -g default-terminal "tmux-256color"` in `~/.tmux.conf`).
 
+## Artist picker
+
+```bash
+ytm-offline artist "BABYMETAL" --dry-run
+```
+
+When stdout is a TTY the artist command lists the discography in two sections
+that mirror the YouTube Music artist page and waits for a selection:
+
+```
+A  Albums (9) - 7 selected - 59 new
+   [x]  1 METAL FORTH (2025) 10t +10  ...
+S  Singles & EPs (13) - 6 selected - 7 new
+```
+
+- **A** = the page's albums section, **S** = its "Singles & EPs" section
+  (EPs live here, marked `EP`, but download into the album folder; only
+  `Single` releases go to `music/<Artist>/Singles/`).
+- Every release is shown and numbered, newest year first, then title.
+  Releases that older runs would have dropped are kept visible with a tag
+  at the end of the line — `[live]`, `[remix]`, `[dup of <title>]`, other
+  filter-rule tags — and are **not** selected by default. Releases with 0
+  new tracks are dimmed and unselected too.
+- Tracklists of all releases are resolved up front so counts are exact;
+  you'll see a `resolving releases 12/37` progress line.
+
+Selection grammar (letters are case-insensitive):
+
+- `Enter` — recommended (unselected-but-new releases all in)
+- `all` — everything including tagged releases
+- `A[1-3]`, `A[1,3]`, `A[3-]`, `S[1-10]` — ranges/lists per section
+- `A[*]`, `S`, `A` — whole section
+- `-S[4]` — exclude; combine freely: `A[1-3],S[2],-S[4]`
+- `none` / `q` — abort without touching the manifest
+
+Colors are used only when stdout is a TTY and `NO_COLOR` is unset; the
+plain output reads fine without them. The recap, manifest and download
+totals always come from one counting function. The `--include-live`,
+`--include-remixes`, `--include-compilations`, `--albums-only` and
+`--no-singles` flags no longer remove releases from the picker; they just
+set the visible tags and leave the choice to you.
+
+
 ### Try it without downloading
 
 ```bash
