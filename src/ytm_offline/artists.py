@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import shutil
+import sys
 import time
-from itertools import zip_longest
+import unicodedata
 from math import ceil
 from typing import Any
 
@@ -1351,9 +1353,62 @@ def apply_selection(
     return newer
 
 
-def _short_duration(seconds: int) -> str:
-    seconds = int(seconds or 0)
-    return f"{seconds // 60}:{seconds % 60:02d}"
+def _dwidth(text: str) -> int:
+    """Display width in terminal cells (W/F = 2 cells, combining = 0)."""
+    total = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        total += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return total
+
+
+def _dw_pad(text: str, width: int) -> str:
+    """Right-pad to `width` display cells ( Stranger-safe for wide chars)."""
+    return text + " " * max(0, width - _dwidth(text))
+
+
+def _dw_truncate(text: str, budget: int) -> str:
+    """Truncate to <= budget display cells with …, never splitting a wide char."""
+    if _dwidth(text) <= budget:
+        return text
+    out = ""
+    for ch in text:
+        w = 0 if unicodedata.combining(ch) else (
+            2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        )
+        if _dwidth(out) + w > budget - 1:  # reserve one cell for …
+            break
+        out += ch
+    return out.rstrip() + "…"
+
+
+def _cell_parts(row: dict[str, Any]) -> tuple[str, str, str]:
+    """(prefix, title, suffix) of one picker cell.
+
+    Cell shape: '[x] 12 TITLE (2019) 14t +3'; 't ✓' when everything is
+    owned; an EP is marked 'EP'; tagged releases carry [tag] at the end.
+    Index and counts are never truncated (only the title is).
+    """
+    meta = row["meta"]
+    box = "[x]" if row.get("selected") else "[ ]"
+    year = str(meta.get("year") or "?")[:4]
+    tracks = meta.get("tracks")
+    new = int(meta.get("new_tracks") or 0)
+    if meta.get("unavailable") or tracks is None:
+        counter = "?"
+    elif new:
+        counter = f"{tracks}t +{new}"
+    else:
+        counter = f"{tracks}t ✓"
+    tags = list(meta.get("tags") or [])
+    if str(meta.get("type")) == "ep" and "ep" not in [t.lower() for t in tags]:
+        tags.insert(0, "EP")
+    if meta.get("unavailable") and "unavailable" not in tags:
+        tags.append("unavailable")
+    prefix = f"{box} {row.get('n', 0):>2} "
+    suffix = f" ({year}) {counter}" + "".join(f" [{tag}]" for tag in tags)
+    return prefix, str(meta.get("title") or "?"), suffix
 
 
 def print_sections(
@@ -1361,45 +1416,58 @@ def print_sections(
     *,
     width: int | None = None,
 ) -> None:
-    """Column-listed picker menu; L/R/D shows why each release was skipped."""
+    """ls-style picker menu: columns adapt to the terminal width, filled
+    top to bottom. Widths are measured in screen cells so Japanese titles
+    stay aligned. ANSI colors only on a TTY with NO_COLOR unset.
+    """
     if width is None:
         width = shutil.get_terminal_size((80, 24)).columns
-    half = max(min(width // 2 - 4, 44), 20)
+    use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    dim = "\x1b[2m" if use_color else ""
+    reset = "\x1b[0m" if use_color else ""
     for letter in SECTION_LETTERS:
-        rows = sections[letter]
+        rows = sections.get(letter) or []
         if not rows:
-            print(f"{letter}. {_SECTION_TITLES[letter]} (none)")
             continue
-        n_new = 0
-        lines: list[str] = []
-        for i, row in enumerate(rows, start=1):
-            if row["kind"] == "track":
-                e = row["entry"]
-                n_new += 1
-                label = (
-                    f"{e['title']}  {_short_duration(e.get('duration') or 0)}"
-                    f"  ~{format_size(e.get('est_size') or 0)}"
-                )
-            else:
-                meta = row["meta"]
-                title = f"{meta['title']} ({meta.get('year') or '?'}, {meta.get('type', '?')})"
-                if meta.get("status") == "kept":
-                    label = (
-                        f"{title}  {meta.get('tracks', '?')} tracks, "
-                        f"{meta.get('new_tracks', 0)} new"
-                    )
-                elif str(meta.get("reason", "")) == "unavailable":
-                    label = f"{title}  unavailable"
-                else:
-                    label = f"{title}  {meta.get('reason', 'excluded')}"
-            lines.append(f"   {i}) {label}")
-        cols = ceil(len(lines) / 2) if len(lines) > 8 else len(lines)
-        head = f"{letter}. {_SECTION_TITLES[letter]} ({len(rows)})"
-        if len(lines) == cols:
-            print(f"{head}")
-            print("\n".join(lines))
+        parts = [_cell_parts(row) for row in rows]
+        natural = max(_dwidth(p + t + s) for p, t, s in parts)
+        cell_w = min(max(natural, 26), 46, max(width, 26))
+        cells: list[tuple[str, bool]] = []
+        for row, (prefix, title, suffix) in zip(rows, parts):
+            budget = max(cell_w - _dwidth(prefix) - _dwidth(suffix), 3)
+            text = prefix + _dw_truncate(title, budget) + suffix
+            cells.append((text, bool(row.get("selected"))))
+        if width < 40:
+            columns = 1
         else:
-            left, right = lines[:cols], lines[cols:]
-            print(f"{head}")
-            for l, r in zip_longest(left, right, fillvalue=""):
-                print(l.ljust(half + 6), r)
+            columns = max(1, min(6, width // (cell_w + 2)))
+        rows_per_col = ceil(len(cells) / columns)
+        n_selected = sum(1 for _, selected in cells if selected)
+        n_new = sum(
+            int(row["meta"].get("new_tracks") or 0)
+            for row, (_, selected) in zip(rows, cells)
+            if selected
+        )
+        header = f"{letter}  {_SECTION_TITLES[letter]} ({len(rows)})"
+        tail = f" - {n_selected} selected - {n_new} new"
+        if _dwidth(header + tail) <= width:
+            print(header + tail)
+        else:
+            print(header)
+        slots: list[list[tuple[str, bool] | None]] = [
+            [None] * columns for _ in range(rows_per_col)
+        ]
+        for i, (text, selected) in enumerate(cells):
+            slots[i % rows_per_col][i // rows_per_col] = (text, selected)
+        for line_cells in slots:
+            pieces = []
+            for cell in line_cells:
+                if cell is None:
+                    continue
+                text, selected = cell
+                padded = _dw_pad(text, cell_w)
+                if dim and not selected:
+                    pieces.append(f"{dim}{padded}{reset}")
+                else:
+                    pieces.append(padded)
+            print("  ".join(pieces).rstrip())

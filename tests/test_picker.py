@@ -270,5 +270,95 @@ def test_print_sections_smoke(capsys):
     catalog, rows = _kept_fixture()
     artists.print_sections(rows, width=100)
     out = capsys.readouterr().out
-    assert "A. Albums" in out
-    assert "S. Singles & EPs" in out
+    assert "A  Albums (" in out
+    assert "S  Singles & EPs (" in out
+    assert "[x]  1 An Album" in out
+
+
+def _plain_rows(n: int = 4) -> list[dict]:
+    return [
+        _meta(i, f"Rel {i}", year=str(2020 - i), tracks=3, new=i % 2)
+        for i in range(n)
+    ]
+
+
+def test_renderer_column_major_and_width(capsys):
+    rows = artists.build_sections(_catalog(_plain_rows(4)))
+    artists.print_sections(rows, width=80)
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    # cell width ~26 clamp, gap 2 -> 2 columns at width 80; column-major
+    # fill: line 1 = rows 1 and 3, line 2 = rows 2 and 4.
+    s_block = lines[lines.index("A  Albums (4) - 2 selected - 2 new") + 1:]
+    assert "Rel 0" in s_block[0] and "Rel 2" in s_block[0]
+    assert "Rel 1" in s_block[1] and "Rel 3" in s_block[1]
+    for line in lines:
+        assert artists._dwidth(line.rstrip()) <= 80
+    assert "\x1b[" not in out  # no colors off-tty
+
+
+@pytest.mark.parametrize("width", [40, 80, 120, 200])
+def test_renderer_no_line_overflows(width: int, capsys):
+    releases = [
+        _meta(0, "A Super Long Album Title Which Definitely Needs Truncating Somewhere",
+              year="2024", tracks=14, new=5),
+        _meta(1, "Budokan 白炎 Live", year="2021", mtype="ep", section="S",
+              status="excluded", tracks=8, new=0, tags=["live"], reason="live"),
+        _meta(2, "Mid", year="2023", mtype="single", section="S", tracks=2, new=1),
+        _meta(3, "Another", year="2020", tracks=5, new=0),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=width)
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert len(lines) > 1
+    for line in lines:
+        assert artists._dwidth(line.rstrip()) <= width
+    # truncated titles keep counts (counts never truncated); wide-char
+    # splitting is covered by test_dw_truncate_never_splits_wide
+    assert "(2024)" in out and "14t" in out
+    assert "\x1b[" not in out  # no-color output reads fine
+
+
+def test_dw_truncate_never_splits_wide():
+    text = "白炎x"  # 2 + 2 + 1 display cells
+    truncated = artists._dw_truncate(text, 4)
+    assert truncated.endswith("…")
+    assert artists._dwidth(truncated) <= 4
+    assert artists._dw_truncate(text, 99) == text
+    # combining accents count as zero cells
+    assert artists._dwidth("cafe\u0301") == 4
+
+
+def test_renderer_japanese_alignment(capsys):
+    releases = [
+        _meta(0, "白炎", year="2020", tracks=3, new=1),
+        _meta(1, "AB", year="2019", tracks=3, new=1),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=60)
+    out = capsys.readouterr().out
+    for line in out.splitlines():
+        assert artists._dwidth(line.rstrip()) <= 60
+    # 2 columns, column-major: one line holds both cells; the second cell
+    # starts at the same DISPLAY column on every line even though cell 1
+    # contains two wide characters.
+    body = [l for l in out.splitlines() if l.startswith("[x]")]
+    assert len(body) == 1
+    second = body[0].index("[x]", 3)
+    assert artists._dwidth(body[0][:second]) == 28  # cell 26 + gap 2
+
+
+def test_renderer_header_counts():
+    releases = [
+        _meta(0, "One", new=2),
+        _meta(1, "Two", new=0),
+        _meta(2, "Three", section="A", status="excluded", new=0, tags=["live"]),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        artists.print_sections(rows, width=100)
+    head = buf.getvalue().splitlines()[0]
+    assert head == "A  Albums (3) - 1 selected - 2 new"
