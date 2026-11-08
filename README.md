@@ -84,40 +84,61 @@ ytm-offline artist "BABYMETAL" --dry-run
 ```
 
 When stdout is a TTY the artist command lists the discography in two sections
-that mirror the YouTube Music artist page and waits for a selection:
+that mirror the YouTube Music artist page and waits for a selection. The
+listing is DISPLAY only — classification stays internal and the grammar,
+counts and default selection are what they were.
 
 ```
-A  Albums (9) - 7 selected - 59 new
-   [x]  1 METAL FORTH (2025) 10t +10  ...
-S  Singles & EPs (13) - 6 selected - 7 new
+A  Albums · 7/9 selected · 57 tracks to download
+■  1 METAL FORTH 2025               3/10   □  3 10 BABYMETAL BUDOKAN 2021      0/13
+□  2 THE OTHER ONE 2023            14/14 ✓
+3/10 = tracks you own / tracks in release   ✓ = all owned   ■ selected   □ not selected
+1 releases with new tracks are unselected by default (live / remix / alternate versions): type 'all' to include them
+Selected: 1 releases · 7 tracks to download
 ```
 
-- **A** = the page's albums section, **S** = its "Singles & EPs" section
-  (EPs live here, marked `EP`, but download into the album folder; only
-  `Single` releases go to `music/<Artist>/Singles/`).
-- Every release is shown and numbered, newest year first, then title.
-  Releases that older runs would have dropped are kept visible with a tag
-  at the end of the line — `[live]`, `[remix]`, `[dup of <title>]`, other
-  filter-rule tags — and are **not** selected by default. Releases with 0
-  new tracks are dimmed and unselected too.
-- Tracklists of all releases are resolved up front so counts are exact;
+### Layout
+
+- **Columns**: 3 at terminal width >= 100, 2 at 66–99, 1 below; cell width =
+  `(width − 2·gap) / columns` (gap 2) capped at 64 per cell. Column-major
+  (numbers read downwards); the width is re-read on every render.
+- **Cell**: `■/□ <index right-aligned> <title…> <year> <counter right-aligned>`.
+  The counter is `owned/total` (`3/10`); a fully owned multi-track release
+  shows `14/14 ✓` and its whole cell dimmed; a single-track release shows only
+  `✓` when owned and nothing when new. Only the TITLE is ever truncated with
+  `…` (index, box, year and counter never are).
+- **Colors**: green `■` when selected, dim `□` otherwise; only on a TTY with
+  `NO_COLOR` unset. With `--ascii` (or a non-UTF-8 terminal) the boxes render
+  as `[x]`/`[ ]` and `✓`/`·` become `ok`/`|`.
+- **Sections**: `A` = the page's albums section, `S` = "Singles & EPs"
+  (EPs live in S but download into the album folder; only `Single` releases
+  go to `music/<Artist>/Singles/`). Numbering is per section from 1, newest
+  year first, then title. Headers read
+  `S  Singles & EPs · 1/22 selected · 1 track to download`.
+- Tags (live/remix/alternate versions) are **not** shown in the cells
+  anymore; releases that would have been dropped (live, remix, edition
+  duplicates) stay numbered, unselected by default, and the note line under
+  the listing tells you they exist (`type 'all' to include them`).
+- Tracklists of all releases are resolved up front so counters are exact;
   you'll see a `resolving releases 12/37` progress line.
+- Under the listing: a legend line, the "unselected by default" note (only
+  when it applies) and the current selection total, each truncated to the
+  terminal width.
 
 Selection grammar (letters are case-insensitive):
 
 - `Enter` — recommended (unselected-but-new releases all in)
-- `all` — everything including tagged releases
+- `all` — everything including the tagged releases
 - `A[1-3]`, `A[1,3]`, `A[3-]`, `S[1-10]` — ranges/lists per section
 - `A[*]`, `S`, `A` — whole section
 - `-S[4]` — exclude; combine freely: `A[1-3],S[2],-S[4]`
 - `none` / `q` — abort without touching the manifest
 
-Colors are used only when stdout is a TTY and `NO_COLOR` is unset; the
-plain output reads fine without them. The recap, manifest and download
-totals always come from one counting function. The `--include-live`,
+The recap, manifest and download totals always come from one counting
+function (`summarize_entries`/`owned_key`). The `--include-live`,
 `--include-remixes`, `--include-compilations`, `--albums-only` and
-`--no-singles` flags no longer remove releases from the picker; they just
-set the visible tags and leave the choice to you.
+`--no-singles` flags no longer remove releases from the picker; the
+differing release still gets its own number and the choice is yours.
 
 
 ### Try it without downloading
