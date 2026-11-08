@@ -757,7 +757,11 @@ def cmd_artist(args: argparse.Namespace) -> int:
         if summary["est_source"] == "measured":
             time_label += f" (measured {summary['measured_s_per_track']:.1f} s/track)"
         else:
-            time_label += " (duration model; no measured throughput yet)"
+            # No runs.jsonl history yet: fall back to the measured batch
+            # rate 18 s/track (7 s delay + ~11 s download), not the
+            # duration model.
+            eta = summary["new_tracks"] * 18
+            time_label = f"~{eta // 60} min (default estimate)"
         print(
             f"recap: {summary['new_tracks']} new tracks | {summary['est_human']} | {time_label}"
         )

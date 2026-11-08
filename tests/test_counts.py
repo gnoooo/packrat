@@ -57,6 +57,33 @@ def test_runs_record_and_read_back(tmp_path: pathlib.Path):
     assert artists.runs.last_measured(tmp_path) == 20.0
 
 
+def test_batch_appends_runs_real_batches(tmp_path, monkeypatch):
+    # A real batch (artist or download-manifest mode) appends to runs.jsonl
+    # at the end so future catalogs can estimate time from throughput.
+    from ytm_offline import batch
+    from ytm_offline.download import DownloadResult
+
+    monkeypatch.setattr(
+        batch,
+        "download_track",
+        lambda *a, **k: DownloadResult(
+            status="downloaded", filepath=tmp_path / "a.m4a", error=None
+        ),
+    )
+    entries = [
+        {"video_id": "v1", "title": "T1", "artist": "A", "duration": 120},
+        {"video_id": "v2", "title": "T2", "artist": "A", "duration": 120},
+        {"video_id": "v3", "title": "T3", "artist": "A", "duration": 120},
+    ]
+    batch.run_batch_download(
+        entries, output_root=tmp_path, mode="artist:Banda", delay=0.0
+    )
+    lines = (tmp_path / "playlists" / "runs.jsonl").read_text().splitlines()
+    data = json.loads(lines[-1])
+    assert data["mode"] == "artist:Banda" and data["tracks"] == 3
+    assert data["downloaded"] == 3
+
+
 def test_runs_last_measured_skips_empty_and_broken(tmp_path: pathlib.Path):
     p = tmp_path / "playlists" / "runs.jsonl"
     p.parent.mkdir(parents=True)
