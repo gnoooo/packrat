@@ -6,6 +6,7 @@ import json
 import pathlib
 import re
 import shutil
+import time
 from itertools import zip_longest
 from math import ceil
 from typing import Any
@@ -156,10 +157,12 @@ def classify_release(title: str) -> list[str]:
 def release_kind(release: dict[str, Any]) -> str:
     """Normalize a release type into album/ep/single."""
     kind = str(release.get("type", "")).lower()
+    if kind == "ep":
+        # EPs live in the singles section on YT Music but download to an
+        # album folder (is_single only routes release_type 'single').
+        return "ep"
     if "single" in kind or release.get("_section") == "singles":
         return "single"
-    if "ep" == kind:
-        return "ep"
     return "album"
 
 
@@ -580,10 +583,12 @@ def build_catalog(
     max_size: str | None = None,
     delay: float = 7.0,
     singles_dir: str = SINGLES_DIR_DEFAULT,
+    pause: float = 0.5,
 ) -> dict[str, Any]:
     """Fetch, filter and dedupe an artist catalog; return manifest payload.
 
-    Does not write anything; the caller saves the manifest.
+    Does not write anything; the caller saves the manifest. ``pause`` is the
+    sleep between per-release tracklist fetches (tests pass 0).
     """
     yt = YTMusic(headers_path)
     disk_keys = disk_owned_keys(output_root)
@@ -620,57 +625,70 @@ def build_catalog(
     excluded["edition_duplicates"] = len(dropped)
     excluded.update(top["excluded_counts"] if top else {})
     kept_ids = {r["browseId"] for r in kept}
-    dropped_reasons = {
-        r.get("browseId"): reason for r, reason in dropped
+    dup_of = {
+        r.get("browseId"): reason[len("duplicate edition of "):]
+        for r, reason in dropped
+    }
+    excluded_reasons = {
+        r["browseId"]: r.get("excluded_rule") or "excluded"
+        for r in releases
+        if r["browseId"] not in kept_ids
     }
 
     archive = Archive(archive_path)
     output_root.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict[str, Any]] = []
-    release_meta: list[dict[str, Any]] = []
     unavailable = 0
     already_owned = 0
     skipped_duration = 0
     new_tracks = 0
     owned_keys: set[tuple[str, str]] = set()
-    kept_map = {r["browseId"]: r for r in kept}
-
-    # Report all releases not surviving filtering/deduping.
-    for release in releases:
-        if release["browseId"] in kept_map:
-            continue
-        reason = release.get("excluded_rule") or dropped_reasons.get(
-            release["browseId"], "excluded"
-        )
-        release_meta.append(
-            {**_release_summary(release), "status": "excluded", "reason": reason}
-        )
 
     def window_ok(duration: int) -> bool:
         return not duration_window or 90 <= duration <= 540
+
+    # Resolve the tracklist of EVERY release up front (tagged releases must
+    # show counts too), with a cache so nothing is fetched twice.
+    resolve_cache: dict[str, list[dict[str, Any]] | None] = {}
+    total_releases = len(releases)
+
+    def resolve(release: dict[str, Any]) -> list[dict[str, Any]] | None:
+        bid = release["browseId"]
+        if bid in resolve_cache:
+            return resolve_cache[bid]
+        if resolve_cache and pause > 0:
+            time.sleep(pause)
+        print(f"resolving releases {len(resolve_cache) + 1}/{total_releases}", end="\r", flush=True)
+        tracks = resolve_release_tracks(yt, release)
+        resolve_cache[bid] = tracks
+        return tracks
 
     classified: dict[str, list[tuple[dict[str, Any], int, tuple[str, str]]]] = {
         r["browseId"]: [] for r in kept
     }
     track_counts: dict[str, int] = {}
+    display_counts: dict[str, tuple[int, int] | None] = {}
 
-    # Pass A: resolve releases, decide owned (archive id / disk path / key).
-    # Owned keys seed owned_keys so top songs dedupe against the real catalog.
-    for release in kept:
-        tracks = resolve_release_tracks(yt, release)
+    # Pass A: resolve all releases, decide owned (archive id / disk/key).
+    # Kept rows seed owned_keys so top songs dedupe against the real catalog;
+    # tagged (excluded) rows only collect display counts.
+    for release in releases:
+        bid = release["browseId"]
+        tracks = resolve(release)
         if tracks is None:
-            unavailable += 1
-            release_meta.append(
-                {**_release_summary(release), "status": "excluded", "reason": "unavailable"}
-            )
+            display_counts[bid] = None
+            if bid in kept_ids:
+                unavailable += 1
             continue
-        track_counts[release["browseId"]] = len(tracks)
         year = _release_year(release)
+        is_kept = bid in kept_ids
+        n_new = 0
         for track in tracks:
             duration = track.get("duration_seconds", 0)
             if not window_ok(duration):
-                skipped_duration += 1
+                if is_kept:
+                    skipped_duration += 1
                 continue
             key = owned_key(artist_name, track["title"])
             video_id = track["video_id"]
@@ -679,10 +697,20 @@ def build_catalog(
                 or owned_file_exists(output_root, track, release)
                 or key in disk_keys
             ):
-                already_owned += 1
-                owned_keys.add(key)
+                if is_kept:
+                    already_owned += 1
+                    owned_keys.add(key)
                 continue
-            classified[release["browseId"]].append((track, year, key))
+            if is_kept:
+                classified[bid].append((track, year, key))
+            else:
+                n_new += 1
+        if is_kept:
+            track_counts[bid] = len(tracks)
+        else:
+            display_counts[bid] = (len(tracks), n_new)
+    if total_releases:
+        print()
 
     if scope == "all":
         top = build_top_songs(
@@ -703,14 +731,17 @@ def build_catalog(
         for t in top["entries"]:
             owned_keys.add(owned_key(artist_name, t["title"]))
 
-    # Pass B: form release entries; rows that dup a selected top song are
-    # counted as owned-duplicates and dropped.
+    # Pass B: form kept-release entries; rows that dup a selected top song
+    # are counted as owned-duplicates and dropped.
+    release_row_index = {r["browseId"]: i for i, r in enumerate(releases)}
+    kept_new: dict[str, int] = {}
     for release in kept:
-        if release["browseId"] not in track_counts:
+        bid = release["browseId"]
+        if bid not in track_counts:
             continue  # already reported (unavailable)
         new_in_release = 0
-        meta_row = len(release_meta)
-        for track, year, key in classified[release["browseId"]]:
+        meta_row = release_row_index[bid]
+        for track, year, key in classified[bid]:
             if key in owned_keys:
                 already_owned += 1
                 continue
@@ -718,15 +749,39 @@ def build_catalog(
             new_in_release += 1
             new_tracks += 1
             entries.append(_entry_for(track, release, artist_name, singles_dir=singles_dir, release_row=meta_row))
-        release_meta.append(
-            {
-                "row": meta_row,
-                **_release_summary(release),
-                "status": "kept",
-                "tracks": track_counts[release["browseId"]],
-                "new_tracks": new_in_release,
-            }
-        )
+        kept_new[bid] = new_in_release
+
+    # One meta row per release, in releases order; tags replace dropping.
+    release_meta: list[dict[str, Any]] = []
+    for idx, release in enumerate(releases):
+        bid = release["browseId"]
+        meta: dict[str, Any] = {
+            "row": idx,
+            **_release_summary(release),
+            "section": "S" if release.get("_section") == "singles" else "A",
+        }
+        tags: list[str] = []
+        if bid in excluded_reasons:
+            tags.append(excluded_reasons[bid])
+        if bid in dup_of:
+            tags.append(f"dup of {dup_of[bid]}")
+        if bid in kept_ids and bid in track_counts:
+            meta["status"] = "kept"
+            meta["tracks"] = track_counts[bid]
+            meta["new_tracks"] = kept_new.get(bid, 0)
+        else:
+            meta["status"] = "excluded"
+            counts = display_counts.get(bid)
+            if counts is not None:
+                meta["tracks"], meta["new_tracks"] = counts
+            else:
+                meta["unavailable"] = True
+            meta["reason"] = ", ".join(tags) or (
+                "unavailable" if counts is None else "excluded"
+            )
+        if tags:
+            meta["tags"] = tags
+        release_meta.append(meta)
 
     label = clean(artist_name) or clean(browse_id)
     manifest_path = output_root / "playlists" / f"artist-{label}.manifest.json"
@@ -772,6 +827,7 @@ def build_catalog(
             "max_size": payload["max_size"],
         },
         "entries": all_entries,
+        "_resolve_cache": resolve_cache,
     }
 
 
