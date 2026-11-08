@@ -364,6 +364,37 @@ def test_renderer_header_counts():
     assert head == "A  Albums (3) - 1 selected - 2 new"
 
 
+def test_dup_tag_uses_section_letter_and_index():
+    releases = [
+        _meta(0, "An Album", section="A", new=2),
+        _meta(1, "Live Single", mtype="single", section="S", status="excluded",
+              new=0, tags=["dup of An Album"], reason="dup of An Album"),
+        _meta(2, "An Album (Deluxe)", section="A", status="excluded", new=0,
+              tags=["dup of An Album"], reason="dup of An Album"),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    assert rows["A"][0]["n"] == 1
+    assert rows["A"][1]["meta"]["tags"] == ["dup of A1"]
+    assert rows["S"][0]["meta"]["tags"] == ["dup of A1"]
+
+
+def test_renderer_single_column_long_tag_cell_fits(capsys):
+    releases = [
+        _meta(0, "A Very Long Album Title That Will Eventually Need Truncating",
+              year="2024", tracks=14, new=5),
+        _meta(1, "Not Dyn Other", section="A", status="excluded", tracks=12,
+              new=0, tags=["dup of A Very Long Album Title That Will Eventually Need Truncating"]),
+    ]
+    rows = artists.build_sections(_catalog(releases))
+    artists.print_sections(rows, width=40)  # single column
+    out = capsys.readouterr().out
+    assert "dup of A1" in out  # short tag visible
+    for line in out.splitlines():
+        assert artists._dwidth(line.rstrip()) <= 40
+        if "dup of" in line:  # index, counts, tag always visible
+            assert "[ ]" in line and "(2020)" in line and "12t" in line
+
+
 def _cmd_artist_args(tmp_path):
     import argparse
     return argparse.Namespace(

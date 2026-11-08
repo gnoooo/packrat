@@ -1110,6 +1110,21 @@ def build_sections(catalog: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
                 and not meta.get("tags")
                 and int(meta.get("new_tracks") or 0) >= 1
             )
+
+    # Dup tags reference the picked original as 'dup of A3' (section letter
+    # + index) instead of the full title, so cells stay short.
+    targets = {
+        str(row["meta"].get("title", "")).casefold(): f"{letter}{row['n']}"
+        for letter in SECTION_LETTERS
+        for row in sections[letter]
+    }
+    for rows in sections.values():
+        for row in rows:
+            for i, tag in enumerate(row["meta"].get("tags") or []):
+                if tag.startswith("dup of "):
+                    short = targets.get(tag[len("dup of "):].casefold())
+                    if short:
+                        row["meta"]["tags"][i] = f"dup of {short}"
     return sections
 
 def parse_selection(
@@ -1433,6 +1448,9 @@ def print_sections(
         parts = [_cell_parts(row) for row in rows]
         natural = max(_dwidth(p + t + s) for p, t, s in parts)
         cell_w = min(max(natural, 26), 46, max(width, 26))
+        # A long tag must not overflow the cell: widen it so index, counts
+        # and tag always stay visible next to a truncated title.
+        cell_w = max(cell_w, max(_dwidth(p) + _dwidth(s) + 3 for p, _, s in parts))
         cells: list[tuple[str, bool]] = []
         for row, (prefix, title, suffix) in zip(rows, parts):
             budget = max(cell_w - _dwidth(prefix) - _dwidth(suffix), 3)
