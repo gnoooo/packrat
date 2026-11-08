@@ -763,10 +763,11 @@ def build_catalog(
             "section": "S" if release.get("_section") == "singles" else "A",
         }
         tags: list[str] = []
-        if bid in excluded_reasons:
-            tags.append(excluded_reasons[bid])
         if bid in dup_of:
+            # A release can't be both rule-excluded and dup-dropped.
             tags.append(f"dup of {dup_of[bid]}")
+        elif bid in excluded_reasons:
+            tags.append(excluded_reasons[bid])
         if bid in kept_ids and bid in track_counts:
             meta["status"] = "kept"
             meta["tracks"] = track_counts[bid]
