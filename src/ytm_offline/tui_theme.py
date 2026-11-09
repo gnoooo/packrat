@@ -80,18 +80,18 @@ def smoothstep(t: float) -> float:
 def crest(x: float, now: float, length: float) -> float:
     """Highlight crest on the bar: smoothstep² of a traveling sine.
 
-    L = max(40, bar_width/2), speed 0.30 cycles/s — crest advances at most
-    one cell per 50 ms frame.
+    ``length`` is the (full) bar width; L = max(40, length/2), speed
+    0.30 cycles/s — the crest advances at most one cell per 50 ms frame.
     """
-    length = max(40.0, length)
-    raw = 0.5 + 0.5 * math.sin(2 * math.pi * (x / length - now * CREST_SPEED))
+    L = max(40.0, length / 2)
+    raw = 0.5 + 0.5 * math.sin(2 * math.pi * (x / L - now * CREST_SPEED))
     s = smoothstep(raw)
     return s * s
 
 
 def crest_offset(t0: float, t1: float, length: float) -> int:
     """Cells the crest peak moved between two frames (crest test helper)."""
-    return round((t1 - t0) * CREST_SPEED * max(40.0, length))
+    return round((t1 - t0) * CREST_SPEED * max(40.0, length / 2))
 
 
 # --- xterm-256 palette ------------------------------------------------------

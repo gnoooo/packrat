@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 from ytm_offline import tui_theme as tt
 
 
@@ -117,3 +119,140 @@ def test_palette_tiers_none_and_wave3():
     p3 = tt.Palette(tt.THEMES["ocean"], tt.TIER_BMID)
     assert len(p3.wave3) == 3
     assert p3.wave3[-1] == 231  # bold white
+
+
+# --- redesign phase 1: tiers, multi-stop gradients, crest, custom install ---
+
+def test_select_tier_palette_mode_matrix():
+    A = tt.select_tier
+    # >= 256 colors
+    assert A(True, 256, False, "custom", True) == tt.TIER_CUSTOM
+    assert A(True, 256, False, "custom", False) == tt.TIER_FIXED
+    assert A(True, 256, False, "auto", True) == tt.TIER_CUSTOM
+    assert A(True, 256, False, "auto", False) == tt.TIER_FIXED
+    assert A(True, 256, False, "fixed", True) == tt.TIER_FIXED
+    assert A(True, 256, False, "basic", True) == tt.TIER_FIXED
+    # forced basic with no colors support
+    assert A(True, 8, False, "basic") == tt.TIER_BMID
+    assert A(True, 8, False, "auto") == tt.TIER_BMID
+
+
+def test_walk_stops_endpoints_and_midpoints():
+    stops = tt.parse_hex_tuple(("#000000", "#808080", "#ffffff"))
+    assert tt.walk_stops(stops, 0.0) == (0, 0, 0)
+    assert tt.walk_stops(stops, 1.0) == (255, 255, 255)
+    assert tt.walk_stops(stops, 0.5) == (128, 128, 128)
+    assert tt.walk_stops(stops, 0.25) == (64, 64, 64)
+
+
+def test_theme_walk_uses_multi_stops():
+    theme = tt.THEMES["ocean"]
+    assert theme.walk(0.0) == tt.parse_hex(theme.stops[0])
+    assert theme.walk(1.0) == tt.parse_hex(theme.stops[-1])
+    # the middle of the ocean walk is cyan-ish, not base-vs-white pink
+    mid = theme.walk(0.33)
+    assert mid[2] > mid[0]  # blue channel dominates near #00b4d8
+
+
+def test_fixed_gradient_distinct_colors_per_theme():
+    """Every theme's FIXED-mode wave (base walk + crest blend) yields
+    >= MIN_DISTINCT distinct xterm-256 colors. Reports the counts."""
+    counts = {}
+    hi = tt.parse_hex("#ffffff")
+    W = 100  # capped bar width
+    for name, theme in tt.THEMES.items():
+        seen = set()
+        for k in range(24):  # one crest period
+            now = k / 24 / tt.CREST_SPEED
+            for x in range(0, W, 2):
+                c = tt.crest(x, now, W)
+                rgb = theme.walk(x / W)
+                if c > 0:
+                    rgb = tt.blend(rgb, hi, tt.CREST_BLEND * c)
+                seen.add(tt.nearest_index(rgb))
+        counts[name] = len(seen)
+        assert len(seen) >= tt.MIN_DISTINCT, (name, counts)
+    print("distinct fixed-mode colors:", counts)
+
+
+def test_crest_displacement_per_frame():
+    for bar_width in (10, 24, 48, 64, 80, 100):
+        moved = tt.crest_offset(0.0, 0.05, bar_width)  # one 50 ms tick
+        assert 0 <= moved <= 1, bar_width
+
+
+def test_crest_range_and_travel():
+    vals = [tt.crest(x, 0.0, 100) for x in range(0, 100)]
+    assert all(0.0 <= v <= 1.0 for v in vals)
+    # the crest advances with time: peak moves rightwards
+    def peak(now: float) -> int:
+        return max(range(0, 120), key=lambda x: tt.crest(x, now, 100))
+    assert peak(0.5) > peak(0.0)
+
+
+class _FakeCurses:
+    def __init__(self) -> None:
+        self.colors: list[tuple] = []
+        self.pairs: list[tuple] = []
+
+    def init_color(self, slot, r, g, b):
+        self.colors.append((slot, r, g, b))
+
+    def init_pair(self, number, slot, bg):
+        self.pairs.append((number, slot, bg))
+
+
+def test_install_custom_rgb_exact_values_and_slots():
+    fake = _FakeCurses()
+    rgbs = tt.theme_gradient_rgb(tt.THEMES["ocean"], steps=8)
+    static = {k: (0, 0, 0) for k in tt.COLOR_KEYS}
+    grad_pairs, static_pairs = tt.install_custom_rgb(
+        rgbs, static, curses_mod=fake,
+    )
+    # 8 gradient + 6 static colors = 14 slots, starting at 32
+    assert len(fake.colors) == 14
+    assert [c[0] for c in fake.colors] == list(range(32, 32 + 14))
+    for _, r, g, b in fake.colors:
+        assert 0 <= r <= 1000 and 0 <= g <= 1000 and 0 <= b <= 1000
+    # black maps to (0,0,0) on the 0..1000 scale
+    assert fake.colors[8][1:] == (0, 0, 0)
+    # pairs numbered from 1; gradient positions map in order
+    assert [p[0] for p in fake.pairs] == list(range(1, 15))
+    assert grad_pairs == {i: i + 1 for i in range(8)}
+    assert static_pairs == {k: 9 + i for i, k in enumerate(tt.COLOR_KEYS)}
+
+
+def test_install_custom_rgb_out_of_slots():
+    fake = _FakeCurses()
+    # 24 gradient steps + 6 UI colors fit; force the overflow with more.
+    rgbs = [(i, i, i) for i in range(219)]
+    static = {k: (0, 0, 0) for k in tt.COLOR_KEYS}
+    try:
+        tt.install_custom_rgb(rgbs, static, curses_mod=fake)
+    except ValueError as exc:
+        assert "32..255" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_restore_palette_writes_sequence():
+    out = io.StringIO()
+    tt.restore_palette(out)
+    assert out.getvalue() == tt.RESTORE_SEQUENCE == "\x1b]104\x07"
+
+
+def test_palette_tiers_fixed_and_custom():
+    pf = tt.Palette(tt.THEMES["sunset"], tt.TIER_FIXED)
+    assert pf.gradient and pf.gradient_rgb_list == []
+    pc = tt.Palette(tt.THEMES["sunset"], tt.TIER_CUSTOM)
+    assert pc.gradient == list(range(len(pc.gradient_rgb_list)))
+    assert len(pc.gradient_rgb_list) == tt.GRADIENT_STEPS
+    # custom tier keeps rgb list for install_custom_rgb
+    assert pc.gradient_rgb_list[0] == tt.parse_hex(pf.stops[0])
+
+
+def test_palette_none_static_map():
+    p = tt.Palette(tt.THEMES["mono"], tt.TIER_NONE)
+    assert p.gradient == [] and p.wave3 == []
+    assert set(p.static) == set(tt.COLOR_KEYS)
+    assert all(v == -1 for v in p.static.values())
