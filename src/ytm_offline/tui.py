@@ -907,9 +907,10 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
 def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
             ascii_mode: bool = False, no_anim: bool = False,
             no_color: bool | None = None, palette: str = "auto") -> int:
-    """Run worker under the TUI; plain logging fallback when stdout is no TTY."""
+    """Run worker under the TUI; plain logging fallback when stdout/stdin is no TTY."""
     if not supports_tui():
-        print("stdout is not a TTY; falling back to plain logging", file=sys.stderr)
+        print("stdout/stdin is not a TTY; falling back to plain logging",
+              file=sys.stderr)
         return worker_func(**worker_kwargs)
     if no_color is not None:
         # Explicit no_color wins; None leaves the global (set by main()) intact.
@@ -962,7 +963,7 @@ def _latest_log_path() -> str:
 
 
 def supports_tui() -> bool:
-    return sys.stdout.isatty()
+    return sys.stdout.isatty() and sys.stdin.isatty()
 
 
 # --- demo worker (no network, no files, no yt-dlp) ---------------------------

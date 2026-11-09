@@ -109,6 +109,15 @@ def test_snapshot_dataclass_replace_required_fields():
             "elapsed_seconds",)  # elapsed_seconds always set
 
 
+def test_supports_tui_requires_stdin_and_stdout(monkeypatch):
+    # Piping stdin must fall back to plain logging, not enter curses.
+    monkeypatch.setattr(tui.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(tui.sys.stdin, "isatty", lambda: False)
+    assert tui.supports_tui() is False
+    monkeypatch.setattr(tui.sys.stdin, "isatty", lambda: True)
+    assert tui.supports_tui() is True
+
+
 def test_ui_crash_stops_worker_gracefully(monkeypatch, tmp_path, capsys):
     # If the UI thread raises, the worker must be told to stop (finishing
     # its current track) and the user gets a short message with the log
