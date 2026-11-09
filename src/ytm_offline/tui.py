@@ -356,8 +356,10 @@ def _draw_themed_line(win, y: int, prefix: str, body: str, suffix: str, vis: Vis
         return
     if (not thin and vis.bar_bg and mode in ("running", "waiting")
             and vis.track_attr is not None):
+        # Bar animation is driven by the injected frame phase, never the
+        # wall clock, so renders (and tests) are deterministic per frame.
         _draw_space_bar(win, y, prefix, body, suffix, vis, mode,
-                        time.monotonic(), base_attr)
+                        phase, base_attr)
         return
     _safe_addstr(win, y, 0, prefix, base_attr)
     fill = str(vis.g["thin_fill"] if thin else vis.g["bar_fill"])
