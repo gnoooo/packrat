@@ -104,6 +104,14 @@ def _all_calls(screen: FakeScreen) -> list:
     return calls
 
 
+def _desc(screen: FakeScreen) -> list:
+    out = []
+    for c in screen.children:
+        out.append(c)
+        out.extend(_desc(c))
+    return out
+
+
 def test_render_smoke_no_exceptions(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     frame = {"mode": "running", "phase": 0.13, "thin_phase": 0.44, "breath": 0.5,
@@ -519,3 +527,21 @@ def test_tui_glyphs_command_smoke(monkeypatch, capsys, tmp_path):
         assert group in out
     assert "tier: none" in out  # piped output never carries ANSI colors
     assert "\x1b[" not in out
+
+@pytest.mark.parametrize("rows,cols", [(24, 80), (30, 120), (50, 200), (60, 300)])
+def test_render_matrix_all_sizes(rows, cols, monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    vis = _visual_no_color()
+    for mode in ("running", "waiting", "paused", "stopping", "done", "aborted"):
+        screen = FakeScreen(rows, cols)
+        tui_mod._draw_all(screen, state, vis, None, False, 0, False,
+                          {"mode": mode, "phase": 0.1, "thin_phase": 0.4,
+                           "breath": 0.5, "flash": False, "sweep": None,
+                           "history": ()})
+        calls = _all_calls(screen)
+        assert calls
+        for y, x, t in calls:
+            assert 0 <= y < rows and x + tg.display_width(t) <= cols, (rows, cols, y, x, t)
+        framed = [c for c in _desc(screen) if c._h >= 3]
+        assert len(framed) >= 2, (rows, cols, mode)
