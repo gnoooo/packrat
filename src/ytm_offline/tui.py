@@ -462,9 +462,12 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
         bar_w = max(10, w - 40)
         pct = max(0.0, min(100.0, cur.percent))
         eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
-        suffix = f" {cur.speed}  ETA {eta}" if cur.speed else f" ETA {eta}"
-        if cur.total_bytes:
-            suffix += f"  {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
+        # Spec order: '<pct>% <bytes>/<total> <speed>'; ETA last so the
+        # long tail clips in the middle, never the percent.
+        suffix = f" {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
+        if cur.speed:
+            suffix += f" {cur.speed}"
+        suffix += f"  ETA {eta}"
         _draw_themed_line(win, 4, f"│ {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
                           vis, frame["mode"], frame["thin_phase"], frame["breath"],
                           frame.get("sweep"), curses.A_BOLD, thin=True)
