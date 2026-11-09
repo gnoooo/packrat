@@ -68,6 +68,8 @@ Keys in the TUI:
 
 The layout: full-width header band (`♪ ytm-offline › <mode>` + colored status badge + `⏱` elapsed), the overall panel with a space-background gradient bar (≤ 100 cells) and a braille throughput graph of the last 60 s (flat `⣀` baseline when there is no data yet), a framed now-playing window (finished + next track while waiting between tracks), a status panel with chips (`✓ downloaded`, `○ archived`, `✗ failed`, `↻ retries`, error gauge `●○○ c/3`), a failures panel only when something failed, and a key-chip footer band. Content is capped at 140 columns and centered.
 
+Rendering details: every panel is a complete rounded frame — content rows are `│` + padded text + `│` to the exact inner width, so the right border is never missing. All strings are sanitized before they reach curses (control characters like `\n`/`\r`/`\t` become a space, runs of spaces collapse), so odd titles can't blank lines. The overall panel shows the wave bar + percent on line 1 and the single `done/total tracks · bytes · ETA · speed` line + graph on line 2. Panels sit between the header and footer with one blank row between each and get 40% of the leftover space above the body (vertical centering) on terminals with ≥ 30 rows; below that the layout is compact (no blank rows, panels packed). The drawn area is recomputed every render and on resize (`erase()` first, so no stale cells survive).
+
 ### Themes and visual flags
 
 Four color themes (default `ocean`): `ocean` (deep blue → cyan → white), `sunset` (purple → red → gold → cream), `matrix` (dark → green → white), `mono` (gray → white). Every subcommand accepts:
