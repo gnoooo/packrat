@@ -60,22 +60,25 @@ Keys in the TUI:
 - `p` pause / resume
 - `s` skip current track
 - `q` quit after the current track
-- `l` toggle log panel
+- `l` toggle log panel (tall terminals, height ≥ 30 rows)
 - `a` toggle animations
 - `t` cycle color theme
 - `?` show key help
 - Up/Down / PgUp/PgDn scroll the log
 
+The layout: full-width header band (`♪ ytm-offline › <mode>` + colored status badge + `⏱` elapsed), the overall panel with a space-background gradient bar (≤ 100 cells) and a braille throughput graph of the last 60 s (flat `⣀` baseline when there is no data yet), a framed now-playing window (finished + next track while waiting between tracks), a status panel with chips (`✓ downloaded`, `○ archived`, `✗ failed`, `↻ retries`, error gauge `●○○ c/3`), a failures panel only when something failed, and a key-chip footer band. Content is capped at 140 columns and centered.
+
 ### Themes and visual flags
 
-Four color themes (default `ocean`): `ocean` (cyan→white), `sunset` (orange→white), `matrix` (green→white), `mono` (gray→white). Every subcommand accepts:
+Four color themes (default `ocean`): `ocean` (deep blue → cyan → white), `sunset` (purple → red → gold → cream), `matrix` (dark → green → white), `mono` (gray → white). Every subcommand accepts:
 
-- `--theme <name>` — pick the theme (visible only with a 256-color `$TERM`).
+- `--theme <name>` — pick the theme.
+- `--palette auto|custom|fixed|basic` (default `auto`) — `custom` redefines exact RGB colors via `init_color` (needs 256-color curses + `can_change_color()`); `fixed` maps every gradient step to the nearest xterm-256 color (perceptual redmean distance, cube + grays); `basic` is the plain-attr fallback. Auto picks the best tier your terminal supports; the terminal palette is restored on exit (also on a UI crash), including via tmux (`tmux-256color`, `set -g default-terminal "tmux-256color"` in `~/.tmux.conf`).
 - `--no-anim` — static colors, no waves/spinner (env: `YTM_TUI_ANIM=0`).
 - `--no-color` — monochrome, characters only (env: `NO_COLOR`).
 - `--ascii` — ASCII-only glyphs (bars, box borders, spinner).
 
-The animated renderer needs a 256-color terminal. Under tmux, use `tmux-256color` (`set -g default-terminal "tmux-256color"` in `~/.tmux.conf`).
+`ytm-offline tui-glyphs` prints the glyph groups (block/box/braille/shapes/marks), a theme gradient strip and which palette tier was selected.
 
 ## Artist picker
 
