@@ -179,3 +179,98 @@ def test_batch_start_carries_est_bytes(monkeypatch):
     for d in seen:
         state.apply(ev.Event(d["type"], d["payload"]))
     assert state.total_est_bytes == 6000
+
+
+# --- item 10: non-daemon worker, graceful quit, force exit -------------------
+
+
+class _FakeWin:
+    """Bare curses-window stand-in recording addstr text."""
+
+    def __init__(self, h, w):
+        self._maxyx = (h, w)
+        self.writes = []
+
+    def getmaxyx(self):
+        return self._maxyx
+
+    def addstr(self, y, x, text, attr=0):
+        self.writes.append(text)
+
+
+def test_worker_quit_mid_track_completes_and_saves(tmp_path):
+    # q mid-track: the non-daemon worker must finish its unwind (the real
+    # worker writes archive/manifest/m3u8 and cleans temp files) before
+    # _join_worker returns.
+    import threading
+    import time
+
+    from ytm_offline import events as ev2
+    from ytm_offline.control import Control
+
+    state = ev2.State(mode="test")
+    control = Control()
+    container = {"return_value": None, "exception": None}
+    saved = tmp_path / "state.txt"
+
+    def fake_worker(event_callback=None, control=None, **kw):
+        event_callback({"type": "start",
+                        "payload": {"mode": "test", "total": 1}})
+        for _ in range(40):  # ~2 s of work, polls should_stop like real workers
+            if control.should_stop():
+                break
+            time.sleep(0.05)
+        saved.write_text("completed")  # archive/manifest/m3u8 written here
+        return {"summary": "stopped"}
+
+    thread = threading.Thread(target=tui._worker_target,
+                              args=(fake_worker, {}, state, control, container))
+    thread.start()
+    time.sleep(0.4)  # quit mid-work
+    control.request_stop()
+    tui._join_worker(thread)
+    assert thread.is_alive() is False
+    assert saved.read_text() == "completed"  # state/manifest saved on quit
+    assert container["exception"] is None
+    assert container["return_value"] == {"summary": "stopped"}
+
+
+def test_footer_shows_finishing_when_stopping():
+    from ytm_offline import events as ev
+
+    state = ev.State(mode="test")
+    state.apply(ev.Event("status", {"status": "STOPPING", "reason": "user quit"}))
+    win = _FakeWin(1, 60)
+    tui._draw_footer(win, state, None, 0)
+    assert "finishing the current track" in win.writes[0]
+    assert "quit" in win.writes[0]
+
+
+def test_footer_default_is_keys():
+    from ytm_offline import events as ev
+
+    state = ev.State(mode="test")
+    state.apply(ev.Event("status", {"status": "RUNNING"}))
+    win = _FakeWin(1, 60)
+    tui._draw_footer(win, state, None, 0)
+    assert " p pause/resume" in win.writes[0]
+
+
+def test_join_worker_second_ctrl_c_force_exit(monkeypatch, capsys):
+    # A second Ctrl-C while waiting for the worker must print the partial
+    # file warning and force-exit instead of hanging forever.
+    import threading
+
+    def raise_kbd(self, timeout=None):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(threading.Thread, "join", raise_kbd)
+    monkeypatch.setattr(tui.os, "_exit", lambda code: (_ for _ in ()).throw(
+        SystemExit(code)))
+    t = threading.Thread(target=lambda: None)
+    t.start()
+    with pytest.raises(SystemExit):
+        tui._join_worker(t, "logs/x.log")
+    err = capsys.readouterr().err
+    assert "partial file may remain" in err
+    assert "logs/x.log" in err

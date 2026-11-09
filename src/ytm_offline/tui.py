@@ -615,10 +615,13 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
-def _draw_footer(win, vis: Visual, y: int = 0) -> None:
+def _draw_footer(win, snap, vis: Visual, y: int = 0) -> None:
     h, w = win.getmaxyx()
-    help_text = " p pause/resume  s skip  q quit  l log  a anim  t theme  ? help "
-    _safe_addstr(win, y, 0, help_text.ljust(w), curses.A_REVERSE)
+    if snap.status == "STOPPING":
+        text = " finishing the current track… press q again to quit now "
+    else:
+        text = " p pause/resume  s skip  q quit  l log  a anim  t theme  ? help "
+    _safe_addstr(win, y, 0, text.ljust(w), curses.A_REVERSE)
 
 
 def _draw_help(stdscr, vis: Visual) -> None:
@@ -706,7 +709,7 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
         return
     # Header/footer bands run the FULL terminal width; body is centered.
     _draw_header(stdscr, snap, vis)
-    _draw_footer(stdscr, vis, h - 1)
+    _draw_footer(stdscr, snap, vis, h - 1)
     body_h = h - 2
     cw = min(w, 140)
     x0 = max(0, (w - cw) // 2)
@@ -905,6 +908,17 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
         state.apply(Event("done", {"reason": "finished"}))
 
 
+def _join_worker(thread: threading.Thread, log_note: str = "") -> None:
+    """Wait for the worker; a second Ctrl-C force-exits (partial file may remain)."""
+    try:
+        thread.join()
+    except KeyboardInterrupt:
+        print("second Ctrl-C: download thread still running — a partial file may "
+              f"remain{(f'; full log: {log_note}' if log_note else '')}",
+              file=sys.stderr)
+        os._exit(130)
+
+
 def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
             ascii_mode: bool = False, no_anim: bool = False,
             no_color: bool | None = None, palette: str = "auto") -> int:
@@ -922,10 +936,12 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     state = State(mode=mode)
     control = Control()
     result_container: dict[str, Any] = {"return_value": None, "exception": None}
+    # Not a daemon: on quit the worker finishes its current track, writes
+    # archive/manifest/m3u8 and unwinds (deleting any temp cookie file)
+    # before run_tui returns.
     thread = threading.Thread(
         target=_worker_target,
         args=(worker_func, worker_kwargs, state, control, result_container),
-        daemon=True,
     )
     thread.start()
     try:
@@ -933,11 +949,12 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     except KeyboardInterrupt:
         control.request_stop()
         state.apply(Event("status", {"status": "ABORTED", "reason": "Ctrl-C"}))
+        print("finishing the current track… Ctrl-C again to force quit",
+              file=sys.stderr)
     except Exception as exc:  # UI bug: stop the worker cleanly, no traceback
         # The worker finishes its current track, writes archive/manifest/
         # m3u8 and unwinds (deleting any temp cookie file) before exiting.
         control.request_stop()
-        thread.join(5)
         path = _latest_log_path()
         print(f"TUI crashed: {exc.__class__.__name__}: {exc}",
               file=sys.stderr)
@@ -947,7 +964,7 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
         return 1
     finally:
         control.request_stop()
-        thread.join(5)
+        _join_worker(thread, _latest_log_path())
         # Terminal palette back to defaults AFTER curses has ended, even on
         # a UI crash (curses.wrapper already restored the terminal itself).
         tt.restore_palette()
