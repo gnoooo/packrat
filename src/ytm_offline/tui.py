@@ -375,23 +375,28 @@ def _spark_rates(history: tuple[tuple[float, int], ...]) -> list[float]:
 
 
 def _draw_header(win, snap: State, vis: Visual) -> None:
+    """Full-width header band: '♪ ytm-offline › <mode>' left, status badge
+    (own color) + elapsed on the right, every cell covered."""
+    h, w = win.getmaxyx()
+    g = vis.g
     status = snap.status
     colors = vis.colors
     if status == "DONE":
         sattr = colors.get("success", 0)
     elif status in ("STOPPED", "ABORTED"):
         sattr = colors.get("error", 0)
-    elif status == "STOPPING":
-        sattr = colors.get("stopping", 0)
-    elif status.startswith("WAITING"):
-        sattr = colors.get("warning", 0)
+    elif status in ("STOPPING",) or status.startswith("WAITING"):
+        sattr = colors.get("warning", 0) if status.startswith("WAITING") else colors.get("stopping", 0)
     else:
         sattr = colors.get("info", 0)
-    line = f" ytm-offline  |  {snap.mode[:30]}  |  {status}  |  elapsed {format_duration(snap.elapsed_seconds)}"
-    _safe_addstr(win, 0, 0, line, curses.A_BOLD)
-    pos = line.find(status)
-    if pos >= 0:
-        _safe_addstr(win, 0, pos, status, sattr | curses.A_BOLD)
+    right = f" {g.get('dot', '*')} {status}  {g.get('clock', '~')} {format_duration(snap.elapsed_seconds)} "
+    right_w = tg.display_width(right)
+    left = truncate(f" {g.get('note', '~')} ytm-offline › {snap.mode}", max(4, w - right_w - 1))
+    pad = max(0, w - 1 - tg.display_width(left) - right_w)
+    _safe_addstr(win, 0, 0, left + " " * pad, curses.A_BOLD)
+    x = w - 1 - right_w
+    if x > tg.display_width(left):
+        _safe_addstr(win, 0, x, right, sattr | curses.A_BOLD)
 
 
 def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
@@ -408,15 +413,32 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     suffix = f" {pct:5.1f}%  ETA {eta_s}"
     _draw_themed_line(win, 0, prefix, body, suffix, vis, frame["mode"], frame["phase"],
                       frame["breath"], frame.get("sweep"), curses.A_BOLD)
-    base = f" downloaded {format_bytes(snap.total_bytes_downloaded)} / est {format_bytes(snap.total_est_bytes)}"
+    base = f" {snap.done}/{snap.total} tracks · {format_bytes(snap.total_bytes_downloaded)} / {format_bytes(snap.total_est_bytes)} · ETA {eta_s}"
     if snap.max_size_bytes:
-        base += f" / max {format_bytes(snap.max_size_bytes)}"
+        base += f" · max {format_bytes(snap.max_size_bytes)}"
+    rate = tg.rates_60s(frame.get("history") or (), time.monotonic())
+    if rate:
+        base += f" · {format_bytes(rate)}/s"
     line = base
     avail = w - 1 - tg.display_width(base) - 2
     if avail >= 8:
-        rates = _spark_rates(frame["history"])
-        line += "  " + tg.sparkline(vis.g, rates, min(30, avail))
-    _safe_addstr(win, 1, 0, line, vis.colors.get("info", 0))
+        graph_w = min(40, avail)
+        samples: list[float] = []
+        hist = frame.get("history") or ()
+        now = time.monotonic()
+        over = [v for ts, v in hist if now - ts <= 60.0]
+        # ~2 samples/cell over the last minute, per-second granularity
+        per_bucket = max(1, int(60.0 / max(1, graph_w * 2)))
+        buckets: list[float] = []
+        for i in range(graph_w * 2):
+            start = now - (graph_w * 2 - i) * per_bucket
+            vals = [v for ts, v in hist if start < ts <= start + per_bucket]
+            buckets.append(vals[-1] if vals else 0.0)
+        deltas = [max(0.0, buckets[i] - buckets[i - 1]) if i else 0.0
+                  for i in range(len(buckets))]
+        samples = deltas
+        line += "  " + tg.braille_graph(samples, graph_w)
+    _safe_addstr(win, 1, 0, tg.truncate_width(line, w - 1), vis.colors.get("info", 0))
 
 
 def _empty_border_rows(win, h: int, written: set[int], vis: Visual) -> None:
@@ -462,19 +484,31 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
 
 def _draw_counters(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
-    line = f"│ downloaded {snap.downloaded}  archived {snap.archived}  skipped-size {snap.skipped_size}  failed {snap.failed}  retries {snap.retries}"
-    attr0 = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else 0
+    g = vis.g
+    flash_attr = (vis.colors.get("error", 0) | curses.A_BOLD) if frame.get("flash") else 0
     _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "status"),
-                 vis.colors.get("info", 0) | curses.A_BOLD)
-    _safe_addstr(win, 1, 0, line, attr0)
+                 (vis.colors.get("error", 0) if frame.get("flash")
+                  else vis.colors.get("info", 0)) | curses.A_BOLD)
+    chips = [
+        f"{g.get('done')} {snap.downloaded} downloaded",
+        f"{g.get('dot_off')} {snap.archived} archived",
+        f"{g.get('fail')} {snap.failed} failed",
+        f"{g.get('pause', '|')} {snap.retries} retries",
+    ]
+    if snap.skipped_size:
+        chips.append(f"{g.get('ellipsis', '..')} {snap.skipped_size} skipped-size")
+    _safe_addstr(win, 1, 0, f"│ {'   '.join(chips)}", flash_attr)
     c = snap.consecutive_retryable
+    dots = (
+        g.get("dot", "*") * min(3, c) + g.get("dot_off", "o") * max(0, 3 - c)
+    )
     if c >= 3:
         attr1 = vis.colors.get("error", 0) | curses.A_BOLD
-    elif c == 2:
+    elif c >= 1:
         attr1 = vis.colors.get("warning", 0) | curses.A_BOLD
     else:
         attr1 = vis.colors.get("success", 0)
-    _safe_addstr(win, 2, 0, f"│ consecutive retryable errors: {c}/3", attr1)
+    _safe_addstr(win, 2, 0, f"│ errors {dots} {c}/3", attr1)
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
@@ -554,7 +588,7 @@ def _draw_help(stdscr, vis: Visual) -> None:
 # --- layout + frame ---------------------------------------------------------
 
 
-def _layout(stdscr, show_log: bool):
+def _layout(stdscr, show_log: bool, failed: int = 0):
     h, w = stdscr.getmaxyx()
     header_h = 1
     overall_h = 2
@@ -564,13 +598,20 @@ def _layout(stdscr, show_log: bool):
     remaining = h - (header_h + overall_h + current_h + counters_h + footer_h)
     if remaining < 6:
         # Too small; just draw header + footer and a warning.
-        return None, None, None, None, None, None
+        return (None, None, None, None, None, None, None)
 
-    if show_log:
+    # Failures panel only carries content when tracks actually failed;
+    # the log fills the remaining height, but only on tall terminals.
+    show_log = show_log and h >= 30
+    if failed <= 0:
+        failures_h = 0
+    elif show_log:
         failures_h = max(3, remaining // 4)
-        log_h = remaining - failures_h
     else:
         failures_h = remaining
+    if show_log:
+        log_h = remaining - failures_h
+    else:
         log_h = 0
 
     y = 0
@@ -582,9 +623,9 @@ def _layout(stdscr, show_log: bool):
     y += current_h
     counters = stdscr.derwin(counters_h, w, y, 0)
     y += counters_h
-    failures = stdscr.derwin(failures_h, w, y, 0)
+    failures = stdscr.derwin(failures_h, w, y, 0) if failures_h else None
     y += failures_h
-    log = stdscr.derwin(log_h, w, y, 0)
+    log = stdscr.derwin(log_h, w, y, 0) if log_h else None
     y += log_h
     footer = stdscr.derwin(footer_h, w, y, 0)
     return header, overall, current, counters, failures, log, footer
@@ -599,7 +640,13 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
         stdscr.noutrefresh()
         curses.doupdate()
         return
-    header, overall, current, counters, failures, log, footer = _layout(stdscr, show_log)
+    # Content is capped at 140 columns and centered (read-me note).
+    cw = min(w, 140)
+    x0 = max(0, (w - cw) // 2)
+    root = stdscr if cw == w else stdscr.derwin(h, cw, 0, x0)
+    header, overall, current, counters, failures, log, footer = _layout(
+        root, show_log, failed=snap.failed,
+    )
     if header is None:
         _safe_addstr(stdscr, 0, 0, "terminal too small for layout", curses.A_BOLD)
         stdscr.noutrefresh()
@@ -609,14 +656,14 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
     _draw_overall(overall, snap, vis, frame)
     _draw_current(current, snap, vis, frame)
     _draw_counters(counters, snap, vis, frame)
-    _draw_failures(failures, snap, vis, frame)
-    if show_log and log:
+    if failures:
+        _draw_failures(failures, snap, vis, frame)
+    if log:
         _draw_log(log, snap, vis, ring_handler, log_offset)
     _draw_footer(footer, vis)
-    for win in (header, overall, current, counters, failures, footer):
-        win.noutrefresh()
-    if show_log and log:
-        log.noutrefresh()
+    for win in (header, overall, current, counters, failures, log, footer):
+        if win:
+            win.noutrefresh()
     if help_mode:
         _draw_help(stdscr, vis)
     stdscr.noutrefresh()

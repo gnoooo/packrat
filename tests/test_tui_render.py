@@ -400,3 +400,101 @@ def test_bar_pairs_out_of_budget_fallback():
 
     bg, edge, track = tui_mod._make_bar_pairs(Cur(), {0: 16}, 232, 2)
     assert bg == {} and edge == {} and track is None
+
+def test_braille_graph_flat_baseline_and_rising():
+    flat = tg.braille_graph([], 10)
+    assert flat == "\u28c0" * 10  # both bottom dots, never a ramp
+    rising = tg.braille_graph([0, 0, 10, 40, 160, 640], 3)
+    assert all(0x2800 <= ord(c) <= 0x28FF for c in rising)
+    assert ord(rising[2]) > ord(rising[0])  # grows toward the right
+    assert all(tg.char_width(c) == 1 for c in rising)
+
+
+def test_header_band_full_width_with_badge(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    win = FakeScreen(1, 100)
+    tui_mod._draw_header(win, state, _visual_no_color())
+    texts = [t for _, _, t in win.addstr_calls]
+    joined = "".join(texts)
+    assert "ytm-offline" in joined and "RUNNING" in joined
+    # every cell of the row is covered: left band + badge + pad
+    assert tui_mod.tg.display_width(joined) >= 99
+    if len(win.addstr_calls) > 1:
+        badge_y, badge_x, badge_text, badge_attr = win.attr_calls[0]
+        assert badge_attr != 0
+
+
+def test_status_chips_and_gauge(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    win = FakeScreen(4, 80)
+    tui_mod._draw_counters(win, state, _visual_no_color(),
+                           {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                            "breath": 0.5, "flash": False, "sweep": None,
+                            "history": ()})
+    rows = [" ".join(t for _, _, t in child_calls) for child_calls in
+            [[c for c in win.addstr_calls if y == 1] for y in range(4)]]
+    body = " ".join(rows)
+    assert "downloaded" in body and "archived" in body
+    assert "failed" in body and "retries" in body
+    assert "/3" in body and ("\u25cf" in body or "\u25cb" in body)
+
+
+def test_failures_panel_hidden_when_no_failures(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = State("t")
+    state.apply(Event("start", {"total": 3, "total_est_bytes": 3000}))
+    state.apply(Event("track_start", {"video_id": "v1", "title": "Song One",
+                                      "artist": "Artist", "album": "Album",
+                                      "source": "artist:A", "stage": "downloading"}))
+    screen = FakeScreen(24, 80)
+    tui_mod._draw_all(screen, state.snapshot(), _visual_no_color(), None,
+                      False, 0, False,
+                      {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                       "breath": 0.5, "flash": False, "sweep": None,
+                       "history": ()})
+    assert not any("recent failures" in t for _, _, t in _all_calls(screen))
+
+
+def test_log_panel_only_tall_terminals(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    vis = _visual_no_color()
+    frame = {"mode": "running", "phase": 0.1, "thin_phase": 0.4, "breath": 0.5,
+             "flash": False, "sweep": None, "history": ()}
+    small = FakeScreen(24, 80)
+    tui_mod._draw_all(small, state, vis, None, True, 0, False, frame)
+    assert not any(
+        "log" in t and "\u256d" in t for _, _, t in _all_calls(small))
+    tall = FakeScreen(32, 100)
+    tui_mod._draw_all(tall, state, vis, None, True, 0, False, frame)
+    assert any(
+        "log" in t and "\u256d" in t for _, _, t in _all_calls(tall))
+
+
+def test_overall_line2_braille_graph(monkeypatch):
+    import time as time_mod
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    win = FakeScreen(2, 100)
+    now = time_mod.monotonic()
+    frame = {"mode": "running", "phase": 0.1, "thin_phase": 0.4, "breath": 0.5,
+             "flash": False, "sweep": None,
+             "history": tuple((now - i, i * 1000) for i in range(60))}
+    tui_mod._draw_overall(win, state, vis_ := _visual_no_color(), frame)
+    row2 = " ".join(t for y, _, t in win.addstr_calls if y == 1)
+    assert "tracks" in row2 and "ETA" in row2
+    assert "\u28c0" in row2 or any(0x2800 <= ord(c) <= 0x28FF for c in row2)
+
+
+def test_content_capped_at_140_columns(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    screen = FakeScreen(32, 300)
+    tui_mod._draw_all(screen, state, _visual_no_color(), None, False, 0, False,
+                      {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                       "breath": 0.5, "flash": False, "sweep": None,
+                       "history": ()})
+    for y, x, t in _all_calls(screen):
+        assert tui_mod.tg.display_width(t) <= 140

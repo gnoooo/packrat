@@ -74,6 +74,7 @@ GLYPHS: dict[str, dict[str, object]] = {
         "spark": "▁▂▃▄▅▆▇█",
         "play": "▸", "done": "✓", "fail": "✗", "note": "♪",
         "dot": "●", "dot_off": "○", "pause": "‖", "ellipsis": "...", "diamond": "◆",
+        "clock": "⏱", "brain": "⠿",
     },
     "ascii": {
         "bar_fill": "#",
@@ -87,6 +88,7 @@ GLYPHS: dict[str, dict[str, object]] = {
         "spark": "._-~=*#",
         "play": ">", "done": "+", "fail": "x", "note": "~",
         "dot": "*", "dot_off": "o", "pause": "||", "ellipsis": "...", "diamond": "+",
+        "clock": "T", "brain": ".",
     },
 }
 
@@ -178,6 +180,62 @@ def sparkline(g: dict, samples: list[float], width: int) -> str:
     return "".join(
         levels[min(len(levels) - 1, int(v / peak * (len(levels) - 1)))] for v in cells
     )
+
+
+# --- braille throughput graph (2x4 dots per cell) ---------------------------
+
+
+_BR_LEFT = (0x01, 0x02, 0x04, 0x40)   # dots 1,2,3,7  top..bottom
+_BR_RIGHT = (0x08, 0x10, 0x20, 0x80)  # dots 4,5,6,8  top..bottom
+_BRAILLE_BASE = 0x2800
+
+
+def _braille_char(dots: int) -> str:
+    return chr(_BRAILLE_BASE + (dots & 0xFF))
+
+
+def braille_graph(samples: list[float], width: int) -> str:
+    """Throughput graph, 2 samples per cell over 4 braille rows. All-zero
+    or empty input is a FLAT baseline (both bottom dots), never a ramp."
+    """
+    width = max(1, int(width))
+    if not samples or max(samples) <= 0:
+        return _braille_char(0x40 | 0x80) * width
+    peak = max(samples)
+    out = []
+    for j in range(width):
+        dots = 0
+        for bits, col in ((_BR_LEFT, 0), (_BR_RIGHT, 1)):
+            idx = j * 2 + col
+            val = samples[idx] if idx < len(samples) else 0.0
+            if val <= 0:
+                continue
+            level = max(1, min(8, int(round(val / peak * 8))))
+            filled = max(1, (level * 4 + 3) // 8)
+            for r in range(4):
+                if 4 - r <= filled:  # rows fill bottom-up
+                    dots |= bits[r]
+        out.append(_braille_char(dots or 0xC0))
+    return "".join(out)
+
+
+def rates_60s(history, now: float) -> float | None:
+    """Bytes-per-second over the last ~60 s of (ts, bytes) history."""
+    old = now - 60.0
+    older = newer = None
+    for ts, val in history:
+        if ts <= old:
+            older = (ts, val)
+        else:
+            newer = (ts, val)
+            break
+    if newer is None or older is None:
+        return None
+    dt = newer[0] - older[0]
+    if dt < 1.0:
+        return None
+    rate = (newer[1] - older[1]) / dt
+    return rate if rate > 0 else None
 
 
 # --- panels -----------------------------------------------------------------
