@@ -9,6 +9,7 @@ from __future__ import annotations
 import curses
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -60,9 +61,19 @@ def _render_bar_ascii(width: int, percent: float) -> str:
     return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_RUN_SPACES_RE = re.compile(r" {2,}")
+
+
+def _clean(text: str) -> str:
+    """Control chars → space, collapsed runs, stripped ends (curses-safe)."""
+    text = _CTRL_CHARS_RE.sub(" ", str(text))
+    return _RUN_SPACES_RE.sub(" ", text).strip()
+
+
 def truncate(text: str, width: int) -> str:
-    """Redact and cut to a display width, ellipsis when it fits."""
-    text = redact(str(text))
+    """Sanitize, redact and cut to a display width, ellipsis when needed."""
+    text = redact(_clean(str(text)))
     if width <= 3:
         return text[: width]
     if tg.display_width(text) <= width:
@@ -374,6 +385,57 @@ def _spark_rates(history: tuple[tuple[float, int], ...]) -> list[float]:
 # --- panels -----------------------------------------------------------------
 
 
+def _row_borders(win, y: int, vis: Visual) -> None:
+    """Left and right '│' of one content row (no padding decisions)."""
+    _, w = win.getmaxyx()
+    if w < 2:
+        return
+    _safe_addstr(win, y, 0, vis.g.get("v", "|"), 0)
+    _safe_addstr(win, y, w - 1, vis.g.get("v", "|"), 0)
+
+
+def _panel_row(win, y: int, text: str, vis: Visual, attr: int = 0,
+               bold: bool = False) -> None:
+    """'│' + padded content + '│' padded to the exact inner width."""
+    h, w = win.getmaxyx()
+    if h < 3 or w < 4 or y < 1 or y > h - 2:
+        return
+    if bold:
+        attr = attr | curses.A_BOLD
+    body = truncate(text, max(0, w - 4))
+    pad = " " * max(0, w - 2 - tg.display_width(body) - 1)
+    _safe_addstr(win, y, 0, vis.g.get("v", "|"), 0)
+    _safe_addstr(win, y, 1, " " + body + pad, attr)
+    _safe_addstr(win, y, w - 1, vis.g.get("v", "|"), 0)
+
+
+def _right_border(win, y: int, vis: Visual) -> None:
+    """Right '│' for rows that themed lines draw themselves."""
+    h, w = win.getmaxyx()
+    if h < 1 or w < 2 or y < 0 or y >= h:
+        return
+    _safe_addstr(win, y, w - 1, vis.g.get("v", "|"), 0)
+
+
+def _throughput_graph(frame: dict, avail: int) -> str:
+    """Braille deltas of the last minute, or '' when there is no room."""
+    if avail < 8:
+        return ""
+    graph_w = min(40, avail)
+    hist = frame.get("history") or ()
+    now = time.monotonic()
+    # ~2 samples/cell over the last minute, per-second granularity
+    per_bucket = max(1, int(60.0 / max(1, graph_w * 2)))
+    buckets: list[float] = []
+    for i in range(graph_w * 2):
+        start = now - (graph_w * 2 - i) * per_bucket
+        vals = [v for ts, v in hist if start < ts <= start + per_bucket]
+        buckets.append(vals[-1] if vals else 0.0)
+    deltas = [max(0.0, buckets[i] - buckets[i - 1]) if i else 0.0
+              for i in range(len(buckets))]
+    return tg.braille_graph(deltas, graph_w)
+
+
 def _draw_header(win, snap: State, vis: Visual) -> None:
     """Full-width header band: '♪ ytm-offline › <mode>' left, status badge
     (own color) + elapsed on the right, every cell covered."""
@@ -392,7 +454,7 @@ def _draw_header(win, snap: State, vis: Visual) -> None:
     right = f" {g.get('dot', '*')} {status}  {g.get('clock', '~')} {format_duration(snap.elapsed_seconds)} "
     right_w = tg.display_width(right)
     left = truncate(f" {g.get('note', '~')} ytm-offline › {snap.mode}", max(4, w - right_w - 1))
-    pad = max(0, w - 1 - tg.display_width(left) - right_w)
+    pad = max(0, w - tg.display_width(left) - right_w)
     _safe_addstr(win, 0, 0, left + " " * pad, curses.A_BOLD)
     x = w - 1 - right_w
     if x > tg.display_width(left):
@@ -401,51 +463,43 @@ def _draw_header(win, snap: State, vis: Visual) -> None:
 
 def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
+    _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "overall"), curses.A_BOLD)
     if snap.total <= 0:
-        _safe_addstr(win, 0, 0, " overall: resolving tracks...", curses.A_BOLD)
+        _panel_row(win, 1, "resolving tracks...", vis, bold=True)
+        _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
         return
-    bar_w = max(10, min(100, w - 40))
     pct = snap.done / snap.total * 100
     eta = snap.eta_seconds()
     eta_s = "…" if eta is None else format_duration(eta)
-    prefix = f" {snap.done}/{snap.total} "
+    # Line 1: wave bar + percent only (bug 3: no track count here).
+    bar_w = max(10, min(100, w - 26))
     body = tg.bar(vis.g, bar_w, pct)
-    suffix = f" {pct:5.1f}%  ETA {eta_s}"
-    _draw_themed_line(win, 0, prefix, body, suffix, vis, frame["mode"], frame["phase"],
-                      frame["breath"], frame.get("sweep"), curses.A_BOLD)
-    base = f" {snap.done}/{snap.total} tracks · {format_bytes(snap.total_bytes_downloaded)} / {format_bytes(snap.total_est_bytes)} · ETA {eta_s}"
+    suffix = f" {pct:5.1f}% "
+    _draw_themed_line(win, 1, "│ ", body, suffix, vis, frame["mode"], frame["phase"],
+                      frame["breath"], frame.get("sweep"), 0)
+    _right_border(win, 1, vis)
+    # Line 2: tracks · bytes · ETA · speed + braille graph.
+    base = (f"{snap.done}/{snap.total} tracks · "
+            f"{format_bytes(snap.total_bytes_downloaded)} / "
+            f"{format_bytes(snap.total_est_bytes)} · ETA {eta_s}")
     if snap.max_size_bytes:
         base += f" · max {format_bytes(snap.max_size_bytes)}"
     rate = tg.rates_60s(frame.get("history") or (), time.monotonic())
     if rate:
         base += f" · {format_bytes(rate)}/s"
-    line = base
-    avail = w - 1 - tg.display_width(base) - 2
-    if avail >= 8:
-        graph_w = min(40, avail)
-        samples: list[float] = []
-        hist = frame.get("history") or ()
-        now = time.monotonic()
-        over = [v for ts, v in hist if now - ts <= 60.0]
-        # ~2 samples/cell over the last minute, per-second granularity
-        per_bucket = max(1, int(60.0 / max(1, graph_w * 2)))
-        buckets: list[float] = []
-        for i in range(graph_w * 2):
-            start = now - (graph_w * 2 - i) * per_bucket
-            vals = [v for ts, v in hist if start < ts <= start + per_bucket]
-            buckets.append(vals[-1] if vals else 0.0)
-        deltas = [max(0.0, buckets[i] - buckets[i - 1]) if i else 0.0
-                  for i in range(len(buckets))]
-        samples = deltas
-        line += "  " + tg.braille_graph(samples, graph_w)
-    _safe_addstr(win, 1, 0, tg.truncate_width(line, w - 1), vis.colors.get("info", 0))
+    avail = w - 4 - tg.display_width(base) - 2
+    graph = _throughput_graph(frame, avail)
+    if graph:
+        base += "  " + graph
+    _panel_row(win, 2, base, vis, attr=vis.colors.get("info", 0))
+    _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
 def _empty_border_rows(win, h: int, written: set[int], vis: Visual) -> None:
-    """Panels that may be content-empty still get complete left borders."""
+    """Panels that may be content-empty still get complete borders."""
     for y in range(1, h - 1):
         if y not in written:
-            _safe_addstr(win, y, 0, vis.g.get("v", "|"), 0)
+            _panel_row(win, y, "", vis)
 
 
 def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
@@ -453,12 +507,11 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
     cur = snap.current
     _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "now playing"),
                  vis.colors.get("info", 0) | curses.A_BOLD)
-    written = {1, 2, 3, 4}
+    written: set[int] = set()
     if cur.video_id:
-        _safe_addstr(win, 1, 0, f"│ {truncate(cur.title, w - 4)}", curses.A_BOLD)
-        _safe_addstr(win, 2, 0, f"│ {truncate(cur.artist + ' - ' + cur.album, w - 4)}", 0)
-        _safe_addstr(win, 3, 0,
-                     f"│ source: {truncate(cur.source, max(8, w // 3))}  |  stage: {cur.stage}", 0)
+        _panel_row(win, 1, cur.title, vis, bold=True)
+        _panel_row(win, 2, f"{cur.artist} - {cur.album}", vis)
+        _panel_row(win, 3, f"source: {cur.source}  |  stage: {cur.stage}", vis)
         bar_w = max(10, w - 40)
         pct = max(0.0, min(100.0, cur.percent))
         eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
@@ -471,16 +524,20 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
         _draw_themed_line(win, 4, f"│ {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
                           vis, frame["mode"], frame["thin_phase"], frame["breath"],
                           frame.get("sweep"), curses.A_BOLD, thin=True)
-        written = set()
+        _right_border(win, 4, vis)
+        written = {1, 2, 3, 4}
     elif snap.status.startswith("WAITING"):
         # Between tracks: show what finished and what is up next (bug d).
-        finished = truncate(snap.last_finished, max(10, w - 10))
-        _safe_addstr(win, 1, 0, f"│ {vis.g.get('done', '+')} finished: {finished}", 0)
+        _panel_row(win, 1, f"{vis.g.get('done', '+')} finished: {snap.last_finished}", vis)
         if snap.next_title:
-            nxt = truncate(snap.next_title, max(10, w - 14))
-            _safe_addstr(win, 2, 0,
-                         f"│ {vis.g.get('play', '>')} next: {nxt}", curses.A_BOLD)
-        written = {1, 2}
+            _panel_row(win, 2,
+                       f"{vis.g.get('play', '>')} next: {snap.next_title}", vis, bold=True)
+            written = {1, 2}
+        else:
+            written = {1}
+    else:
+        _panel_row(win, 1, "waiting for the first track...", vis)
+        written = {1}
     _empty_border_rows(win, h, written, vis)
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
@@ -492,26 +549,19 @@ def _draw_counters(win, snap: State, vis: Visual, frame: dict) -> None:
     _safe_addstr(win, 0, 0, tg.panel_top(vis.g, w, "status"),
                  (vis.colors.get("error", 0) if frame.get("flash")
                   else vis.colors.get("info", 0)) | curses.A_BOLD)
-    chips = [
-        f"{g.get('done')} {snap.downloaded} downloaded",
-        f"{g.get('dot_off')} {snap.archived} archived",
-        f"{g.get('fail')} {snap.failed} failed",
-        f"{g.get('pause', '|')} {snap.retries} retries",
-    ]
-    if snap.skipped_size:
-        chips.append(f"{g.get('ellipsis', '..')} {snap.skipped_size} skipped-size")
-    _safe_addstr(win, 1, 0, f"│ {'   '.join(chips)}", flash_attr)
+    chips_text, gauge = _counters_text(snap, vis)
     c = snap.consecutive_retryable
-    dots = (
-        g.get("dot", "*") * min(3, c) + g.get("dot_off", "o") * max(0, 3 - c)
-    )
     if c >= 3:
-        attr1 = vis.colors.get("error", 0) | curses.A_BOLD
+        gauge_attr = vis.colors.get("error", 0) | curses.A_BOLD
     elif c >= 1:
-        attr1 = vis.colors.get("warning", 0) | curses.A_BOLD
+        gauge_attr = vis.colors.get("warning", 0) | curses.A_BOLD
     else:
-        attr1 = vis.colors.get("success", 0)
-    _safe_addstr(win, 2, 0, f"│ errors {dots} {c}/3", attr1)
+        gauge_attr = vis.colors.get("success", 0)
+    if (tg.display_width(chips_text) + 3 + tg.display_width(gauge)) <= w - 4:
+        _panel_row(win, 1, f"{chips_text}   {gauge}", vis, attr=flash_attr)
+    else:
+        _panel_row(win, 1, chips_text, vis, attr=flash_attr)
+        _panel_row(win, 2, gauge, vis, attr=gauge_attr)
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
@@ -524,7 +574,7 @@ def _draw_failures(win, snap: State, vis: Visual, frame: dict) -> None:
     for fail in reversed(list(snap.recent_failures)[-(max(0, h - 2)):]):
         title = truncate(str(fail.get("title", "")), half)
         reason = truncate(str(fail.get("reason", "")), max(4, half - 4))
-        _safe_addstr(win, y, 0, f"│ {title}: {reason}", vis.colors.get("error", 0))
+        _panel_row(win, y, f"{title}: {reason}", vis, attr=vis.colors.get("error", 0))
         y += 1
         if y >= h - 1:
             break
@@ -550,7 +600,7 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
     visible = max(0, h - 2)
     shown = lines[-visible:]
     for i, line in enumerate(shown):
-        _safe_addstr(win, i + 1, 0, "│ " + truncate(line, w - 4), 0)
+        _panel_row(win, i + 1, line, vis)
     _empty_border_rows(win, h, set(range(1, 1 + len(shown))), vis)
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
@@ -558,7 +608,7 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
 def _draw_footer(win, vis: Visual) -> None:
     h, w = win.getmaxyx()
     help_text = " p pause/resume  s skip  q quit  l log  a anim  t theme  ? help "
-    _safe_addstr(win, 0, 0, help_text.ljust(max(0, w - 1)), curses.A_REVERSE)
+    _safe_addstr(win, 0, 0, help_text.ljust(w), curses.A_REVERSE)
 
 
 def _draw_help(stdscr, vis: Visual) -> None:
@@ -591,47 +641,48 @@ def _draw_help(stdscr, vis: Visual) -> None:
 # --- layout + frame ---------------------------------------------------------
 
 
-def _layout(stdscr, show_log: bool, failed: int = 0):
-    h, w = stdscr.getmaxyx()
-    header_h = 1
-    overall_h = 2
-    current_h = 6
-    counters_h = 4
-    footer_h = 1
-    remaining = h - (header_h + overall_h + current_h + counters_h + footer_h)
-    if remaining < 6:
-        # Too small; just draw header + footer and a warning.
-        return (None, None, None, None, None, None, None)
+def _counters_text(snap: State, vis: Visual) -> tuple[str, str]:
+    """(chips, gauge) line content shared by the drawer and the sizer."""
+    g = vis.g
+    chips = [
+        f"{g.get('done')} {snap.downloaded} downloaded",
+        f"{g.get('dot_off')} {snap.archived} archived",
+        f"{g.get('fail')} {snap.failed} failed",
+        f"{g.get('pause', '|')} {snap.retries} retries",
+    ]
+    if snap.skipped_size:
+        chips.append(f"{g.get('ellipsis', '..')} {snap.skipped_size} skipped-size")
+    c = snap.consecutive_retryable
+    dots = (
+        g.get("dot", "*") * min(3, c) + g.get("dot_off", "o") * max(0, 3 - c)
+    )
+    return "   ".join(chips), f"errors {dots} {c}/3"
 
-    # Failures panel only carries content when tracks actually failed;
-    # the log fills the remaining height, but only on tall terminals.
-    show_log = show_log and h >= 30
-    if failed <= 0:
-        failures_h = 0
-    elif show_log:
-        failures_h = max(3, remaining // 4)
-    else:
-        failures_h = remaining
-    if show_log:
-        log_h = remaining - failures_h
-    else:
-        log_h = 0
 
-    y = 0
-    header = stdscr.derwin(header_h, w, y, 0)
-    y += header_h
-    overall = stdscr.derwin(overall_h, w, y, 0)
-    y += overall_h
-    current = stdscr.derwin(current_h, w, y, 0)
-    y += current_h
-    counters = stdscr.derwin(counters_h, w, y, 0)
-    y += counters_h
-    failures = stdscr.derwin(failures_h, w, y, 0) if failures_h else None
-    y += failures_h
-    log = stdscr.derwin(log_h, w, y, 0) if log_h else None
-    y += log_h
-    footer = stdscr.derwin(footer_h, w, y, 0)
-    return header, overall, current, counters, failures, log, footer
+def _counters_height(snap: State, w: int, vis: Visual) -> int:
+    chips, gauge = _counters_text(snap, vis)
+    if tg.display_width(chips) + 3 + tg.display_width(gauge) <= w - 4:
+        return 3
+    return 4
+
+
+def _panel_heights(snap: State, w: int, vis: Visual) -> list[tuple[str, int]]:
+    heights: list[tuple[str, int]] = [
+        ("overall", 3 if snap.total <= 0 else 4),
+    ]
+    cur = snap.current
+    if cur.video_id:
+        cur_rows = 4
+    elif snap.status.startswith("WAITING"):
+        cur_rows = 1 + (1 if snap.next_title else 0)
+    else:
+        cur_rows = 1
+    heights.append(("current", cur_rows + 2))
+    heights.append(("counters", _counters_height(snap, w, vis)))
+    if snap.failed > 0:
+        heights.append(
+            ("failures", min(5, len(snap.recent_failures)) + 2))
+    return heights
 
 
 def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
@@ -643,30 +694,56 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
         stdscr.noutrefresh()
         curses.doupdate()
         return
-    # Content is capped at 140 columns and centered (read-me note).
+    # Header/footer bands run the FULL terminal width; body is centered.
+    _draw_header(stdscr, snap, vis)
+    _draw_footer(stdscr, vis)
+    body_h = h - 2
     cw = min(w, 140)
     x0 = max(0, (w - cw) // 2)
-    root = stdscr if cw == w else stdscr.derwin(h, cw, 0, x0)
-    header, overall, current, counters, failures, log, footer = _layout(
-        root, show_log, failed=snap.failed,
-    )
-    if header is None:
-        _safe_addstr(stdscr, 0, 0, "terminal too small for layout", curses.A_BOLD)
-        stdscr.noutrefresh()
-        curses.doupdate()
-        return
-    _draw_header(header, snap, vis)
-    _draw_overall(overall, snap, vis, frame)
-    _draw_current(current, snap, vis, frame)
-    _draw_counters(counters, snap, vis, frame)
-    if failures:
-        _draw_failures(failures, snap, vis, frame)
-    if log:
-        _draw_log(log, snap, vis, ring_handler, log_offset)
-    _draw_footer(footer, vis)
-    for win in (header, overall, current, counters, failures, log, footer):
-        if win:
-            win.noutrefresh()
+    body = stdscr.derwin(body_h, cw, 1, x0)
+    heights = _panel_heights(snap, cw, vis)
+    compact = h < 30
+    gaps = 0 if compact else 1
+    base_row = sum(v for _, v in heights) + gaps * max(0, len(heights) - 1)
+    log_shown = show_log and h >= 30
+    log_h = 0
+    if log_shown:
+        log_h = body_h - base_row - gaps
+        if log_h < 3:
+            log_shown = False
+            log_h = 0
+    if log_shown or compact:
+        top_margin = 0
+    else:
+        # Vertical centering: 40% of the free space goes above the body.
+        free = max(0, body_h - base_row - 2)
+        top_margin = round(free * 0.4)
+    y = top_margin
+    drawers = {
+        "overall": _draw_overall,
+        "current": _draw_current,
+        "counters": _draw_counters,
+        "failures": _draw_failures,
+    }
+    shown: list = []
+    for name, ph in heights:
+        if y + ph > body_h:
+            break  # never drop content for spacing alone; clip the tail
+        win = body.derwin(ph, cw, y, 0)
+        drawers[name](win, snap, vis, frame)
+        shown.append(win)
+        y += ph + gaps
+    if log_shown:
+        log_h = body_h - y
+        if log_h >= 3:
+            win = body.derwin(log_h, cw, y, 0)
+            _draw_log(win, snap, vis, ring_handler, log_offset)
+            shown.append(win)
+        else:
+            log_shown = False
+    for win in shown:
+        win.noutrefresh()
+    body.noutrefresh()
     if help_mode:
         _draw_help(stdscr, vis)
     stdscr.noutrefresh()

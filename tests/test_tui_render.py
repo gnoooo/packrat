@@ -197,6 +197,10 @@ def test_panels_have_complete_frames(monkeypatch):
                        "breath": 0.5, "flash": False, "sweep": None,
                        "history": ()})
     framed = [c for c in screen.children if c._h >= 3]
+    for child in list(screen.children):
+        framed.extend(c for c in child.children if c._h >= 3)
+    # the body derwin itself has no drawn borders — panels only
+    framed = [c for c in framed if c.addstr_calls]
     assert len(framed) >= 3, f"expected several framed panels, {len(framed)}"
     for child in framed:
         h = child._h
@@ -485,13 +489,13 @@ def test_overall_line2_braille_graph(monkeypatch):
     import time as time_mod
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     state = _fake_state().snapshot()
-    win = FakeScreen(2, 100)
+    win = FakeScreen(4, 100)
     now = time_mod.monotonic()
     frame = {"mode": "running", "phase": 0.1, "thin_phase": 0.4, "breath": 0.5,
              "flash": False, "sweep": None,
              "history": tuple((now - i, i * 1000) for i in range(60))}
     tui_mod._draw_overall(win, state, vis_ := _visual_no_color(), frame)
-    row2 = " ".join(t for y, _, t in win.addstr_calls if y == 1)
+    row2 = " ".join(t for y, _, t in win.addstr_calls if y == 2)
     assert "tracks" in row2 and "ETA" in row2
     assert "\u28c0" in row2 or any(0x2800 <= ord(c) <= 0x28FF for c in row2)
 
@@ -504,8 +508,9 @@ def test_content_capped_at_140_columns(monkeypatch):
                       {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
                        "breath": 0.5, "flash": False, "sweep": None,
                        "history": ()})
-    for y, x, t in _all_calls(screen):
-        assert tui_mod.tg.display_width(t) <= 140
+    for win in screen.children:
+        for y, x, t in _all_calls(win):
+            assert tui_mod.tg.display_width(t) <= 140
 
 def test_every_glyph_is_one_display_cell():
     for key, table in tg.GLYPHS.items():
