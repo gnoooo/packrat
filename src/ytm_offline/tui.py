@@ -21,8 +21,9 @@ from ytm_offline import tui_glyphs as tg
 from ytm_offline import tui_theme as tt
 from ytm_offline.control import Control
 from ytm_offline.events import Event, State
-from ytm_offline.logging_config import (RING_CAPACITY, RingBufferHandler,  # noqa: F401 (re-exported)
-                                        redact, setup_logging)
+from ytm_offline.logging_config import (LOG_DIR, RING_CAPACITY,  # noqa: F401
+                                        RingBufferHandler, redact,  # noqa: F401
+                                        setup_logging)
 
 FANCY = tg.GLYPHS["fancy"]
 
@@ -917,8 +918,7 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
         set_visual_options(no_color=no_color, palette=palette)
     else:
         set_visual_options(palette=palette)
-    os.makedirs("logs", exist_ok=True)
-    ring_handler = setup_logging(tui_active=True)
+    ring_handler = setup_logging(tui_active=True)  # creates LOG_DIR itself
     state = State(mode=mode)
     control = Control()
     result_container: dict[str, Any] = {"return_value": None, "exception": None}
@@ -958,7 +958,8 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
 
 def _latest_log_path() -> str:
     import glob
-    paths = sorted(glob.glob("logs/ytm-offline-*.log"))
+
+    paths = sorted(glob.glob(str(LOG_DIR / "ytm-offline-*.log")))
     return paths[-1] if paths else "logs/"
 
 

@@ -33,6 +33,7 @@ class RedactFilter(logging.Filter):
 
 
 RING_CAPACITY = 1000
+LOG_DIR = pathlib.Path("logs")
 
 
 class RingBufferHandler(logging.Handler):
@@ -72,7 +73,7 @@ def setup_logging(
     - Otherwise, also echoes to stderr.
     """
     if log_dir is None:
-        log_dir = pathlib.Path("logs")
+        log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log_file = log_dir / f"ytm-offline-{ts}.log"
