@@ -904,13 +904,17 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
 
 
 def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
-            ascii_mode: bool = False, no_anim: bool = False, no_color: bool = False,
-            palette: str = "auto") -> int:
+            ascii_mode: bool = False, no_anim: bool = False,
+            no_color: bool | None = None, palette: str = "auto") -> int:
     """Run worker under the TUI; plain logging fallback when stdout is no TTY."""
     if not supports_tui():
         print("stdout is not a TTY; falling back to plain logging", file=sys.stderr)
         return worker_func(**worker_kwargs)
-    set_visual_options(palette=palette)
+    if no_color is not None:
+        # Explicit no_color wins; None leaves the global (set by main()) intact.
+        set_visual_options(no_color=no_color, palette=palette)
+    else:
+        set_visual_options(palette=palette)
     os.makedirs("logs", exist_ok=True)
     ring_handler = setup_logging(tui_active=True)
     state = State(mode=mode)
