@@ -44,6 +44,7 @@ class FakeScreen:
     def __init__(self, h: int, w: int) -> None:
         self._h, self._w = h, w
         self.addstr_calls: list[tuple[int, int, str]] = []
+        self.attr_calls: list[tuple[int, int, str, int]] = []
         self.children: list[FakeScreen] = []
 
     def getmaxyx(self):
@@ -62,6 +63,7 @@ class FakeScreen:
 
     def addstr(self, y, x, text, attr=0):
         self.addstr_calls.append((y, x, str(text)))
+        self.attr_calls.append((y, x, str(text), int(attr)))
 
 
 def _visual_no_color() -> tui_mod.Visual:
@@ -286,3 +288,115 @@ def test_empty_waiting_panel_keeps_frame():
     tui_mod._draw_current(win, snap, _visual_no_color(), frame)
     texts = [t for _, _, t in win.addstr_calls]
     assert texts[0].startswith(g["tl"]) and texts[-1].startswith(g["bl"])
+
+
+# --- space-background bars (gradient without █ seams) ------------------------
+
+
+def _visual_bar_tables() -> "tui_mod.Visual":
+    """Colored-tier visual with hand-made bar pair tables (no real curses)."""
+    theme = tt.THEMES["ocean"]
+    pal = tt.Palette(theme, tui_theme_tier())
+    bar_bg = {p: 100 + p for p in range(len(pal.gradient_exact))}
+    bar_edge = {p: 200 + p for p in range(len(pal.gradient_exact))}
+    return tui_mod.Visual(
+        tg.GLYPHS["fancy"], pal, {k: 0 for k in tt.COLOR_KEYS},
+        lambda idx, bold=False: 0, False, tui_theme_tier(),
+        bar_bg=bar_bg, bar_edge=bar_edge, track_attr=50,
+    )
+
+
+def tui_theme_tier() -> str:
+    return tt.TIER_FIXED
+
+
+def _win(w: int = 140):
+    win = FakeScreen(3, w)
+    return win
+
+
+def test_running_bar_is_spaces_with_crest_attrs():
+    vis = _visual_bar_tables()
+    body = tg.bar(vis.g, 24, 43.0)  # forces a partial edge glyph (frac 3/8)
+    win = _win()
+    tui_mod._draw_themed_line(win, 1, " 3/10 ", body, " 43.0%", vis,
+                              "running", 0.13, 0.5, None)
+    texts = [(t, a) for _, _, t, a in win.attr_calls]
+    assert texts[0] == (" 3/10 ", 0)     # prefix drawn plain
+    bar = "".join(t for t, _a in texts[1:-1])
+    # fill cells become SPACES; the partial edge stays a 1/8 glyph
+    assert "\u2588" not in bar
+    assert tg.GLYPHS["fancy"]["bar_edge"][2] in bar  # edge at 43% is the 3/8 glyph
+    # track run is one grouped addstr of spaces with the track attr
+    track_runs = [(t, a) for t, a in texts if a == 50]
+    assert len(track_runs) == 1
+    assert track_runs[0][0].strip(" ") == ""  # spaces only
+    # suffix keeps base_attr (0 here)
+    assert texts[-1][0] == " 43.0%" and texts[-1][1] == 0
+    # running uses the crest: several distinct gradient bg attrs across fills
+    bg_attrs = {a for t, a in texts if 100 <= a < 200}
+    assert len(bg_attrs) >= 3
+
+
+def test_waiting_bar_is_static_gradient():
+    vis = _visual_bar_tables()
+    body = tg.bar(vis.g, 24, 41.7)
+    win = _win()
+    tui_mod._draw_themed_line(win, 1, "", body, "", vis,
+                              "waiting", 0.0, 0.5, None)
+    bg_attrs = [(a, t) for _, _, t, a in win.attr_calls if 100 <= a < 200]
+    # clickable data: positions monotonically non-decreasing across...
+    spaced = True
+    pos_list = [a - 100 for a, _ in bg_attrs]
+    assert spaced and all(b >= a for a, b in zip(pos_list, pos_list[1:]))
+
+
+def test_none_tier_bar_keeps_fill_chars():
+    vis = _visual_no_color()
+    body = tg.bar(vis.g, 10, 50.0)
+    win = _win()
+    tui_mod._draw_themed_line(win, 1, "", body, "", vis,
+                              "running", 0.13, 0.5, None)
+    texts = [t for _, _, t, _a in win.attr_calls]
+    assert "\u2588" in "".join(texts)
+
+
+def test_bar_pairs_fake_curses():
+    import types
+
+    calls: list[tuple] = []
+
+    class Cur:
+        COLOR_PAIRS = 256
+
+        def init_pair(self, n, fg, bg):
+            calls.append((n, fg, bg))
+
+        def color_pair(self, n):
+            return n * 10
+
+    cur = Cur()
+    grad = {p: 16 + p for p in range(24)}
+    bg, edge, track = tui_mod._make_bar_pairs(cur, grad, 232, 1)
+    assert len(bg) == 24 and len(edge) == 24 and track is not None
+    # 24 bg + 24 edge + 1 track = 49 pairs numbered 1..49
+    assert (calls[0]) == (1, 16, 16)          # bg: same grad fg+bg
+    assert (calls[1]) == (2, 16, 232)         # edge: fg grad, bg track
+    assert calls[48] == (49, 232, 232)        # track pair last
+    assert bg[0] == 10 and edge[0] == 20
+
+
+def test_bar_pairs_out_of_budget_fallback():
+    import types
+
+    class Cur:
+        COLOR_PAIRS = 3
+
+        def init_pair(self, n, fg, bg):
+            pass
+
+        def color_pair(self, n):
+            return n
+
+    bg, edge, track = tui_mod._make_bar_pairs(Cur(), {0: 16}, 232, 2)
+    assert bg == {} and edge == {} and track is None

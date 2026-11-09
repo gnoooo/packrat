@@ -348,7 +348,7 @@ def install_custom_rgb(
     rgbs: list[Rgb],
     static: dict[str, Rgb],
     *,
-    first_slot: int = 32,
+    first_slot: int = 32,  # FIRST_GRADIENT_SLOT; keep in sync with tui.py
     curses_mod=None,
     track_rgb: Rgb | None = None,
 ) -> tuple[dict[int, int], dict[str, int]]:

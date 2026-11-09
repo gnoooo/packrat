@@ -110,13 +110,20 @@ def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
 class Visual:
     """One theme+tier snapshot; built at start and on every theme switch."""
 
-    def __init__(self, glyphs, pal, colors, attr, no_anim: bool, tier: str) -> None:
+    def __init__(self, glyphs, pal, colors, attr, no_anim: bool, tier: str,
+                 bar_bg: dict | None = None, bar_edge: dict | None = None,
+                 track_attr: int | None = None) -> None:
         self.g = glyphs
         self.pal = pal
         self.colors = colors
         self.attr = attr
         self.no_anim = no_anim
         self.tier = tier
+        # Space-bar pair tables (pos -> attr); empty for basic/none tiers
+        # or when the pair budget ran out (bars then use the fill chars).
+        self.bar_bg = bar_bg or {}
+        self.bar_edge = bar_edge or {}
+        self.track_attr = track_attr
 
     def wave_attr(self, x: float, phase: float) -> int:
         idx, bold = self.pal.attr_for_intensity(tt.wave_intensity(x, phase))
@@ -125,6 +132,42 @@ class Visual:
     def breathe_attr(self, breath: float) -> int:
         idx, bold = self.pal.attr_for_intensity(breath)
         return self.attr(idx, bold) if idx >= 0 else 0
+
+
+def _make_bar_pairs(cur, grad_values: dict[int, int], track_value: int,
+                    first_pair: int) -> tuple[dict[int, int], dict[int, int], int | None]:
+    """Space-bar pair tables, built ONCE at startup.
+
+    Returns ({pos: bg_attr}, {pos: edge_attr}, track_attr) where bg pairs
+    (fg=grad, bg=grad) render the gradient as spaces, edge pairs
+    (fg=grad, bg=track) color the 1/8 partial cell, and the track pair
+    (fg=track, bg=track) fills the empty part. Returns ({}, {}, None)
+    when the pair budget (COLOR_PAIRS) is exhausted or init fails — the
+    renderer then falls back to the fill-char bar.
+    """
+    try:
+        budget = cur.COLOR_PAIRS
+    except Exception:
+        return {}, {}, None
+    steps = len(grad_values)
+    if steps == 0 or first_pair + 2 * steps > budget:
+        return {}, {}, None
+    bg: dict[int, int] = {}
+    edge: dict[int, int] = {}
+    n = first_pair
+    try:
+        for pos, grad in grad_values.items():
+            cur.init_pair(n, grad, grad)
+            bg[pos] = cur.color_pair(n)
+            n += 1
+            cur.init_pair(n, grad, track_value)
+            edge[pos] = cur.color_pair(n)
+            n += 1
+        cur.init_pair(n, track_value, track_value)
+        track_attr = cur.color_pair(n)
+    except cur.error:
+        return {}, {}, None
+    return bg, edge, track_attr
 
 
 def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> Visual:
@@ -153,6 +196,9 @@ def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> V
         return _cur.A_BOLD if bold else 0
 
     attr: Callable[[int, bool], int] = plain_attr
+    bar_bg: dict[int, int] = {}
+    bar_edge: dict[int, int] = {}
+    track_attr: int | None = None
     if tier != tt.TIER_NONE:
         try:
             _cur.start_color()
@@ -174,6 +220,20 @@ def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> V
                     k: (_cur.color_pair(p) if p >= 0 else 0)
                     for k, p in static_pairs.items()
                 }
+                # Gradient slots start at tt's first_slot (32, install order
+                # = rgb list); the track color got the last slot.
+                grad_slots = {
+                    pos: 32 + pos  # tt install order: gradient rgb slots first
+                    for pos in range(len(pal.gradient_rgb_list))
+                }
+                track = static_pairs.get(tt.TRACK_KEY)
+                first_free = (
+                    1 + len(pal.gradient_rgb_list) + len(static_pairs) - 1
+                )
+                if track is not None:
+                    bar_bg, bar_edge, track_attr = _make_bar_pairs(
+                        _cur, grad_slots, track, first_free,
+                    )
             else:
                 pairs = tt.activate(pal)
 
@@ -182,13 +242,26 @@ def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> V
                     return a | _cur.A_BOLD if bold else a
 
                 colors = {
-                    k: (attr(idx) if idx >= 0 else 0) for k, idx in pal.static.items()
+                    k: (_cur.color_pair(pairs[idx]) if idx >= 0 else 0)
+                    for k, idx in pal.static.items()
                 }
+                grad_idx = {
+                    pos: pal.gradient_exact[pos]
+                    for pos in range(len(pal.gradient_exact))
+                }
+                track = pal.track_idx
+                first_free = 1 + len(pairs)
+                if track is not None and track >= 0:
+                    bar_bg, bar_edge, track_attr = _make_bar_pairs(
+                        _cur, grad_idx, track, first_free,
+                    )
             attr = themed_attr
-        except _cur.error:
+        except (_cur.error, ValueError):
             attr = plain_attr
             colors = {k: 0 for k in tt.COLOR_KEYS}
-    return Visual(glyphs, pal, colors, attr, no_anim, tier)
+            bar_bg, bar_edge, track_attr = {}, {}, None
+    return Visual(glyphs, pal, colors, attr, no_anim, tier,
+                  bar_bg=bar_bg, bar_edge=bar_edge, track_attr=track_attr)
 
 
 def _cell_attr(vis: Visual, i: int, mode: str, phase: float, breath: float,
@@ -210,12 +283,70 @@ def _cell_attr(vis: Visual, i: int, mode: str, phase: float, breath: float,
     return vis.colors.get("error", 0)
 
 
+def _bar_position(vis: Visual, i: int, width: int, mode: str, now: float) -> int:
+    """Gradient position (0..steps-1) for bar cell i; running mode adds the
+    moving crest highlight."""
+    steps = len(vis.bar_bg)
+    if width <= 1:
+        t = 0.0
+    else:
+        t = i / (width - 1)
+    if mode == "running":
+        rgb = tt.blend(
+            vis.pal.theme.walk(t), tt.parse_hex(vis.pal.theme.highlight),
+            tt.CREST_BLEND * tt.crest(i, now, width),
+        )
+        return tt.nearest_position(rgb, vis.pal.theme, steps)
+    return round(t * (steps - 1))
+
+
+def _draw_space_bar(win, y: int, prefix: str, body: str, suffix: str,
+                    vis: Visual, mode: str, now: float,
+                    base_attr: int = 0) -> None:
+    """Gradient bar rendered as colored SPACES (no █ seams), grouped into
+    one addstr per same-attr run."""
+    g = vis.g
+    edge_set = set(str(g["bar_edge"]))
+    track_c = str(g["bar_track"])
+    fill_c = str(g["bar_fill"])
+    x = tg.display_width(prefix)
+    _safe_addstr(win, y, 0, prefix, base_attr)
+    runs: list[tuple[int, str]] = []
+    for i, ch in enumerate(body):
+        pos = _bar_position(vis, i, len(body), mode, now)
+        if ch != fill_c and (ch != track_c and ch not in edge_set):
+            # unexpected char: keep it as-is, uncolored
+            attr, text = 0, ch
+        elif ch == track_c:
+            attr = vis.track_attr if vis.track_attr is not None else 0
+            text = " "
+        elif ch in edge_set:
+            attr = vis.bar_edge.get(pos, vis.track_attr or 0)
+            text = ch
+        else:
+            attr = vis.bar_bg.get(pos, 0)
+            text = " "
+        if runs and runs[-1][0] == attr:
+            runs[-1] = (attr, runs[-1][1] + text)
+        else:
+            runs.append((attr, text))
+    for attr, text in runs:
+        _safe_addstr(win, y, x, text, attr)
+        x += tg.display_width(text)
+    _safe_addstr(win, y, x, suffix, base_attr)
+
+
 def _draw_themed_line(win, y: int, prefix: str, body: str, suffix: str, vis: Visual,
                       mode: str, phase: float, breath: float, sweep: float | None,
                       base_attr: int = 0, thin: bool = False) -> None:
     """prefix + per-cell colored body + suffix; bar cells get the wave."""
     if vis.tier == tt.TIER_NONE or not body:
         _safe_addstr(win, y, 0, prefix + body + suffix, base_attr)
+        return
+    if (not thin and vis.bar_bg and mode in ("running", "waiting")
+            and vis.track_attr is not None):
+        _draw_space_bar(win, y, prefix, body, suffix, vis, mode,
+                        time.monotonic(), base_attr)
         return
     _safe_addstr(win, y, 0, prefix, base_attr)
     fill = str(vis.g["thin_fill"] if thin else vis.g["bar_fill"])
