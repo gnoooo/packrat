@@ -153,6 +153,34 @@ def gradient_indices(
     return out
 
 
+def gradient_exact(
+    base: Rgb, highlight: Rgb, steps: int = GRADIENT_STEPS, *, stops: tuple[str, ...] | None = None
+) -> list[int]:
+    """Per-position xterm-256 indices (no dedupe) for space-background bars."""
+    out: list[int] = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        rgb = walk_stops(stops_rgb(stops), t) if stops else blend(base, highlight, t)
+        out.append(nearest_index(rgb))
+    return out
+
+
+TRACK_KEY = "__track__"  # static-map key carrying the custom track-color slot
+
+
+def nearest_position(
+    rgb: Rgb, theme: Theme, steps: int = GRADIENT_STEPS,
+) -> int:
+    """Nearest gradient POSITION (0..steps-1) to an arbitrary wave RGB."""
+    r = theme.walk  # multi-stop walk
+    best, best_d = 0, None
+    for i in range(steps):
+        d = _redmean(rgb, r(i / (steps - 1)))
+        if best_d is None or d < best_d:
+            best, best_d = i, d
+    return best
+
+
 # --- tiers ------------------------------------------------------------------
 
 TIER_CUSTOM = "custom"  # curses init_color with exact RGB
@@ -253,6 +281,8 @@ class Palette:
         if tier == TIER_NONE:
             self.gradient: list[int] = []
             self.gradient_rgb_list: list[Rgb] = []
+            self.gradient_exact: list[int] = []
+            self.track_idx = -1
             self.wave3: list[int] = []
             self.static: dict[str, int] = {k: -1 for k in COLOR_KEYS}
             return
@@ -262,11 +292,17 @@ class Palette:
             self.gradient_rgb_list = theme_gradient_rgb(theme)
             # positions 0..steps-1; install_custom_rgb maps position→pair
             self.gradient = list(range(len(self.gradient_rgb_list)))
+            self.gradient_exact: list[int] = []
         else:
             self.gradient_rgb_list = []
             self.gradient = gradient_indices(
                 base, highlight, stops=self.stops,
             )
+            # per-position indices, no consecutive dedupe (space-bg bars)
+            self.gradient_exact = gradient_exact(
+                base, highlight, stops=self.stops,
+            )
+        self.track_idx = nearest_index(parse_hex(theme.dim))
         self.static: dict[str, int] = {
             k: nearest_index(parse_hex(getattr(theme, k))) for k in COLOR_KEYS
         }
@@ -314,17 +350,24 @@ def install_custom_rgb(
     *,
     first_slot: int = 32,
     curses_mod=None,
+    track_rgb: Rgb | None = None,
 ) -> tuple[dict[int, int], dict[str, int]]:
     """init_color EXACT RGB into reserved color slots 32..255; one pair per
     color, allocated ONCE at startup.
 
-    Returns ({gradient_position: pair}, {static_key: pair}).
+    With ``track_rgb`` one extra slot holds the bar's empty-part color; its
+    COLOR NUMBER is returned as ``static[TRACK_KEY]`` (usable as a pair bg).
+    Returns ({gradient_position: pair}, {static_key or TRACK_KEY: pair-or-slot}).
     """
     cur = curses_mod
     if cur is None:
         import curses as cur
+    colors: list[tuple[Rgb, bool]] = [(rgb, False) for rgb in rgbs]
+    colors += [(rgb, True) for rgb in static.values()]
+    if track_rgb is not None:
+        colors.append((track_rgb, True))
     slots: list[int] = []
-    for rgb in [*rgbs, *static.values()]:
+    for rgb, _is_static in colors:
         if len(slots) + first_slot >= 256:
             raise ValueError("custom palette out of reserved slots 32..255")
         r, g, b = (max(0, min(255, c)) for c in rgb)
@@ -333,12 +376,15 @@ def install_custom_rgb(
         slots.append(s)
     grad_pairs: dict[int, int] = {}
     static_pairs: dict[str, int] = {}
+    keys = list(static) + ([TRACK_KEY] if track_rgb is not None else [])
     for number, slot in enumerate(slots, start=1):
-        cur.init_pair(number, slot, -1)
         if number <= len(rgbs):
+            cur.init_pair(number, slot, -1)
             grad_pairs[number - 1] = number
         else:
-            static_pairs[list(static)[number - 1 - len(rgbs)]] = number
+            idx = number - 1 - len(rgbs)
+            cur.init_pair(number, slot, -1)
+            static_pairs[keys[idx]] = slot if keys[idx] == TRACK_KEY else number
     return grad_pairs, static_pairs
 
 

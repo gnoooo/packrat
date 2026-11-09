@@ -256,3 +256,61 @@ def test_palette_none_static_map():
     assert p.gradient == [] and p.wave3 == []
     assert set(p.static) == set(tt.COLOR_KEYS)
     assert all(v == -1 for v in p.static.values())
+
+
+def _fake_curses_record():
+    class Fake:
+        def __init__(self):
+            self.calls = []
+        def init_color(self, *a):
+            self.calls.append(("color",) + a)
+        def init_pair(self, *a):
+            self.calls.append(("pair",) + a)
+    return Fake()
+
+
+def test_gradient_exact_no_dedupe():
+    from ytm_offline import tui_theme as tt
+    theme = tt.THEMES["ocean"]
+    ex = tt.gradient_exact(tt.parse_hex(theme.base), tt.parse_hex(theme.highlight),
+                           stops=theme.stops)
+    assert len(ex) == tt.GRADIENT_STEPS
+    assert ex[0] == tt.nearest_index(tt.parse_hex("#0b3d91"))
+    assert ex[-1] == 231  # xterm white
+
+
+def test_palette_track_idx_and_gradient_exact():
+    from ytm_offline import tui_theme as tt
+    pf = tt.Palette(tt.THEMES["ocean"], tt.TIER_FIXED)
+    expected = tt.nearest_index(tt.parse_hex("#666666"))
+    assert pf.track_idx == expected
+    assert len(pf.gradient_exact) == tt.GRADIENT_STEPS
+    pn = tt.Palette(tt.THEMES["ocean"], tt.TIER_NONE)
+    assert pn.track_idx == -1 and pn.gradient_exact == []
+
+
+def test_nearest_position_endpoints():
+    from ytm_offline import tui_theme as tt
+    theme = tt.THEMES["ocean"]
+    assert tt.nearest_position((0, 5, 60), theme) == 0
+    assert tt.nearest_position((255, 255, 255), theme) == tt.GRADIENT_STEPS - 1
+    mid = tt.nearest_position((0, 130, 160), theme)
+    assert 0 < mid < tt.GRADIENT_STEPS - 1
+
+
+def test_install_custom_rgb_track_slot():
+    from ytm_offline import tui_theme as tt
+    fake = _fake_curses_record()
+    theme = tt.THEMES["ocean"]
+    rgbs = tt.theme_gradient_rgb(theme)
+    static = {k: tt.parse_hex(getattr(theme, k)) for k in tt.COLOR_KEYS}
+    grad, stat = tt.install_custom_rgb(
+        rgbs, static, track_rgb=tt.parse_hex("#666666"), curses_mod=fake)
+    assert tt.TRACK_KEY in stat
+    slot_count = len(rgbs) + len(static) + 1
+    assert len(fake.calls) == slot_count * 2  # one color + one pair each
+    track_slot = stat[tt.TRACK_KEY]
+    assert track_slot == 32 + len(rgbs) + len(static)
+    # track slot init_color called with the gray on the 0-1000 scale
+    color_calls = [c for c in fake.calls if c[0] == "color"]
+    assert color_calls[-1] == ("color", track_slot, 400, 400, 400)
