@@ -456,7 +456,7 @@ def _draw_header(win, snap: State, vis: Visual) -> None:
     left = truncate(f" {g.get('note', '~')} ytm-offline › {snap.mode}", max(4, w - right_w - 1))
     pad = max(0, w - tg.display_width(left) - right_w)
     _safe_addstr(win, 0, 0, left + " " * pad, curses.A_BOLD)
-    x = w - 1 - right_w
+    x = max(0, w - right_w)
     if x > tg.display_width(left):
         _safe_addstr(win, 0, x, right, sattr | curses.A_BOLD)
 
@@ -605,10 +605,10 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
     _safe_addstr(win, h - 1, 0, tg.panel_bottom(vis.g, w), curses.A_BOLD)
 
 
-def _draw_footer(win, vis: Visual) -> None:
+def _draw_footer(win, vis: Visual, y: int = 0) -> None:
     h, w = win.getmaxyx()
     help_text = " p pause/resume  s skip  q quit  l log  a anim  t theme  ? help "
-    _safe_addstr(win, 0, 0, help_text.ljust(w), curses.A_REVERSE)
+    _safe_addstr(win, y, 0, help_text.ljust(w), curses.A_REVERSE)
 
 
 def _draw_help(stdscr, vis: Visual) -> None:
@@ -696,7 +696,7 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
         return
     # Header/footer bands run the FULL terminal width; body is centered.
     _draw_header(stdscr, snap, vis)
-    _draw_footer(stdscr, vis)
+    _draw_footer(stdscr, vis, h - 1)
     body_h = h - 2
     cw = min(w, 140)
     x0 = max(0, (w - cw) // 2)

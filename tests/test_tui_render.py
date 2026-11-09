@@ -51,13 +51,17 @@ class FakeScreen:
         return self._h, self._w
 
     def erase(self):
-        pass
+        """Stub-erase: drop everything drawn so a resize leaves no stale cells."""
+        self.addstr_calls.clear()
+        self.attr_calls.clear()
+        self.children.clear()
 
     def noutrefresh(self):
         pass
 
     def derwin(self, nh, nw, y, x):
         child = FakeScreen(nh, nw)
+        child._pos = (y, x)
         self.children.append(child)
         return child
 
@@ -550,3 +554,178 @@ def test_render_matrix_all_sizes(rows, cols, monkeypatch):
             assert 0 <= y < rows and x + tg.display_width(t) <= cols, (rows, cols, y, x, t)
         framed = [c for c in _desc(screen) if c._h >= 3]
         assert len(framed) >= 2, (rows, cols, mode)
+
+
+# --- layout spacing / centering / full-width bands (bug polish) ---------------
+
+
+def _frame_d(h: int, w: int, state, show_log: bool = False):
+    tests_frame = {
+        "mode": "running", "phase": 0.1, "thin_phase": 0.4, "breath": 0.5,
+        "flash": False, "sweep": None, "history": (),
+    }
+    screen = FakeScreen(h, w)
+    curses.doupdate = lambda: None
+    tui_mod._draw_all(screen, state, _visual_no_color(), None, show_log, 0,
+                      False, tests_frame)
+    return screen
+
+
+def _waiting_state(finished="First", nxt=""):
+    st = State("test")
+    st.apply(Event("start", {"total": 5, "total_est_bytes": 50000}))
+    st.apply(Event("track_done", {"status": "downloaded", "video_id": "v1",
+                                  "title": finished, "bytes": 1000}))
+    st.apply(Event("delay", {"status": "WAITING 7.0s", "remaining": 7.0,
+                             "finished": finished, "next": nxt}))
+    return st
+
+
+def _framed_panels(screen):
+    """Every panel sub-window (skip the 1-cell body wrapper and empties)."""
+    out = []
+    for body in screen.children:
+        for win in body.children:
+            if win.addstr_calls and win._h >= 3:
+                out.append(win)
+    return out
+
+
+def _rows(win):
+    rows: dict[int, str] = {}
+    for y, x, t in win.addstr_calls:
+        rows.setdefault(y, "")
+        if x == 0:
+            rows[y] = t if not rows[y] else rows[y]
+    return rows
+
+
+@pytest.mark.parametrize("size", [(24, 80), (30, 120), (50, 120), (60, 270)])
+def test_every_panel_row_has_both_borders(size):
+    h, w = size
+    state = _fake_state().snapshot()
+    screen = _frame_d(h, w, state)
+    g = tg.GLYPHS["fancy"]
+    for win in _framed_panels(screen):
+        rows = _rows(win)
+        gw = tg.display_width
+        # 4 corners of a complete frame
+        assert rows[0].startswith(g["tl"]) and rows[0].endswith(g["tr"])
+        assert rows[win._h - 1].startswith(g["bl"]) and \
+            rows[win._h - 1].endswith(g["br"])
+        for y in range(1, win._h - 1):
+            row = rows.get(y, "")
+            assert row.startswith(g["v"]), (y, row)
+            rights = [t for yy, x, t in win.addstr_calls
+                      if yy == y and x == win._w - 1]
+            assert rights and rights[0] == g["v"], (y, rights)
+            # no row wider than the panel/terminal
+            for yy, xx, t in win.addstr_calls:
+                if yy == y:
+                    assert gw(t) <= win._w - xx
+
+
+def test_sanitize_title_with_newline():
+    state = _fake_state()
+    state.apply(Event("track_start", {
+        "video_id": "v9", "title": "Broken\nTitle  with   tabs\t!",
+        "artist": "Art", "album": "Alb", "source": "artist:Art",
+        "stage": "downloading"}))
+    snap = state.snapshot()
+    screen = _frame_d(30, 120, snap)
+    texts = [t for _, _, t in _all_calls(screen)]
+    assert not any(any(ord(c) < 32 or ord(c) == 127 for c in t) for t in texts)
+    joined = "\n".join(texts)
+    assert "Broken" in joined and "Title with tabs !" in joined
+    # the broken title renders on one line, nothing blank after it
+    lines = [l for l in joined.splitlines() if "Broken" in l]
+    assert len(lines) == 1
+
+
+def test_overall_framed_single_count():
+    state = _fake_state().snapshot()  # 0/3
+    body = _frame_d(30, 120, state).children[0]
+    overall = body.children[0]
+    rows = _rows(overall)
+    assert rows[0].startswith(tg.GLYPHS["fancy"]["tl"])
+    assert rows[overall._h - 1].startswith(tg.GLYPHS["fancy"]["bl"])
+    all_text = " ".join(t for _, _, t in overall.addstr_calls)
+    assert all_text.count("2/3") == 1
+    assert "ETA" in all_text
+    bar_text = _rows(overall)[1]
+    assert bar_text.count(tg.GLYPHS["fancy"]["bar_fill"]) <= 100
+
+
+def test_header_and_footer_bands_full_width():
+    state = _fake_state().snapshot()
+    h, w = 30, 270
+    screen = _frame_d(h, w, state)
+    hdr = [t for y, x, t in screen.addstr_calls if y == 0]
+    ftr = [t for y, x, t in screen.addstr_calls if y == h - 1]
+    # header reaches to the right edge, footer starts at x=0 with full width
+    assert hdr
+    assert any(tui_mod.tg.display_width(left) >= 100 for left in hdr)
+    assert ftr and ftr[0].startswith(" p pause/resume")
+    assert any(x > 140 for y, x, t in screen.addstr_calls
+               if y in (0, h - 1))
+
+
+def test_centering_follows_formula():
+    state = _waiting_state().snapshot()
+    h, w = 50, 120
+    body = _frame_d(h, w, state).children[0]
+    vis = _visual_no_color()
+    heights = tui_mod._panel_heights(state, min(w, 140), vis)
+    body_h = h - 2
+    base = sum(v for _, v in heights) + (len(heights) - 1)
+    free = max(0, body_h - base - 2)
+    expected_top = round(free * 0.4)
+    first_y = body.children[0]._pos[0]
+    assert first_y == expected_top
+    assert first_y >= 1  # not stuck to the top
+    assert body.children[0]._pos[1] == 0
+    last = body.children[len(heights) - 1]
+    assert last._pos[0] + last._h <= body_h - 1
+
+
+def test_compact_has_no_blank_rows():
+    state = _fake_state().snapshot()
+    body = _frame_d(24, 80, state).children[0]
+    wins = body.children
+    ys = [win._pos[0] for win in wins]
+    heights = [win._h for win in wins]
+    for i in range(len(ys) - 1):
+        assert ys[i + 1] == ys[i] + heights[i], (ys, heights)
+
+
+def test_log_visible_no_centering_and_fills():
+    state = _fake_state().snapshot()
+    h, w = 50, 120
+    body = _frame_d(h, w, state, show_log=True).children[0]
+    assert body.children[0]._pos[0] == 0  # no centering
+    log = body.children[-1]
+    body_h = h - 2
+    assert log._pos[0] + log._h == body_h  # fills to the bottom
+    assert log._h >= 10
+
+
+def test_resize_leaves_no_stale_cells():
+    state = _fake_state().snapshot()
+    screen = FakeScreen(60, 270)
+    curses.doupdate = lambda: None
+    big_frame = {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                 "breath": 0.5, "flash": False, "sweep": None, "history": ()}
+    tui_mod._draw_all(screen, state, _visual_no_color(), None, False, 0,
+                      False, big_frame)
+    screen.erase()
+    screen._h, screen._w = 24, 80  # simulated resize
+    small_frame = dict(big_frame)
+    tui_mod._draw_all(screen, state, _visual_no_color(), None, False, 0,
+                      False, small_frame)
+    texts = [t for _, _, t in _all_calls(screen)]
+    assert all(tui_mod.tg.display_width(t) <= 270 for t in texts)
+    # nothing remembered from the big layout: the only body child is new
+    assert len(screen.children) == 1
+    for win in screen.children:
+        for pan in win.children:
+            assert pan._w <= 80
