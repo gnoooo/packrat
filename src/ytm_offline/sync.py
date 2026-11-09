@@ -19,7 +19,7 @@ from ytmusicapi import YTMusic
 from yt_dlp.cookies import extract_cookies_from_browser
 
 from ytm_offline.archive import Archive
-from ytm_offline.batch import run_batch_download
+from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.download import estimate_track
 from ytm_offline.manifest import Manifest
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
@@ -242,7 +242,7 @@ def run_retry(
             count = sum(1 for e in to_retry if e.get("status") == status)
             if count:
                 logger.info("  %s: %d", status, count)
-        return 1 if (failures or summary["stopped"]) else 0
+        return exit_code_from_result(summary)
 
 
 def run_sync(
@@ -387,4 +387,4 @@ def run_sync(
             if count:
                 logger.info("  %s: %d", status, count)
         logger.info("manifest: %s", manifest_path)
-        return 1 if (summary["failed"] or summary["stopped"]) else 0
+        return exit_code_from_result(summary)

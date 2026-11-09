@@ -63,10 +63,12 @@ def run_batch_download(
     failures: list[str] = []
     consecutive_retryable = 0
     stop_early = False
+    stop_reason = "completed"
 
     for i, entry in enumerate(entries, start=1):
         if control and control.should_stop():
             stop_early = True
+            stop_reason = "user"
             entry["error"] = "batch stopped by user"
             break
 
@@ -125,6 +127,7 @@ def run_batch_download(
                     },
                 )
                 stop_early = True
+                stop_reason = "consecutive_errors"
                 break
         else:
             consecutive_retryable = 0
@@ -144,6 +147,7 @@ def run_batch_download(
                 while slept < delay:
                     if control and control.should_stop():
                         stop_early = True
+                        stop_reason = "user"
                         break
                     remaining = max(0.0, delay - slept)
                     _emit(
@@ -190,4 +194,31 @@ def run_batch_download(
         "skipped": sum(1 for e in entries if e.get("status") == "skipped"),
         "failures": failures,
         "stopped": stop_early,
+        "stop_reason": stop_reason,
     }
+
+
+def exit_code_from_result(result: Any) -> int:
+    """CLI exit code for a worker result.
+
+    None → 0; int → itself; dict → 0 unless a track failed or the run was
+    aborted by the stop rule (3 consecutive retryable errors). A clean user
+    quit ('q' in the TUI) is 0 when nothing failed. Dicts carrying a real
+    "error" key are 1.
+    """
+    if result is None:
+        return 0
+    if isinstance(result, int):
+        return result
+    if not isinstance(result, dict):
+        return 0
+    if result.get("error"):
+        return 1
+    summary = result.get("summary")
+    if not isinstance(summary, dict):
+        summary = result
+    if summary.get("failed"):
+        return 1
+    if summary.get("stopped") and summary.get("stop_reason") != "user":
+        return 1
+    return 0

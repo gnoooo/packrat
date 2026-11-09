@@ -11,7 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Sequence
+from typing import Any, Sequence
 
 from ytmusicapi import YTMusic
 
@@ -22,12 +22,31 @@ from ytm_offline import discover_phase4 as discover_phase4_module
 from ytm_offline import queues as queues_module
 from ytm_offline import sync as sync_module
 from ytm_offline import tui as tui_module
-from ytm_offline.batch import run_batch_download
+from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.manifest import Manifest
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
 from ytm_offline.sync import browser_cookie_file
+
+
+def print_result_summary(result: Any) -> None:
+    """One-line download summary from a worker result; never a raw dict."""
+    if isinstance(result, dict) and result.get("error"):
+        print(result["error"], file=sys.stderr)
+        return
+    summary = result.get("summary") if isinstance(result, dict) else None
+    if not isinstance(summary, dict):
+        summary = result if isinstance(result, dict) else None
+    if not isinstance(summary, dict) or "downloaded" not in summary:
+        return  # listing-only result (no batch ran) has no summary line
+    print(
+        f"downloaded {summary.get('downloaded', 0)}"
+        f"  archived {summary.get('archived', 0)}"
+        f"  skipped-size {summary.get('skipped_size', 0)}"
+        f"  failed {summary.get('failed', 0)}"
+        f"  stopped {summary.get('stopped', False)}"
+    )
 
 
 def _redact(msg: object) -> str:
@@ -351,14 +370,16 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
         if not args.dry_run:
             print("\ndownloading discovered tracks...")
-            return discover_module.download_pending(
-                manifest=manifest,
-                output_root=output_root,
-                cookies=args.cookies,
-                cookies_from_browser=args.cookies_from_browser,
-                browser_profile=args.browser_profile,
-                archive_path=args.archive,
-                delay=args.delay,
+            return exit_code_from_result(
+                discover_module.download_pending(
+                    manifest=manifest,
+                    output_root=output_root,
+                    cookies=args.cookies,
+                    cookies_from_browser=args.cookies_from_browser,
+                    browser_profile=args.browser_profile,
+                    archive_path=args.archive,
+                    delay=args.delay,
+                )
             )
         return 0
 
@@ -423,25 +444,29 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     """Sync liked songs or a playlist to disk."""
     if args.tui and not args.dry_run:
-        return tui_module.run_tui(
-            sync_module.run_sync,
-            {"args": args},
-            mode=args.source,
-            ascii_mode=args.ascii,
+        return exit_code_from_result(
+            tui_module.run_tui(
+                sync_module.run_sync,
+                {"args": args},
+                mode=args.source,
+                ascii_mode=args.ascii,
+            )
         )
-    return sync_module.run_sync(args)
+    return exit_code_from_result(sync_module.run_sync(args))
 
 
 def cmd_retry(args: argparse.Namespace) -> int:
     """Retry failed tracks from a manifest."""
     if args.tui:
-        return tui_module.run_tui(
-            sync_module.run_retry,
-            {"args": args},
-            mode="retry",
-            ascii_mode=args.ascii,
+        return exit_code_from_result(
+            tui_module.run_tui(
+                sync_module.run_retry,
+                {"args": args},
+                mode="retry",
+                ascii_mode=args.ascii,
+            )
         )
-    return sync_module.run_retry(args)
+    return exit_code_from_result(sync_module.run_retry(args))
 
 
 def cmd_download_manifest(args: argparse.Namespace) -> int:
@@ -481,18 +506,12 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             )
         else:
             result = artists_module.download_artist(**kwargs)
-        if "error" in result:
-            print(result["error"], file=sys.stderr)
+        print_result_summary(result)
+        if isinstance(result, dict) and result.get("error"):
             return 1
-        summary = result["summary"]
-        print(
-            f"downloaded {summary['downloaded']}  archived {summary['archived']}"
-            f"  skipped-size {summary['skipped_size']}  failed {summary['failed']}"
-            f"  stopped {summary['stopped']}"
-        )
-        print(f"manifest: {result['manifest_path']}")
-        print(f"playlists: {result['m3u8_dir']}")
-        return 1 if (summary["failed"] or summary["stopped"]) else 0
+        print(f"manifest: {result.get('manifest_path')}")
+        print(f"playlists: {result.get('m3u8_dir')}")
+        return exit_code_from_result(result)
 
     # Generic manifest (sync, discover, albums, queues, phase4, radio, ...).
     manifest = Manifest.load(manifest_path)
@@ -542,7 +561,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             )
 
     if args.tui:
-        return tui_module.run_tui(
+        worker_result: Any = tui_module.run_tui(
             run_batch_download,
             {
                 "entries": entries,
@@ -559,27 +578,24 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             mode="manifest",
             ascii_mode=args.ascii,
         )
+    else:
+        worker_result = run_batch_download(
+            entries,
+            output_root=output_root,
+            save_callback=save_callback,
+            cookies=args.cookies,
+            cookies_from_browser=args.cookies_from_browser,
+            browser_profile=args.browser_profile,
+            max_size=parse_size(args.max_size) if args.max_size else None,
+            delay=args.delay,
+            archive_path=args.archive,
+            mode="manifest",
+        )
 
-    summary = run_batch_download(
-        entries,
-        output_root=output_root,
-        save_callback=save_callback,
-        cookies=args.cookies,
-        cookies_from_browser=args.cookies_from_browser,
-        browser_profile=args.browser_profile,
-        max_size=parse_size(args.max_size) if args.max_size else None,
-        delay=args.delay,
-        archive_path=args.archive,
-        mode="manifest",
-    )
-    print(
-        f"downloaded {summary['downloaded']}  archived {summary['archived']}"
-        f"  skipped-size {summary['skipped_size']}  failed {summary['failed']}"
-        f"  stopped {summary['stopped']}"
-    )
+    print_result_summary(worker_result)
     print(f"manifest: {manifest_path}")
     print(f"playlist: {m3u8_path}")
-    return 1 if (summary["failed"] or summary["stopped"]) else 0
+    return exit_code_from_result(worker_result)
 
 
 def _selection_prompt(width: int) -> str:
@@ -853,19 +869,14 @@ def cmd_artist(args: argparse.Namespace) -> int:
             )
         else:
             result = artists_module.download_artist(**kwargs)
-        if "error" in result:
+        print_result_summary(result)
+        if isinstance(result, dict) and result.get("error"):
             print(result["error"], file=sys.stderr)
             exit_code = 1
             continue
-        summary = result["summary"]
-        print(
-            f"downloaded {summary['downloaded']}  archived {summary['archived']}"
-            f"  skipped-size {summary['skipped_size']}  failed {summary['failed']}"
-            f"  stopped {summary['stopped']}"
-        )
-        print(f"manifest: {result['manifest_path']}")
-        print(f"playlists: {result['m3u8_dir']}")
-        if summary["failed"] or summary["stopped"]:
+        print(f"manifest: {result.get('manifest_path')}")
+        print(f"playlists: {result.get('m3u8_dir')}")
+        if exit_code_from_result(result):
             exit_code = 1
     return exit_code
 
@@ -897,22 +908,16 @@ def cmd_radio(args: argparse.Namespace) -> int:
         )
     else:
         result = queues_module.build_radio(**kwargs)
-    if "error" in result:
-        print(result["error"], file=sys.stderr)
+    print_result_summary(result)
+    if isinstance(result, dict) and result.get("error"):
         return 1
-    print(f"radio seed: {result['seed']} ({result['seed_video_id']})")
-    print(f"tracks: {result['total_tracks']}  est size: {result['total_est_size_human']}")
+    print(f"radio seed: {result.get('seed')} ({result.get('seed_video_id')})")
+    print(f"tracks: {result.get('total_tracks')}  est size: {result.get('total_est_size_human')}")
     if "summary" in result:
-        s = result["summary"]
-        print(
-            f"downloaded {s['downloaded']}  archives {s['archived']}"
-            f"  skipped-size {s['skipped_size']}  failed {s['failed']}"
-            f"  stopped {s['stopped']}"
-        )
-        print(f"manifest: {result['manifest_path']}")
-        print(f"playlist: {result['m3u8_path']}")
-        return 1 if (s["failed"] or s["stopped"]) else 0
-    for t in result["tracks"]:
+        print(f"manifest: {result.get('manifest_path')}")
+        print(f"playlist: {result.get('m3u8_path')}")
+        return exit_code_from_result(result)
+    for t in result.get("tracks", []):
         print(f"  {t}")
     return 0
 
@@ -924,7 +929,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
 
     if args.download:
         if args.tui:
-            return tui_module.run_tui(
+            dl_result: dict[str, Any] = tui_module.run_tui(
                 queues_module.download_queues,
                 {
                     "output_root": output_root,
@@ -938,20 +943,21 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
                 mode="queues",
                 ascii_mode=args.ascii,
             )
-        dl_result = queues_module.download_queues(
-            output_root=output_root,
-            archive_path=args.archive,
-            cookies=args.cookies,
-            cookies_from_browser=args.cookies_from_browser,
-            browser_profile=args.browser_profile,
-            max_size=args.max_size,
-            delay=args.delay,
-        )
-        if "error" in dl_result:
-            print(dl_result["error"], file=sys.stderr)
-            return 1
+        else:
+            dl_result = queues_module.download_queues(
+                output_root=output_root,
+                archive_path=args.archive,
+                cookies=args.cookies,
+                cookies_from_browser=args.cookies_from_browser,
+                browser_profile=args.browser_profile,
+                max_size=args.max_size,
+                delay=args.delay,
+            )
+        print_result_summary(dl_result)
+        if isinstance(dl_result, dict) and dl_result.get("error"):
+            return exit_code_from_result(dl_result)
         print(f"queues download complete: {dl_result['manifest_path']}")
-        return 0
+        return exit_code_from_result(dl_result)
 
     result = queues_module.discover_queues(
         headers_path=args.headers,
@@ -990,7 +996,7 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
 
     if args.download:
         if args.tui:
-            return tui_module.run_tui(
+            dl_result: dict[str, Any] = tui_module.run_tui(
                 albums_module.download_albums,
                 {
                     "output_root": output_root,
@@ -1004,20 +1010,21 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
                 mode="albums",
                 ascii_mode=args.ascii,
             )
-        dl_result = albums_module.download_albums(
-            output_root=output_root,
-            archive_path=args.archive,
-            cookies=args.cookies,
-            cookies_from_browser=args.cookies_from_browser,
-            browser_profile=args.browser_profile,
-            max_size=args.max_size,
-            delay=args.delay,
-        )
-        if "error" in dl_result:
-            print(dl_result["error"], file=sys.stderr)
-            return 1
+        else:
+            dl_result = albums_module.download_albums(
+                output_root=output_root,
+                archive_path=args.archive,
+                cookies=args.cookies,
+                cookies_from_browser=args.cookies_from_browser,
+                browser_profile=args.browser_profile,
+                max_size=args.max_size,
+                delay=args.delay,
+            )
+        print_result_summary(dl_result)
+        if isinstance(dl_result, dict) and dl_result.get("error"):
+            return exit_code_from_result(dl_result)
         print(f"albums download complete: {dl_result['manifest_path']}")
-        return 0
+        return exit_code_from_result(dl_result)
 
     result = albums_module.discover_albums(
         headers_path=args.headers,
