@@ -1298,6 +1298,9 @@ def build_parser() -> argparse.ArgumentParser:
             _p.add_argument("--no-color", action="store_true", help="disable TUI colors")
         if "--ascii" not in have:
             _p.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
+        if "--palette" not in have:
+            _p.add_argument("--palette", choices=["auto", "custom", "fixed", "basic"], default="auto",
+                            help="TUI color tier: exact RGB redefinition (custom), xterm-256 matching (fixed), or plain attrs (basic)")
 
     return parser
 
@@ -1313,6 +1316,7 @@ def cmd_tui_demo(args: argparse.Namespace) -> int:
         ascii_mode=args.ascii,
         no_anim=args.no_anim,
         no_color=args.no_color,
+        palette=args.palette,
     )
 
 
@@ -1329,7 +1333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from ytm_offline import tui as _tui
 
-    _tui.set_visual_options(getattr(args, "theme", "ocean"), getattr(args, "no_color", False))
+    _tui.set_visual_options(getattr(args, "theme", "ocean"), getattr(args, "no_color", False),
+                            getattr(args, "palette", "auto"))
 
     return args.func(args)
 

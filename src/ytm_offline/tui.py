@@ -75,11 +75,13 @@ def truncate(text: str, width: int) -> str:
 _visual_state = {"theme": "ocean", "no_color": False}
 
 
-def set_visual_options(theme: str = "ocean", no_color: bool = False) -> None:
+def set_visual_options(theme: str = "ocean", no_color: bool = False,
+                       palette: str = "auto") -> None:
     """Single place the CLI passes its visual flags; run_tui call sites unchanged."""
     if theme in tt.THEMES:
         _visual_state["theme"] = theme
     _visual_state["no_color"] = bool(no_color)
+    _visual_state["palette"] = palette
 
 
 def anim_mode(status: str) -> str:
@@ -131,7 +133,18 @@ def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> V
     glyphs = tg.pick_set(force_ascii=ascii_mode)
     has_colors = _cur.has_colors()
     no_color = tt.no_color_requested() or _visual_state.get("no_color")
-    tier = tt.select_tier(has_colors, _cur.COLORS if has_colors else 0, no_color)
+    can_change = False
+    try:
+        can_change = bool(_cur.can_change_color() and _cur.COLORS >= 256)
+    except _cur.error:
+        can_change = False
+    tier = tt.select_tier(
+        has_colors,
+        _cur.COLORS if has_colors else 0,
+        no_color,
+        palette_mode=_visual_state.get("palette", "auto"),
+        can_change_color=can_change,
+    )
     theme = tt.THEMES.get(theme_name, tt.THEMES["ocean"])
     pal = tt.Palette(theme, tier)
     colors: dict[str, int] = {k: 0 for k in tt.COLOR_KEYS}
@@ -143,14 +156,35 @@ def _build_visual(stdscr, theme_name: str, ascii_mode: bool, no_anim: bool) -> V
     if tier != tt.TIER_NONE:
         try:
             _cur.start_color()
-            pairs = tt.activate(pal)
+            if tier == tt.TIER_CUSTOM:
+                gradient_pairs, static_pairs = tt.install_custom_rgb(
+                    pal.gradient_rgb_list,
+                    {k: tt.parse_hex(getattr(theme, k)) for k in tt.COLOR_KEYS},
+                    curses_mod=_cur,
+                )
+                pal.custom_pairs = gradient_pairs
 
-            def themed_attr(idx: int, bold: bool = False, _pairs: dict = pairs) -> int:
-                a = _cur.color_pair(_pairs.get(idx, 0))
-                return a | _cur.A_BOLD if bold else a
+                def themed_attr(idx: int, bold: bool = False,
+                                _pairs: dict = gradient_pairs) -> int:
+                    a = _cur.color_pair(_pairs.get(idx, 0))
+                    return a | _cur.A_BOLD if bold else a
 
+                # static colors already come back as pair numbers
+                colors = {
+                    k: (_cur.color_pair(p) if p >= 0 else 0)
+                    for k, p in static_pairs.items()
+                }
+            else:
+                pairs = tt.activate(pal)
+
+                def themed_attr(idx: int, bold: bool = False, _pairs: dict = pairs) -> int:
+                    a = _cur.color_pair(_pairs.get(idx, 0))
+                    return a | _cur.A_BOLD if bold else a
+
+                colors = {
+                    k: (attr(idx) if idx >= 0 else 0) for k, idx in pal.static.items()
+                }
             attr = themed_attr
-            colors = {k: (attr(idx) if idx >= 0 else 0) for k, idx in pal.static.items()}
         except _cur.error:
             attr = plain_attr
             colors = {k: 0 for k in tt.COLOR_KEYS}
@@ -554,7 +588,7 @@ def _ui(stdscr, state: State, control: Control, ring_handler, ascii_mode: bool,
             }
             _draw_all(stdscr, snap, vis, ring_handler, show_log, log_offset, help_mode, frame)
             prev_sig = sig
-        stdscr.timeout(100 if animating else 250)
+        stdscr.timeout(50 if animating else 250)
         cont, show_log, log_offset, help_mode, action = _handle_keys(
             stdscr, control, state, show_log, log_offset, help_mode)
         if action == "toggle_anim":
@@ -602,11 +636,13 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
 
 
 def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
-            ascii_mode: bool = False, no_anim: bool = False, no_color: bool = False) -> int:
+            ascii_mode: bool = False, no_anim: bool = False, no_color: bool = False,
+            palette: str = "auto") -> int:
     """Run worker under the TUI; plain logging fallback when stdout is no TTY."""
     if not supports_tui():
         print("stdout is not a TTY; falling back to plain logging", file=sys.stderr)
         return worker_func(**worker_kwargs)
+    set_visual_options(palette=palette)
     os.makedirs("logs", exist_ok=True)
     ring_handler = setup_logging(tui_active=True)
     state = State(mode=mode)
@@ -638,6 +674,9 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     finally:
         control.request_stop()
         thread.join(5)
+        # Terminal palette back to defaults AFTER curses has ended, even on
+        # a UI crash (curses.wrapper already restored the terminal itself).
+        tt.restore_palette()
     if result_container["exception"]:
         raise result_container["exception"]
     return result_container["return_value"] if result_container["return_value"] is not None else 0
