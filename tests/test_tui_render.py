@@ -306,6 +306,32 @@ def test_empty_waiting_panel_keeps_frame():
     assert texts[0].startswith(g["tl"]) and texts[-1].startswith(g["bl"])
 
 
+def test_current_bar_suffix_never_overwrites_right_border():
+    # 80 columns, long suffix "123.4 MB/s ETA 99:59:59": the suffix must be
+    # truncated so the right border cell at column w-1 is never overwritten.
+    state = State(mode="test")
+    state.apply(Event("start", {"total": 2, "total_est_bytes": 4000000}))
+    state.apply(Event("track_start", {"video_id": "v1", "title": "T", "artist": "A",
+                                      "album": "B", "source": "artist:A",
+                                      "stage": "downloading"}))
+    state.apply(Event("track_progress", {"stage": "downloading", "percent": 40.0,
+                                         "downloaded_bytes": 4000, "total_bytes": 10000,
+                                         "speed": "123.4 MB/s", "eta_seconds": 359999}))
+    snap = state.snapshot()
+    win = FakeScreen(6, 80)
+    frame = {"mode": "running", "phase": 0.0, "thin_phase": 0.0,
+             "breath": 0.5, "flash": False, "sweep": None, "history": ()}
+    tui_mod._draw_current(win, snap, _visual_no_color(), frame)
+    v = tg.GLYPHS["fancy"]["v"]
+    border = [(x, t) for (y, x, t) in win.addstr_calls if y == 4 and t == v]
+    assert (79, v) in border, "right border missing at column w-1"
+    # The bar line itself ends before the border column.
+    line = [t for (y, x, t) in win.addstr_calls if y == 4 and x == 0]
+    assert line, "bar line not drawn"
+    assert tg.display_width(line[0]) <= 79
+    assert "…" in line[0]  # long tail was cut, not allowed to touch the border
+
+
 # --- space-background bars (gradient without █ seams) ------------------------
 
 

@@ -477,6 +477,9 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     bar_w = max(10, min(100, w - 26))
     body = tg.bar(vis.g, bar_w, pct)
     suffix = f" {pct:5.1f}% "
+    # Suffix stays left of the right border at column w-1 (never overwritten);
+    # plain clip (no sanitize) — the suffix is generated, not user text.
+    suffix = tg.clip_width(suffix, max(0, w - 1 - 2 - bar_w))
     _draw_themed_line(win, 1, "│ ", body, suffix, vis, frame["mode"], frame["phase"],
                       frame["breath"], frame.get("sweep"), 0)
     _right_border(win, 1, vis)
@@ -517,13 +520,16 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
         bar_w = max(10, w - 40)
         pct = max(0.0, min(100.0, cur.percent))
         eta = "…" if cur.eta_seconds is None else format_duration(cur.eta_seconds)
+        prefix = f"│ {pct:5.1f}% "
         # Spec order: '<pct>% <bytes>/<total> <speed>'; ETA last so the
         # long tail clips in the middle, never the percent.
         suffix = f" {format_bytes(cur.downloaded_bytes)}/{format_bytes(cur.total_bytes)}"
         if cur.speed:
             suffix += f" {cur.speed}"
         suffix += f"  ETA {eta}"
-        _draw_themed_line(win, 4, f"│ {pct:5.1f}% ", tg.thin_bar(vis.g, bar_w, pct), suffix,
+        # Suffix stays left of the right border at column w-1 (never overwritten).
+        suffix = truncate(suffix, max(0, w - 1 - tg.display_width(prefix) - bar_w))
+        _draw_themed_line(win, 4, prefix, tg.thin_bar(vis.g, bar_w, pct), suffix,
                           vis, frame["mode"], frame["thin_phase"], frame["breath"],
                           frame.get("sweep"), curses.A_BOLD, thin=True)
         _right_border(win, 4, vis)
