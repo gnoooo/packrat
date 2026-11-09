@@ -21,7 +21,8 @@ from ytm_offline import tui_glyphs as tg
 from ytm_offline import tui_theme as tt
 from ytm_offline.control import Control
 from ytm_offline.events import Event, State
-from ytm_offline.logging_config import RingBufferHandler, redact, setup_logging
+from ytm_offline.logging_config import (RING_CAPACITY, RingBufferHandler,  # noqa: F401 (re-exported)
+                                        redact, setup_logging)
 
 FANCY = tg.GLYPHS["fancy"]
 
@@ -596,7 +597,7 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
     lines: list[str] = []
     if ring_handler is not None:
         try:
-            lines = list(ring_handler.lines(500))
+            lines = list(ring_handler.lines(RING_CAPACITY))
         except Exception:
             lines = []
     if not lines:

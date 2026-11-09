@@ -32,10 +32,13 @@ class RedactFilter(logging.Filter):
         return s
 
 
-class RingBufferHandler(logging.Handler):
-    """Keep the last N redacted log lines in memory."""
+RING_CAPACITY = 1000
 
-    def __init__(self, capacity: int = 200) -> None:
+
+class RingBufferHandler(logging.Handler):
+    """Keep the last RING_CAPACITY redacted log lines in memory."""
+
+    def __init__(self, capacity: int = RING_CAPACITY) -> None:
         super().__init__()
         self._buffer: collections.deque[str] = collections.deque(maxlen=capacity)
         self._lock = collections.deque  # not used; buffer is thread-safe for append
@@ -60,7 +63,7 @@ def redact(text: Any) -> str:
 def setup_logging(
     tui_active: bool,
     log_dir: pathlib.Path | None = None,
-    ring_capacity: int = 200,
+    ring_capacity: int = RING_CAPACITY,
 ) -> RingBufferHandler | None:
     """Configure root logging.
 
