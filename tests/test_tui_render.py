@@ -688,6 +688,30 @@ def test_centering_follows_formula():
     assert last._pos[0] + last._h <= body_h - 1
 
 
+@pytest.mark.parametrize("rows,cols", [(40, 120), (60, 270)])
+def test_centering_spec_at_120x40_and_270x60(rows, cols):
+    """Spec: free = (rows-2) - body_height - 2; 40% of free above the body,
+    the rest below; never negative; body not stuck to the top."""
+    state = _waiting_state().snapshot()
+    body = _frame_d(rows, cols, state).children[0]
+    vis = _visual_no_color()
+    heights = tui_mod._panel_heights(state, min(cols, 140), vis)
+    base = sum(v for _, v in heights) + (len(heights) - 1)
+    body_h = rows - 2
+    free = max(0, body_h - base - 2)
+    top_margin = round(free * 0.4)
+    assert free > 0
+    first_y = body.children[0]._pos[0]
+    last = body.children[len(heights) - 1]
+    top_blank = first_y
+    bottom_blank = body_h - (last._pos[0] + last._h)
+    assert top_blank == top_margin, (top_blank, top_margin, free)
+    assert top_blank >= 1  # not stuck to the top
+    assert bottom_blank == free + 2 - top_margin  # the rest below
+    assert bottom_blank >= top_blank
+
+
+
 def test_compact_has_no_blank_rows():
     state = _fake_state().snapshot()
     body = _frame_d(24, 80, state).children[0]

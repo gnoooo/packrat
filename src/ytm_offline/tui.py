@@ -717,9 +717,11 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
     if log_shown or compact:
         top_margin = 0
     else:
-        # Vertical centering: 40% of the free space goes above the body.
-        free = max(0, body_h - base_row - 2)
-        top_margin = round(free * 0.4)
+        # Spec: body_height = sum(panel heights) + gaps;
+        # free = (rows - 2) - body_height - 2; 40% of free above the body,
+        # the rest below; never negative.
+        free = max(0, (h - 2) - base_row - 2)
+        top_margin = round(free * 0.4) if free > 0 else 0
     y = top_margin
     drawers = {
         "overall": _draw_overall,
