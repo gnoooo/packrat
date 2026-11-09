@@ -498,3 +498,24 @@ def test_content_capped_at_140_columns(monkeypatch):
                        "history": ()})
     for y, x, t in _all_calls(screen):
         assert tui_mod.tg.display_width(t) <= 140
+
+def test_every_glyph_is_one_display_cell():
+    for key, table in tg.GLYPHS.items():
+        for name, value in table.items():
+            for ch in str(value):
+                assert tg.char_width(ch) == 1, (key, name, repr(ch))
+
+
+def test_tui_glyphs_command_smoke(monkeypatch, capsys, tmp_path):
+    import argparse
+    from ytm_offline import cli
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    args = cli.build_parser().parse_args(["tui-glyphs"])
+    assert cli.cmd_tui_glyphs(args) == 0
+    out = capsys.readouterr().out
+    for group in ("block", "box", "braille", "shapes", "marks"):
+        assert group in out
+    assert "tier: none" in out  # piped output never carries ANSI colors
+    assert "\x1b[" not in out

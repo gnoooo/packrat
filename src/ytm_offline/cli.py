@@ -1287,6 +1287,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_tuidemo.add_argument("--seconds", type=float, default=60.0, help="target duration of the simulated batch")
     p_tuidemo.set_defaults(func=cmd_tui_demo)
 
+    p_glyphs = sub.add_parser(
+        "tui-glyphs",
+        help="print the TUI glyph table, a theme gradient strip and the selected palette tier",
+    )
+    p_glyphs.set_defaults(func=cmd_tui_glyphs)
+
     # Visual flags for every TUI-capable subcommand.
     for _p in sub.choices.values():
         have = {o for a in getattr(_p, "_actions", []) for o in getattr(a, "option_strings", [])}
@@ -1318,6 +1324,45 @@ def cmd_tui_demo(args: argparse.Namespace) -> int:
         no_color=args.no_color,
         palette=args.palette,
     )
+
+
+def cmd_tui_glyphs(args: argparse.Namespace) -> int:
+    """Print the glyph groups, a theme gradient strip and the selected tier."""
+    import sys
+    from ytm_offline import tui_glyphs as tg
+    from ytm_offline import tui_theme as tt
+
+    set_name = "ascii" if (getattr(args, "ascii", False) or not tg.supports_fancy()) else "fancy"
+    glyphs = tg.GLYPHS[set_name]
+    no_color = tt.no_color_requested(getattr(args, "no_color", False)) or not sys.stdout.isatty()
+    theme = tt.THEMES.get(getattr(args, "theme", "ocean"), tt.THEMES["ocean"])
+    if no_color:
+        tier = tt.TIER_NONE
+    else:
+        tier = tt.select_tier(True, 256, False,
+                              palette_mode=getattr(args, "palette", "auto"),
+                              can_change_color=False)
+    print(f"glyph set: {set_name}   theme: {theme.name}   tier: {tier}")
+    groups = (
+        ("block", ("bar_fill", "bar_track", "spark")),
+        ("box", ("tl", "tr", "bl", "br", "h", "v", "thin_fill", "thin_edge", "thin_track")),
+        ("braille", ("spinner",)),
+        ("shapes", ("dot", "dot_off", "diamond", "play", "pause")),
+        ("marks", ("note", "done", "fail", "clock", "ellipsis")),
+    )
+    for name, keys in groups:
+        cells = " ".join(str(glyphs[k]) for k in keys if k in glyphs)
+        print(f"{name:>7}: {cells}")
+    strip_w = 24
+    if no_color:
+        print(f"gradient: {'#' * strip_w}")
+        return 0
+    body = "".join(
+        f"\x1b[38;2;{int(c[0])};{int(c[1])};{int(c[2])}m###"
+        for c in (theme.walk(i / (strip_w - 1)) for i in range(strip_w))
+    ) + "\x1b[0m"
+    print(f"gradient: {body}")
+    return 0
 
 
 _NEEDS_HEADERS = {"auth", "library", "sync", "discover", "discover-phase4", "discover-queues", "discover-albums", "radio", "artist"}
