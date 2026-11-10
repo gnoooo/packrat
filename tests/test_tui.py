@@ -44,6 +44,11 @@ def test_render_bar_ascii():
     assert bar == "[#####-----]"
 
 
+def test_latest_log_path_returns_default_when_empty(monkeypatch):
+    monkeypatch.setattr("glob.glob", lambda pattern: [])
+    assert tui._latest_log_path() == "logs/"
+
+
 def test_truncate():
     assert tui.truncate("short", 10) == "short"
     assert tui.truncate("a very long string indeed", 12).endswith("\u2026")

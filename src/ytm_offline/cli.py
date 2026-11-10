@@ -23,6 +23,7 @@ from ytm_offline import queues as queues_module
 from ytm_offline import sync as sync_module
 from ytm_offline import tui as tui_module
 from ytm_offline.batch import exit_code_from_result, run_batch_download
+from ytm_offline.download import _final_filepath
 from ytm_offline.manifest import Manifest
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
 from ytm_offline.playlist import write_m3u8
@@ -281,7 +282,7 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         print(f"download failed: {_redact(exc)}", file=sys.stderr)
         return 1
 
-    downloaded = pathlib.Path(ydl.prepare_filename(info))
+    downloaded = _final_filepath(info, ydl, output_root)
     if not downloaded.exists():
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
@@ -485,7 +486,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
 
     # Artist manifests carry their own label and playlist layout.
-    if payload.get("command") == "artist" or "label" in payload:
+    if payload.get("command") == "artist":
         label = payload.get("label") or payload.get("artist", manifest_path.stem)
         kwargs: dict[str, Any] = {
             "label": label,
@@ -496,6 +497,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             "browser_profile": args.browser_profile,
             "max_size": args.max_size,
             "delay": args.delay,
+            "payload": payload,
         }
         if args.tui:
             result = tui_module.run_tui(
@@ -540,10 +542,11 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     m3u8_path = output_root / "playlists" / f"{stem}.m3u8"
 
     def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        manifest.entries = current_entries
+        # current_entries is the pending subset; the original dicts are
+        # mutated in place so manifest.entries already reflects updates.
         manifest.write(manifest_path, "json")
         downloaded = [
-            e for e in current_entries
+            e for e in manifest.entries
             if e.get("status") == "downloaded" and e.get("path")
         ]
         if downloaded:

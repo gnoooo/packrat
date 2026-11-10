@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import random
 import re
@@ -262,7 +261,7 @@ def discover_queues(
 
         # Per-queue m3u8.
         seed_label = str(seed.get("title", seed["videoId"]))
-        safe_seed = os.path.basename(seed_label.replace(" ", "_").replace("/", "_"))
+        safe_seed = clean(seed_label) or "seed"
         queue_dir = playlists_dir / safe_seed
         queue_dir.mkdir(parents=True, exist_ok=True)
         m3u8_path = queue_dir / f"queue-{safe_seed}.m3u8"
@@ -357,7 +356,8 @@ def download_queues(
         )
 
     def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        manifest.entries = current_entries
+        # current_entries is the pending subset; the original dicts are
+        # mutated in place so manifest.entries already reflects updates.
         manifest.write(manifest_path)
 
     summary = run_batch_download(
@@ -498,7 +498,8 @@ def build_radio(
         )
 
     def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        manifest.entries = current_entries
+        # current_entries is the pending subset; the original dicts are
+        # mutated in place so manifest.entries already reflects updates.
         manifest.write(manifest_path)
         write_m3u8(
             m3u8_path,
@@ -509,7 +510,7 @@ def build_radio(
                     "title": e["title"],
                     "artist": e["artist"],
                 }
-                for e in current_entries
+                for e in manifest.entries
                 if e.get("status") == "downloaded" and e.get("path")
             ],
         )

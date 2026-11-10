@@ -156,6 +156,37 @@ def _estimate_size(info: dict[str, Any] | None) -> int | None:
     return None
 
 
+_AUDIO_EXTS = {".m4a", ".mp3", ".webm", ".ogg", ".flac", ".wav", ".opus"}
+
+
+def _final_filepath(
+    info: dict[str, Any], ydl: yt_dlp.YoutubeDL, output_path: pathlib.Path
+) -> pathlib.Path | None:
+    """Return the actual downloaded file path after yt-dlp postprocessors.
+
+    Falls back to scanning the output directory for an audio file with the
+    expected stem when yt-dlp's metadata keys are missing.
+    """
+    candidate = (
+        info.get("filepath")
+        or info.get("_filename")
+        or ydl.prepare_filename(info)
+    )
+    path = pathlib.Path(candidate)
+    if path.exists():
+        return path
+    # Postprocessors may have changed the extension; look for a likely audio file.
+    if path.parent.exists():
+        for ext in _AUDIO_EXTS:
+            maybe = path.with_suffix(ext)
+            if maybe.exists():
+                return maybe
+        for maybe in sorted(path.parent.glob(path.stem + ".*")):
+            if maybe.suffix.lower() in _AUDIO_EXTS:
+                return maybe
+    return path
+
+
 def _progress_hook(
     control: Any,
     event_callback: Callable[[dict[str, Any]], None] | None,
@@ -281,7 +312,7 @@ def download_track(
                     )
                 emit_start("downloading")
                 ydl.process_ie_result(info, download=True)
-                downloaded = pathlib.Path(ydl.prepare_filename(info))
+                downloaded = _final_filepath(info, ydl, output_path)
                 if not downloaded.exists():
                     return emit_done(
                         status="failed",

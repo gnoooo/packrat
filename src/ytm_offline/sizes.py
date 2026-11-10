@@ -31,12 +31,12 @@ def parse_size(value: str) -> int:
 
 
 def format_size(bytes_count: int) -> str:
-    """Format bytes as human readable."""
+    """Format bytes as human readable (base-1024)."""
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(bytes_count) < 1000 or unit == "TB":
-            return f"{bytes_count:.2f} {unit}"
-        bytes_count /= 1000.0
-    return f"{bytes_count:.2f} TB"
+        if abs(bytes_count) < 1024 or unit == "TB":
+            return f"{bytes_count:.1f} {unit}"
+        bytes_count /= 1024.0
+    return f"{bytes_count:.1f} TB"
 
 
 def heuristic_size(duration: int, bytes_per_second: int = 16000) -> int:

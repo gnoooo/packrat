@@ -5,14 +5,16 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from ytmusicapi import YTMusic
 
 from ytm_offline.archive import Archive
+from ytm_offline.batch import run_batch_download
 from ytm_offline.download import estimate_track
-from ytm_offline.manifest import Manifest
+from ytm_offline.manifest import Manifest, atomic_write_text
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
+from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
 
 
@@ -627,96 +629,55 @@ def download_pending(
     browser_profile: str | None,
     archive_path: str,
     delay: float,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
+    control: Any = None,
 ) -> int:
     """Download the pending tracks from a discovery manifest.
 
-    Uses the same 3-consecutive-retryable-error stop rule as sync.
+    Delegates to run_batch_download so behavior matches sync/artist/queue
+    downloads (events, pause/resume, archive, retry rules).
     """
-    import random
-    import time
-
-    from ytm_offline.archive import Archive
-    from ytm_offline.download import DownloadResult, download_track
-    from ytm_offline.playlist import write_m3u8
-
-    archive = Archive(archive_path)
-    pending = [e for e in manifest.entries if e["status"] == "pending"]
+    pending = [e for e in manifest.entries if e.get("status") == "pending"]
     if not pending:
         print("no pending tracks to download")
         return 0
 
-    downloaded_entries: list[dict[str, Any]] = []
-    consecutive_retryable = 0
-    failures: list[str] = []
-    stop_early = False
-
-    for i, entry in enumerate(pending, start=1):
-        track = {
-            "video_id": entry["video_id"],
-            "title": entry["title"],
-            "artist": entry["artist"],
-            "album": entry["album"],
-            "track_num": None,
-            "duration": 0,
-            "singles_dir": entry.get("singles_dir", SINGLES_DIR_DEFAULT),
-        }
-        print(f"[{i}/{len(pending)}] {track['video_id']} - {track['title']}")
-        result = download_track(
-            track,
-            output_root=output_root,
-            cookies=cookies,
-            cookies_from_browser=cookies_from_browser,
-            browser_profile=browser_profile,
-            max_retries=3,
-        )
-
-        entry["status"] = result.status
-        if result.error:
-            entry["error"] = result.error
-
-        if result.status == "downloaded":
-            archive.add(track["video_id"])
-            archive.save()
-            consecutive_retryable = 0
-            entry["path"] = str(result.filepath)
-            downloaded_entries.append(
-                {
-                    "path": result.filepath,
-                    "duration": result.info.get("duration") or 0 if result.info else 0,
-                    "title": track["title"],
-                    "artist": track["artist"],
-                }
-            )
-        elif result.retryable:
-            consecutive_retryable += 1
-            failures.append(track["video_id"])
-            if consecutive_retryable >= 3:
-                print(
-                    "stopping discovery download: 3 consecutive retryable errors",
-                    file=sys.stderr,
-                )
-                stop_early = True
-                break
-        else:
-            consecutive_retryable = 0
-            failures.append(track["video_id"])
-
-        if i < len(pending) and not stop_early:
-            time.sleep(delay * random.uniform(0.5, 1.5))
-
-    if stop_early:
-        for entry in manifest.entries:
-            if entry["status"] == "pending":
-                entry["error"] = "batch stopped after 3 consecutive retryable errors"
-
     manifest_path = output_root / "playlists" / "discover.manifest.json"
-    manifest.write(manifest_path, "json")
     m3u8_path = output_root / "playlists" / "discover.m3u8"
-    if downloaded_entries:
-        write_m3u8(m3u8_path, downloaded_entries)
+
+    def save_callback(current_entries: list[dict[str, Any]]) -> None:
+        # current_entries is the pending subset; the original dicts are mutated
+        # in place, so manifest.entries already reflects the updates.
+        manifest.write(manifest_path, "json")
+        downloaded = [
+            {
+                "path": e["path"],
+                "duration": e.get("duration", 0),
+                "title": e["title"],
+                "artist": e["artist"],
+            }
+            for e in current_entries
+            if e.get("status") == "downloaded" and e.get("path")
+        ]
+        if downloaded:
+            write_m3u8(m3u8_path, downloaded)
+
+    summary = run_batch_download(
+        pending,
+        output_root=output_root,
+        save_callback=save_callback,
+        cookies=cookies,
+        cookies_from_browser=cookies_from_browser,
+        browser_profile=browser_profile,
+        delay=delay,
+        event_callback=event_callback,
+        control=control,
+        archive_path=archive_path,
+        mode="discover",
+    )
 
     print("\ndiscover download report:")
     for status, count in manifest.counts().items():
         if count:
             print(f"  {status}: {count}")
-    return 1 if (failures or stop_early) else 0
+    return 1 if (summary["failed"] or summary["stopped"]) else 0

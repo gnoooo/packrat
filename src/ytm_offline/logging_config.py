@@ -20,9 +20,11 @@ class RedactFilter(logging.Filter):
     ]
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = self.redact(record.getMessage())
-        record.args = ()  # already interpolated; avoids msg % args double-formatting
-        return True
+        # Copy the record so that mutating msg/args does not affect other handlers.
+        redacted = logging.makeLogRecord(record.__dict__)
+        redacted.msg = self.redact(record.getMessage())
+        redacted.args = ()  # already interpolated; avoids msg % args double-formatting
+        return redacted
 
     @classmethod
     def redact(cls, text: Any) -> str:
@@ -42,7 +44,6 @@ class RingBufferHandler(logging.Handler):
     def __init__(self, capacity: int = RING_CAPACITY) -> None:
         super().__init__()
         self._buffer: collections.deque[str] = collections.deque(maxlen=capacity)
-        self._lock = collections.deque  # not used; buffer is thread-safe for append
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

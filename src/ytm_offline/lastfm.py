@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 class LastFMClient:
@@ -45,7 +49,8 @@ class LastFMClient:
             if "error" in data:
                 return None
             return data
-        except Exception:
+        except Exception as exc:
+            logger.debug("Last.fm %s failed: %s", method, exc, exc_info=True)
             return None
 
     def get_similar_artists(self, artist: str, limit: int = 10) -> list[str]:

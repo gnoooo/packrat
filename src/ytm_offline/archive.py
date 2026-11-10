@@ -1,19 +1,18 @@
-"""Atomic download archive of completed video IDs."""
+"""Append-only download archive of completed video IDs."""
 
 from __future__ import annotations
 
-import os
 import pathlib
-import tempfile
 from typing import Iterable
 
 
 class Archive:
-    """Set of video IDs persisted atomically to a text file."""
+    """Set of video IDs persisted append-only to a text file."""
 
     def __init__(self, path: str | pathlib.Path) -> None:
         self.path = pathlib.Path(path)
         self._ids: set[str] = set()
+        self._dirty: set[str] = set()
         self._load()
 
     def _load(self) -> None:
@@ -25,31 +24,28 @@ class Archive:
         return str(video_id) in self._ids
 
     def add(self, video_id: str) -> None:
-        self._ids.add(str(video_id).strip())
+        vid = str(video_id).strip()
+        self._ids.add(vid)
+        self._dirty.add(vid)
 
     def update(self, video_ids: Iterable[str]) -> None:
         for vid in video_ids:
             self.add(vid)
 
+    def ids(self) -> set[str]:
+        """Return a snapshot of the IDs currently held in memory."""
+        return set(self._ids)
+
     def save(self) -> None:
-        """Write to a temp file in the same directory, then atomic rename."""
+        """Append any IDs added since the last save to the archive file."""
+        if not self._dirty:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        lines = sorted(self._ids)
-        fd, tmp = tempfile.mkstemp(
-            dir=self.path.parent, prefix=self.path.name + ".tmp."
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-                if lines:
-                    f.write("\n")
-            os.replace(tmp, self.path)
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        lines = sorted(self._dirty)
+        with self.path.open("a", encoding="utf-8") as f:
+            for vid in lines:
+                f.write(vid + "\n")
+        self._dirty.clear()
 
     def __len__(self) -> int:
         return len(self._ids)

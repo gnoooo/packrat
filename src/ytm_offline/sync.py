@@ -21,7 +21,7 @@ from yt_dlp.cookies import extract_cookies_from_browser
 from ytm_offline.archive import Archive
 from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.download import estimate_track
-from ytm_offline.manifest import Manifest
+from ytm_offline.manifest import Manifest, atomic_write_text
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
 from ytm_offline.playlist import write_m3u8
 from ytm_offline.sizes import format_size, parse_size
@@ -109,12 +109,6 @@ def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterat
         yield path
     finally:
         _cleanup_cookie_files()
-
-
-def _cache_browser_cookies(browser_spec: str, profile: str | None = None) -> str:
-    """Deprecated: use browser_cookie_file context manager instead."""
-    with browser_cookie_file(browser_spec, profile) as path:
-        return path
 
 
 def resolve_tracks(source: str, headers_path: str, limit: int) -> list[dict[str, Any]]:
@@ -215,9 +209,9 @@ def run_retry(
         logger.info("retrying %d tracks", len(to_retry))
 
         def save_callback(current_entries: list[dict[str, Any]]) -> None:
-            manifest_path.write_text(
+            atomic_write_text(
+                manifest_path,
                 json.dumps({"entries": current_entries}, indent=2),
-                encoding="utf-8",
             )
             write_m3u8(m3u8_path, _m3u8_from_entries(current_entries))
 
@@ -355,12 +349,13 @@ def run_sync(
             return 0
 
         def save_callback(current_entries: list[dict[str, Any]]) -> None:
-            manifest.entries = current_entries
+            # current_entries is the pending subset; the original dicts are
+            # mutated in place so manifest.entries already reflects updates.
             manifest.write(manifest_path, args.manifest_format)
-            write_m3u8(m3u8_path, _m3u8_from_entries(current_entries))
+            write_m3u8(m3u8_path, _m3u8_from_entries(manifest.entries))
             _write_failures(
                 failures_path,
-                [e["video_id"] for e in current_entries if e.get("status") == "failed"],
+                [e["video_id"] for e in manifest.entries if e.get("status") == "failed"],
             )
 
         summary = run_batch_download(

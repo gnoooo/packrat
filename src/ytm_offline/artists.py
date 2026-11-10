@@ -18,6 +18,7 @@ from ytmusicapi import YTMusic
 from ytm_offline.archive import Archive
 from ytm_offline.batch import run_batch_download
 from ytm_offline.discover import _normalize
+from ytm_offline.manifest import atomic_write_text
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, is_single, track_path
 from ytm_offline.playlist import write_m3u8
 from ytm_offline import runs
@@ -881,6 +882,15 @@ def owned_file_exists(output_root: pathlib.Path, track: dict[str, Any], release:
         )
         if singles_layout.exists():
             return True
+        return track_path(
+            output_root,
+            track.get("artist", ""),
+            release.get("title", ""),
+            track.get("title", ""),
+            track_num=track.get("track_num"),
+            ext="m4a",
+            release_type="single",
+        ).exists()
     return track_path(
         output_root,
         track.get("artist", ""),
@@ -1009,10 +1019,7 @@ def write_artist_playlists(
 
 def save_manifest(payload: dict[str, Any]) -> None:
     manifest_path = pathlib.Path(payload["manifest_path"])
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(manifest_path, json.dumps(payload, indent=2))
 
 
 def download_artist(
@@ -1027,12 +1034,14 @@ def download_artist(
     delay: float = 7.0,
     event_callback=None,
     control=None,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Download pending tracks from artist-<label>.manifest.json."""
     manifest_path = output_root / "playlists" / f"artist-{label}.manifest.json"
-    if not manifest_path.exists():
-        return {"error": f"manifest not found: {manifest_path}"}
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload is None:
+        if not manifest_path.exists():
+            return {"error": f"manifest not found: {manifest_path}"}
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     pending = [e for e in entries if e.get("status") == "pending"]
     if not pending:
@@ -1044,12 +1053,13 @@ def download_artist(
         manifest_max_size = parse_size(max_size)
 
     def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        payload["entries"] = current_entries
-        manifest_path.write_text(
+        # current_entries is the pending subset; the original dicts are
+        # mutated in place so payload["entries"] already reflects updates.
+        atomic_write_text(
+            manifest_path,
             json.dumps({k: v for k, v in payload.items()}, indent=2),
-            encoding="utf-8",
         )
-        write_artist_playlists(current_entries, playlists_dir)
+        write_artist_playlists(payload["entries"], playlists_dir)
 
     summary = run_batch_download(
         pending,

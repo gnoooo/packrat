@@ -37,3 +37,16 @@ def test_archive_add_is_idempotent(tmp_path):
     archive.add("same")
     archive.save()
     assert len(Archive(path)) == 1
+
+
+def test_archive_append_only_keeps_existing_ids(tmp_path):
+    path = tmp_path / "archive.txt"
+    archive = Archive(path)
+    archive.add("first")
+    archive.save()
+    archive.add("second")
+    archive.save()
+    text = path.read_text(encoding="utf-8")
+    assert text.count("first") == 1
+    assert text.count("second") == 1
+    assert archive.ids() == {"first", "second"}

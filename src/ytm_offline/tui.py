@@ -24,6 +24,7 @@ from ytm_offline.events import Event, State
 from ytm_offline.logging_config import (LOG_DIR, RING_CAPACITY,  # noqa: F401
                                         RingBufferHandler, redact,  # noqa: F401
                                         setup_logging)
+from ytm_offline.sizes import format_size
 
 FANCY = tg.GLYPHS["fancy"]
 
@@ -41,11 +42,7 @@ def format_duration(seconds: float) -> str:
 def format_bytes(n: int | None) -> str:
     if n is None or n < 0:
         return "? B"
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
+    return format_size(n)
 
 
 def render_bar(width: int, percent: float, ascii_mode: bool = False) -> str:
@@ -936,6 +933,7 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     state = State(mode=mode)
     control = Control()
     result_container: dict[str, Any] = {"return_value": None, "exception": None}
+    uses_browser_cookies = bool(worker_kwargs.get("cookies_from_browser"))
     # Not a daemon: on quit the worker finishes its current track, writes
     # archive/manifest/m3u8 and unwinds (deleting any temp cookie file)
     # before run_tui returns.
@@ -959,7 +957,7 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
         print(f"TUI crashed: {exc.__class__.__name__}: {exc}",
               file=sys.stderr)
         print(f"download stopped cleanly{' (cookie temporary files deleted)'
-              if any(k in str(worker_kwargs) for k in ('cookies_from_browser',)) else ''};"
+              if uses_browser_cookies else ''};"
               f" full log: {path}", file=sys.stderr)
         return 1
     finally:

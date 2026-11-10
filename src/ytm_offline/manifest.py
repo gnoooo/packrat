@@ -4,11 +4,40 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
+import os
 import pathlib
+import tempfile
 from typing import Any, Iterable
 
 
 SCHEMA_VERSION = 1
+
+logger = logging.getLogger(__name__)
+
+
+def atomic_write_text(
+    path: pathlib.Path,
+    text: str,
+    *,
+    encoding: str = "utf-8",
+    newline: str | None = None,
+) -> None:
+    """Write *text* to *path* atomically via a temp file in the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.tmp.", text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 class Manifest:
@@ -18,6 +47,7 @@ class Manifest:
         "pending",
         "archived",
         "skipped_size",
+        "skipped",
         "failed",
         "downloaded",
     }
@@ -69,8 +99,25 @@ class Manifest:
     def load(cls, path: pathlib.Path) -> "Manifest":
         data = json.loads(path.read_text(encoding="utf-8"))
         manifest = cls()
-        manifest.entries = data.get("entries", [])
-        manifest.version = data.get("version", 1)
+        manifest.version = data.get("version", SCHEMA_VERSION)
+        if manifest.version > SCHEMA_VERSION:
+            raise ValueError(
+                f"manifest version {manifest.version} is newer than "
+                f"supported {SCHEMA_VERSION}"
+            )
+        for entry in data.get("entries", []):
+            status = entry.get("status")
+            if status not in cls.VALID_STATUSES:
+                logger.warning(
+                    "manifest %s has unknown status %r for video_id %s; "
+                    "treating as failed",
+                    path,
+                    status,
+                    entry.get("video_id"),
+                )
+                entry["status"] = "failed"
+                entry["error"] = f"unknown original status: {status}"
+            manifest.entries.append(entry)
         return manifest
 
     def failed_ids(self) -> list[str]:
@@ -80,9 +127,9 @@ class Manifest:
         return [e for e in self.entries if e.get("status") == "pending"]
 
     def write(self, path: pathlib.Path, fmt: str = "json") -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         if fmt == "json":
-            path.write_text(
+            atomic_write_text(
+                path,
                 json.dumps(
                     {
                         "version": self.version,
@@ -92,12 +139,14 @@ class Manifest:
                     },
                     indent=2,
                 ),
-                encoding="utf-8",
             )
         elif fmt == "csv":
-            with path.open("w", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=self.entries[0].keys())
-                writer.writeheader()
-                writer.writerows(self.entries)
+            import io
+
+            buf = io.StringIO(newline="")
+            writer = csv.DictWriter(buf, fieldnames=self.entries[0].keys())
+            writer.writeheader()
+            writer.writerows(self.entries)
+            atomic_write_text(path, buf.getvalue(), newline="")
         else:
             raise ValueError(f"unsupported manifest format: {fmt}")

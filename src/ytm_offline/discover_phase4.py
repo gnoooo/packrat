@@ -26,11 +26,7 @@ from ytm_offline.discover import (
 )
 from ytm_offline.lastfm import LastFMClient
 from ytm_offline.manifest import Manifest
-from ytm_offline.sizes import format_size, parse_size
-
-
-# Conservative audio bitrate estimate for dry-run size (bytes / second).
-_EST_BYTES_PER_SECOND = 16000
+from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
 
 class _DummyArchive:
@@ -41,6 +37,9 @@ class _DummyArchive:
 
     def __contains__(self, video_id: object) -> bool:
         return str(video_id) in self._ids
+
+    def ids(self) -> set[str]:
+        return set(self._ids)
 
 
 def _load_manifest_ids(path: pathlib.Path | str) -> set[str]:
@@ -66,10 +65,6 @@ def _load_manifest_keys(path: pathlib.Path | str) -> set[tuple[str, str]]:
         }
     except Exception:
         return set()
-
-
-def _heuristic_size(duration: int) -> int:
-    return int(duration * _EST_BYTES_PER_SECOND)
 
 
 def _build_artist_families(
@@ -176,7 +171,7 @@ def build_profile(
 
     liked_video_ids = {t["videoId"] for t in liked_music if t.get("videoId")}
     history_video_ids = {t["videoId"] for t in history_music if t.get("videoId")}
-    archive_ids = set(archive._ids)
+    archive_ids = archive.ids()
     discover_ids = _load_manifest_ids(discover_manifest_path) if discover_manifest_path else set()
     library_video_ids = liked_video_ids | history_video_ids | archive_ids | discover_ids
 
@@ -786,7 +781,7 @@ def run_discover_phase4(
         album_counts[(artist, album)] += 1
 
         duration = track.get("duration") or 0
-        est_size = _heuristic_size(duration)
+        est_size = heuristic_size(duration)
         if max_size_bytes is not None and est_size > max_size_bytes:
             status = "skipped_size"
             skipped_by_size += 1

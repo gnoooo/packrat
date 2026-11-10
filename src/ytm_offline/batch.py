@@ -14,6 +14,9 @@ from ytm_offline.naming import SINGLES_DIR_DEFAULT
 from ytm_offline import runs
 
 
+_SAVE_INTERVAL = 10
+
+
 def _emit(
     callback: Callable[[dict[str, Any]], None] | None,
     type_: str,
@@ -136,7 +139,9 @@ def run_batch_download(
         if result.status == "skipped_size":
             consecutive_retryable = 0
 
-        if save_callback is not None:
+        if save_callback is not None and (
+            i % _SAVE_INTERVAL == 0 or stop_early or (control and control.should_stop())
+        ):
             save_callback(entries)
 
         if i < len(entries) and not stop_early and not (control and control.should_stop()):
