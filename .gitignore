@@ -1,12 +1,20 @@
 # Credentials / auth files (never commit)
 browser.json
-cookies.txt
+cookies*.txt
 headers_auth.json
+auth.json
+headers.json
 *.json.auth
+*.key
+lastfm.key
 
 # Downloads and state
 music/
 .ytm_offline_archive
+
+# Run history (user data, wherever it is written)
+runs.jsonl
+**/playlists/runs.jsonl
 
 # Python build artifacts
 __pycache__/
@@ -21,3 +29,14 @@ dist/
 
 # Runtime logs
 logs/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+
+# Archives
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
