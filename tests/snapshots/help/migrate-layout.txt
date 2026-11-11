@@ -1,32 +1,9 @@
-usage: ytm-offline migrate-layout [-h] [--output OUTPUT] [--archive ARCHIVE]
-                                  [--delay DELAY] [--max-size MAX_SIZE]
-                                  [--limit LIMIT] [--dry-run] [--yes] [--tui]
-                                  [--theme THEME] [--no-anim] [--no-color]
-                                  [--ascii]
-                                  [--palette {auto,custom,fixed,basic}]
+usage: ytm-offline migrate-layout [-h] [--output OUTPUT] [--dry-run] [--yes]
+                                  [--undo]
 
 options:
-  -h, --help            show this help message and exit
-
-Run control:
-  --output, -o OUTPUT   output root directory (env: YTM_OUTPUT; default:
-                        music)
-  --archive ARCHIVE     download archive file (env: YTM_ARCHIVE; default:
-                        .ytm_offline_archive)
-  --delay DELAY         seconds between downloads (default: 7.0)
-  --max-size MAX_SIZE   skip tracks estimated larger than SIZE (e.g. 3GB)
-  --limit LIMIT         max new tracks to download this run (after dedupe and
-                        selection)
-  --dry-run, -n         write the manifest, download nothing, touch no archive
-  --yes, -y             skip confirmation prompts and use the default
-                        selection
-  --tui                 use the curses TUI
-
-Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
-  --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
-  --no-color            disable TUI colors (env: NO_COLOR)
-  --ascii               use ASCII progress bars in the TUI
-  --palette {auto,custom,fixed,basic}
-                        color tier (auto/custom/fixed/basic) (default: auto)
+  -h, --help           show this help message and exit
+  --output, -o OUTPUT  output root directory (env: YTM_OUTPUT; default: music)
+  --dry-run, -n        print the move plan without moving anything
+  --yes, -y            move without asking
+  --undo               undo the last recorded migration

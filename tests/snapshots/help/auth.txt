@@ -1,25 +1,8 @@
-usage: ytm-offline auth [-h] [--headers HEADERS] [--cookies COOKIES]
-                        [--cookies-from-browser COOKIES_FROM_BROWSER]
-                        [--theme THEME] [--no-anim] [--no-color] [--ascii]
-                        [--palette {auto,custom,fixed,basic}]
+usage: ytm-offline auth [-h] [--headers HEADERS]
 
 options:
-  -h, --help            show this help message and exit
+  -h, --help         show this help message and exit
 
 Authentication:
-  --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
-                        YTM_HEADERS)
-  --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
-                        YTM_COOKIES)
-  --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp --cookies-from-browser
-                        (env: YTM_COOKIES_FROM_BROWSER)
-
-Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
-  --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
-  --no-color            disable TUI colors (env: NO_COLOR)
-  --ascii               use ASCII progress bars in the TUI
-  --palette {auto,custom,fixed,basic}
-                        color tier (auto/custom/fixed/basic) (default: auto)
+  --headers HEADERS  path to ytmusicapi browser-headers JSON file (env:
+                     YTM_HEADERS)

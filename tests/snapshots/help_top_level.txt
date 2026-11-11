@@ -1,6 +1,7 @@
 usage: ytm-offline [-h] [--headers HEADERS] [--cookies COOKIES]
                    [--cookies-from-browser COOKIES_FROM_BROWSER]
-                   [--theme THEME] [--no-anim] [--no-color] [--ascii]
+                   [--theme {ocean,sunset,matrix,mono}] [--no-anim]
+                   [--no-color] [--ascii]
                    [--palette {auto,custom,fixed,basic}] [-v] [--version]
                    {auth,library,download-one,sync,download-manifest,artist,discover,ui} ...
 
@@ -29,12 +30,12 @@ Authentication:
   --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
                         YTM_COOKIES)
   --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp --cookies-from-browser
+                        browser/profile for yt-dlp, e.g. firefox[:profile]
                         (env: YTM_COOKIES_FROM_BROWSER)
 
 Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
+  --theme {ocean,sunset,matrix,mono}
+                        TUI color theme (default: ocean)
   --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
   --no-color            disable TUI colors (env: NO_COLOR)
   --ascii               use ASCII progress bars in the TUI

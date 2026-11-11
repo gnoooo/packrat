@@ -443,10 +443,6 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
 def cmd_discover_phase4(args: argparse.Namespace) -> int:
     """Discover taste-adjacent tracks beyond YT Music's own sections."""
-    if not args.dry_run:
-        print("discover-phase4 currently supports dry-run only; add --dry-run", file=sys.stderr)
-        return 1
-
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -581,11 +577,13 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
 
     # Generic manifest (sync, discover, albums, queues, phase4, radio, ...).
     manifest = Manifest.load(manifest_path)
-    entries = manifest.pending()
     if getattr(args, "failed_only", False):
-        entries = [e for e in entries if e.get("status") not in ("downloaded", "archived")]
+        entries = [e for e in manifest.entries if e.get("status") == "failed"]
+    else:
+        entries = manifest.pending()
     if not entries:
-        print("no pending tracks in manifest")
+        print("no failed tracks in manifest" if getattr(args, "failed_only", False)
+              else "no pending tracks in manifest")
         return 0
     total_pending = len(entries)
     limit = getattr(args, "limit", None)
@@ -596,16 +594,19 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     total_size = sum((e.get("est_size") or 0) for e in entries)
     print(f"pending tracks: {len(entries)}")
     print(f"estimated size: {format_size(total_size)}")
+    if getattr(args, "dry_run", False):
+        print("dry-run: no downloads")
+        return 0
 
     if not args.yes:
         if sys.stdin.isatty():
             answer = input("download now? [y/N] ").strip().lower()
             if answer not in ("y", "yes"):
                 print("not downloading (use --yes to skip the prompt)")
-                return 0
+                return 2
         else:
-            print("not downloading (use --yes to skip the prompt)")
-            return 0
+            print("not downloading: no TTY and --yes was not given", file=sys.stderr)
+            return 2
 
     stem = manifest_path.stem
     if stem.endswith(".manifest"):
@@ -835,6 +836,8 @@ def cmd_artist(args: argparse.Namespace) -> int:
             albums_only=args.albums_only,
             no_singles=args.no_singles,
             duration_window=args.duration_window,
+            min_duration=getattr(args, "min_duration", 90),
+            max_duration=getattr(args, "max_duration", 540),
             scope=scope,
             top_limit=args.top_limit,
             max_per_album=args.max_per_album,
@@ -864,6 +867,8 @@ def cmd_artist(args: argparse.Namespace) -> int:
                 output_root=output_root,
                 archive_path=args.archive,
                 duration_window=args.duration_window,
+                min_duration=getattr(args, "min_duration", 90),
+                max_duration=getattr(args, "max_duration", 540),
                 singles_dir=getattr(args, "singles_dir", "Singles"),
                 delay=args.delay,
             )
@@ -903,6 +908,8 @@ def cmd_artist(args: argparse.Namespace) -> int:
                 output_root=output_root,
                 archive_path=args.archive,
                 duration_window=args.duration_window,
+                min_duration=getattr(args, "min_duration", 90),
+                max_duration=getattr(args, "max_duration", 540),
                 singles_dir=getattr(args, "singles_dir", "Singles"),
                 delay=args.delay,
             )
@@ -928,6 +935,8 @@ def cmd_artist(args: argparse.Namespace) -> int:
                     output_root=output_root,
                     archive_path=args.archive,
                     duration_window=args.duration_window,
+                    min_duration=getattr(args, "min_duration", 90),
+                    max_duration=getattr(args, "max_duration", 540),
                     singles_dir=getattr(args, "singles_dir", "Singles"),
                     delay=args.delay,
                 )
@@ -1252,9 +1261,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     cli_args.resolve_run_control_aliases(args)
     cli_compat.warn_deprecated_options(raw)
 
-    if args.command in _NEEDS_HEADERS and not args.headers:
-        print("--headers or YTM_HEADERS is required for this command", file=sys.stderr)
-        return 1
+    verbose = cli_args.resolve_verbose(args)
+    if verbose:
+        import logging
+
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(levelname)-8s %(message)s",
+        )
+
+    if args.command in _NEEDS_HEADERS:
+        if not args.headers:
+            print(
+                "error: YTM_HEADERS: no headers file configured "
+                "(use --headers or set YTM_HEADERS)",
+                file=sys.stderr,
+            )
+            return 2
+        if not pathlib.Path(args.headers).expanduser().exists():
+            print(
+                f"error: YTM_HEADERS: file not found: {args.headers}",
+                file=sys.stderr,
+            )
+            return 2
 
     from ytm_offline import tui as _tui
 

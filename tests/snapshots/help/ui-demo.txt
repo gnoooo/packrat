@@ -1,5 +1,6 @@
-usage: ytm-offline ui demo [-h] [--theme THEME] [--no-anim] [--no-color]
-                           [--ascii] [--palette {auto,custom,fixed,basic}]
+usage: ytm-offline ui demo [-h] [--theme {ocean,sunset,matrix,mono}]
+                           [--no-anim] [--no-color] [--ascii]
+                           [--palette {auto,custom,fixed,basic}]
                            [--seconds SECONDS]
 
 options:
@@ -7,8 +8,8 @@ options:
   --seconds SECONDS     target duration of the simulated batch (default: 60.0)
 
 Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
+  --theme {ocean,sunset,matrix,mono}
+                        TUI color theme (default: ocean)
   --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
   --no-color            disable TUI colors (env: NO_COLOR)
   --ascii               use ASCII progress bars in the TUI

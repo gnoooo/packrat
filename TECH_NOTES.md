@@ -109,3 +109,21 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 - Artist top-songs mode is not reachable through the A/S picker, so `--scope`,
   `--top-limit` and `--max-per-album` were removed from the CLI.
 - Deprecated aliases have a documented removal target of v0.2.0 in README.
+
+### CLI uniformity pass
+
+- Parent parsers are now narrow per command: headers-only commands do not accept
+  cookies, cookies-only commands do not accept headers, and `--tui` only exists
+  where the TUI is used.
+- `download-one` only accepts `--output` plus cookie auth.
+- `download-manifest --dry-run` stops after the recap; `--failed-only` selects
+  entries with status `failed`.
+- `-v` configures DEBUG logging.
+- Artist `--min-duration`/`--max-duration` now reach the catalog filter.
+- `discover taste` is plan-only; unused run-control options were removed.
+- `migrate-layout` has its own parser and a visible `--undo`.
+- `discover sections` uses `--sources`; `--source` is a hidden alias.
+- `discover taste` uses `--per-album`; `--per-container` is a hidden alias.
+- Deprecated option aliases are hidden from help.
+- Invalid `YTM_HEADERS` exits 2 and names the variable.
+- `--theme` has explicit choices.

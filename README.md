@@ -210,7 +210,7 @@ Commands:
 
 Global options work before or after the subcommand. Run-control options are
 `--output/-o`, `--archive`, `--delay`, `--max-size`, `--limit`, `--dry-run/-n`,
-`--yes/-y`, `--tui`, and `--ascii`.
+`--yes/-y` (where a command prompts), `--tui`, and `--ascii`.
 
 `--limit N` is the maximum number of **new** tracks downloaded in one run. It is
 applied after archive dedupe and selection, uniformly across `sync`, `artist`,
@@ -232,11 +232,11 @@ hidden `--force-new-archive` skips that check.
 ytm-offline auth
 ytm-offline library --top 10
 ytm-offline sync --source liked --limit 5 --dry-run
-ytm-offline sync --source liked --limit 20 --yes
+ytm-offline sync --source liked --limit 20
 ytm-offline download-manifest --manifest music/playlists/liked.manifest.json --failed-only
 ytm-offline artist "BABYMETAL" --select "A[1-3],S[*]" --yes
 ytm-offline artist --from-file artists.txt --also "Another Artist"
-ytm-offline discover sections --dry-run
+ytm-offline discover sections --sources home,charts --dry-run
 ytm-offline discover radio <video-id> --dry-run
 ytm-offline ui glyphs
 ```

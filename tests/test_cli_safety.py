@@ -385,7 +385,7 @@ def test_archive_warning_requires_confirmation_even_with_yes(tmp_path, monkeypat
     (output / "song.m4a").write_bytes(b"x")
     archive = tmp_path / "new_archive"
     args = _args([
-        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "artist", "X", "--headers", "/tmp/x",
         "--output", str(output), "--archive", str(archive), "--yes",
     ])
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)

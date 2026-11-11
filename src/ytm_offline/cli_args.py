@@ -181,48 +181,59 @@ def _help_text(text: str, suppress: bool) -> str:
     return argparse.SUPPRESS if suppress else text
 
 
-def build_auth_parent(suppress_defaults: bool = False, suppress_help: bool = False) -> argparse.ArgumentParser:
+def build_auth_parent(
+    suppress_defaults: bool = False,
+    suppress_help: bool = False,
+    *,
+    headers: bool = True,
+    cookies: bool = True,
+) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     g = p.add_argument_group("Authentication")
 
-    default = argparse.SUPPRESS if suppress_defaults else _headers_default()
-    g.add_argument(
-        "--headers",
-        default=default,
-        help=_help_text(
-            "path to ytmusicapi browser-headers JSON file (env: YTM_HEADERS)",
-            suppress_help,
-        ),
-    )
+    if headers:
+        default = argparse.SUPPRESS if suppress_defaults else _headers_default()
+        g.add_argument(
+            "--headers",
+            default=default,
+            help=_help_text(
+                "path to ytmusicapi browser-headers JSON file (env: YTM_HEADERS)",
+                suppress_help,
+            ),
+        )
 
-    default = argparse.SUPPRESS if suppress_defaults else _cookies_default()
-    g.add_argument(
-        "--cookies",
-        default=default,
-        help=_help_text(
-            "path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)",
-            suppress_help,
-        ),
-    )
+    if cookies:
+        default = argparse.SUPPRESS if suppress_defaults else _cookies_default()
+        g.add_argument(
+            "--cookies",
+            default=default,
+            help=_help_text(
+                "path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)",
+                suppress_help,
+            ),
+        )
 
-    default = argparse.SUPPRESS if suppress_defaults else _cookies_from_browser_default()
-    g.add_argument(
-        "--cookies-from-browser",
-        dest="cookies_from_browser",
-        default=default,
-        help=_help_text(
-            "browser/profile for yt-dlp --cookies-from-browser (env: YTM_COOKIES_FROM_BROWSER)",
-            suppress_help,
-        ),
-    )
+        default = (
+            argparse.SUPPRESS if suppress_defaults else _cookies_from_browser_default()
+        )
+        g.add_argument(
+            "--cookies-from-browser",
+            dest="cookies_from_browser",
+            default=default,
+            help=_help_text(
+                "browser/profile for yt-dlp, e.g. firefox[:profile] "
+                "(env: YTM_COOKIES_FROM_BROWSER)",
+                suppress_help,
+            ),
+        )
 
-    # Deprecated alias: combined with --cookies-from-browser in post-processing.
-    g.add_argument(
-        "--browser-profile",
-        dest="browser_profile_alias",
-        default=argparse.SUPPRESS,
-        help=argparse.SUPPRESS,
-    )
+        # Deprecated alias: combined with --cookies-from-browser in post-processing.
+        g.add_argument(
+            "--browser-profile",
+            dest="browser_profile_alias",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
     return p
 
 
@@ -236,119 +247,137 @@ def build_run_control_parent(
     limit_help: str | None = None,
     output_default: str | None | object = _UNSET,
     output_help: str | None = None,
+    *,
+    output: bool = True,
+    archive: bool = True,
+    delay: bool = True,
+    max_size: bool = True,
+    limit: bool = True,
+    dry_run: bool = True,
+    yes: bool = True,
+    tui: bool = True,
+    force_new_archive: bool = True,
 ) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     g = p.add_argument_group("Run control")
 
-    if output_default is _UNSET:
-        default = argparse.SUPPRESS if suppress_defaults else _output_default()
-    else:
-        default = output_default
-    help_text = output_help or f"output root directory (env: YTM_OUTPUT; default: {DEFAULT_OUTPUT})"
-    g.add_argument(
-        "--output",
-        "-o",
-        dest="output",
-        default=default,
-        help=_help_text(help_text, suppress_help),
-    )
+    if output:
+        if output_default is _UNSET:
+            default = argparse.SUPPRESS if suppress_defaults else _output_default()
+        else:
+            default = output_default
+        help_text = output_help or f"output root directory (env: YTM_OUTPUT; default: {DEFAULT_OUTPUT})"
+        g.add_argument(
+            "--output",
+            "-o",
+            dest="output",
+            default=default,
+            help=_help_text(help_text, suppress_help),
+        )
 
-    default = argparse.SUPPRESS if suppress_defaults else _archive_default()
-    g.add_argument(
-        "--archive",
-        dest="archive",
-        default=default,
-        help=_help_text(
-            f"download archive file (env: YTM_ARCHIVE; default: {DEFAULT_ARCHIVE})",
-            suppress_help,
-        ),
-    )
+    if archive:
+        default = argparse.SUPPRESS if suppress_defaults else _archive_default()
+        g.add_argument(
+            "--archive",
+            dest="archive",
+            default=default,
+            help=_help_text(
+                f"download archive file (env: YTM_ARCHIVE; default: {DEFAULT_ARCHIVE})",
+                suppress_help,
+            ),
+        )
 
-    default = argparse.SUPPRESS if suppress_defaults else DEFAULT_DELAY
-    g.add_argument(
-        "--delay",
-        dest="delay",
-        type=non_negative_float,
-        default=default,
-        help=_help_text(
-            f"seconds between downloads (default: {DEFAULT_DELAY})",
-            suppress_help,
-        ),
-    )
+    if delay:
+        default = argparse.SUPPRESS if suppress_defaults else DEFAULT_DELAY
+        g.add_argument(
+            "--delay",
+            dest="delay",
+            type=non_negative_float,
+            default=default,
+            help=_help_text(
+                f"seconds between downloads (default: {DEFAULT_DELAY})",
+                suppress_help,
+            ),
+        )
 
-    default = argparse.SUPPRESS if suppress_defaults else None
-    g.add_argument(
-        "--max-size",
-        dest="max_size",
-        type=valid_size,
-        default=default,
-        help=_help_text(
-            "skip tracks estimated larger than SIZE (e.g. 3GB)",
-            suppress_help,
-        ),
-    )
+    if max_size:
+        default = argparse.SUPPRESS if suppress_defaults else None
+        g.add_argument(
+            "--max-size",
+            dest="max_size",
+            type=valid_size,
+            default=default,
+            help=_help_text(
+                "skip tracks estimated larger than SIZE (e.g. 3GB)",
+                suppress_help,
+            ),
+        )
 
-    limit_action_default = (
-        argparse.SUPPRESS
-        if (suppress_defaults and limit_default is None)
-        else limit_default
-    )
-    limit_help_text = (
-        limit_help
-        if limit_help is not None
-        else "max new tracks to download this run (after dedupe and selection)"
-    )
-    g.add_argument(
-        "--limit",
-        dest="limit",
-        type=positive_int,
-        default=limit_action_default,
-        help=_help_text(limit_help_text, suppress_help),
-    )
+    if limit:
+        limit_action_default = (
+            argparse.SUPPRESS
+            if (suppress_defaults and limit_default is None)
+            else limit_default
+        )
+        limit_help_text = (
+            limit_help
+            if limit_help is not None
+            else "max new tracks to download this run (after dedupe and selection)"
+        )
+        g.add_argument(
+            "--limit",
+            dest="limit",
+            type=positive_int,
+            default=limit_action_default,
+            help=_help_text(limit_help_text, suppress_help),
+        )
 
-    dry_default = argparse.SUPPRESS if suppress_defaults else False
-    g.add_argument(
-        "--dry-run",
-        "-n",
-        dest="dry_run",
-        action="store_true",
-        default=dry_default,
-        help=_help_text(
-            "write the manifest, download nothing, touch no archive",
-            suppress_help,
-        ),
-    )
+    if dry_run:
+        dry_default = argparse.SUPPRESS if suppress_defaults else False
+        g.add_argument(
+            "--dry-run",
+            "-n",
+            dest="dry_run",
+            action="store_true",
+            default=dry_default,
+            help=_help_text(
+                "plan only; write the manifest and download nothing",
+                suppress_help,
+            ),
+        )
 
-    yes_default = argparse.SUPPRESS if suppress_defaults else False
-    g.add_argument(
-        "--yes",
-        "-y",
-        dest="yes",
-        action="store_true",
-        default=yes_default,
-        help=_help_text(
-            "skip confirmation prompts and use the default selection",
-            suppress_help,
-        ),
-    )
+    if yes:
+        yes_default = argparse.SUPPRESS if suppress_defaults else False
+        g.add_argument(
+            "--yes",
+            "-y",
+            dest="yes",
+            action="store_true",
+            default=yes_default,
+            help=_help_text(
+                "skip confirmation prompts",
+                suppress_help,
+            ),
+        )
 
-    tui_default = argparse.SUPPRESS if suppress_defaults else False
-    g.add_argument(
-        "--tui",
-        dest="tui",
-        action="store_true",
-        default=tui_default,
-        help=_help_text("use the curses TUI", suppress_help),
-    )
+    if tui:
+        tui_default = argparse.SUPPRESS if suppress_defaults else False
+        g.add_argument(
+            "--tui",
+            dest="tui",
+            action="store_true",
+            default=tui_default,
+            help=_help_text("use the curses TUI", suppress_help),
+        )
 
-    # Hidden safety valve for new-archive detection.
-    g.add_argument(
-        "--force-new-archive",
-        dest="force_new_archive",
-        action="store_true",
-        default=argparse.SUPPRESS,
-        help=argparse.SUPPRESS,
-    )
+    if force_new_archive:
+        g.add_argument(
+            "--force-new-archive",
+            dest="force_new_archive",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
 
     # Deprecated layout/format env aliases.
     g.add_argument(
@@ -484,9 +513,10 @@ def build_display_parent(
     g.add_argument(
         "--theme",
         dest="theme",
+        choices=("ocean", "sunset", "matrix", "mono"),
         default=argparse.SUPPRESS if suppress_defaults else DEFAULT_THEME,
         help=_help_text(
-            f"TUI color theme (ocean/sunset/matrix/mono) (default: {DEFAULT_THEME})",
+            f"TUI color theme (default: {DEFAULT_THEME})",
             suppress_help,
         ),
     )
@@ -795,26 +825,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
+    headers_only = build_auth_parent(
+        suppress_defaults=True, cookies=False
+    )
+    cookies_only = build_auth_parent(
+        suppress_defaults=True, headers=False
+    )
+
     # Auth-only helpers
     p_auth = sub.add_parser(
         "auth",
         help="validate ytmusicapi auth",
-        parents=[
-            build_auth_parent(suppress_defaults=True),
-            build_display_parent(suppress_defaults=True),
-            verbose_silent,
-        ],
+        parents=[headers_only, verbose_silent],
     )
     p_auth.set_defaults(func=_noop)
 
     p_library = sub.add_parser(
         "library",
         help="list library playlists",
-        parents=[
-            build_auth_parent(suppress_defaults=True),
-            build_display_parent(suppress_defaults=True),
-            verbose_silent,
-        ],
+        parents=[headers_only, verbose_silent],
     )
     p_library.add_argument(
         "--top",
@@ -844,7 +873,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_download_one = sub.add_parser(
         "download-one",
         help="download and verify one track by video ID",
-        parents=dl_parents,
+        parents=[
+            cookies_only,
+            build_run_control_parent(
+                suppress_defaults=True,
+                archive=False,
+                delay=False,
+                max_size=False,
+                limit=False,
+                dry_run=False,
+                yes=False,
+                tui=False,
+                force_new_archive=False,
+            ),
+            verbose_silent,
+        ],
     )
     p_download_one.add_argument("video_id", help="YouTube Music video ID")
     p_download_one.set_defaults(func=_noop)
@@ -852,7 +895,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser(
         "sync",
         help="sync liked songs or a playlist",
-        parents=dl_parents,
+        parents=[
+            build_auth_parent(suppress_defaults=True),
+            build_run_control_parent(suppress_defaults=True, yes=False),
+            build_display_parent(suppress_defaults=True),
+            verbose_silent,
+        ],
     )
     p_sync.add_argument(
         "--source",
@@ -862,7 +910,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.set_defaults(func=_noop)
 
     manifest_parents = [
-        build_auth_parent(suppress_defaults=True),
+        build_auth_parent(suppress_defaults=True, headers=False),
         build_run_control_parent(
             suppress_defaults=True,
             output_default=None,
@@ -882,7 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="failed_only",
         action="store_true",
         default=False,
-        help="retry only failed/pending entries",
+        help="retry only entries whose status is failed",
     )
     p_manifest.set_defaults(func=_noop)
 
@@ -925,13 +973,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_sections = discover_sub.add_parser(
         "sections",
         help="Home/Charts/Moods/New Releases",
-        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
+        parents=[
+            build_auth_parent(suppress_defaults=True),
+            build_run_control_parent(suppress_defaults=True, tui=False),
+            build_display_parent(suppress_defaults=True),
+            verbose_silent,
+            build_duration_parent(suppress_defaults=True),
+        ],
+    )
+    p_sections.add_argument(
+        "--sources",
+        dest="source",
+        default="home,charts,moods,new_releases",
+        help="comma-separated discovery sources (default: home,charts,moods,new_releases)",
     )
     p_sections.add_argument(
         "--source",
         dest="source",
-        default="home,charts,moods,new_releases",
-        help="comma-separated discovery sources (default: home,charts,moods,new_releases)",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     p_sections.add_argument(
         "--country",
@@ -964,54 +1024,111 @@ def build_parser() -> argparse.ArgumentParser:
     p_taste = discover_sub.add_parser(
         "taste",
         help="taste-adjacent tracks beyond YT Music sections",
-        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
+        parents=[
+            build_auth_parent(suppress_defaults=True, cookies=False),
+            build_run_control_parent(
+                suppress_defaults=True,
+                delay=False,
+                limit=False,
+                dry_run=False,
+                yes=False,
+                tui=False,
+                force_new_archive=False,
+            ),
+            verbose_silent,
+            build_duration_parent(suppress_defaults=True),
+        ],
+    )
+    p_taste.add_argument(
+        "--quota",
+        dest="quota",
+        type=positive_int,
+        default=None,
+        help="max tracks per bucket (overrides the per-bucket defaults)",
     )
     p_taste.add_argument(
         "--deep",
-        "--quota-deep",
         dest="deep",
         type=positive_int,
         default=12,
         help="max deep-cut tracks (default: 12)",
     )
     p_taste.add_argument(
+        "--quota-deep",
+        dest="deep",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    p_taste.add_argument(
         "--adjacent",
-        "--quota-adjacent",
         dest="adjacent",
         type=positive_int,
         default=10,
         help="max adjacent-artist tracks (default: 10)",
     )
     p_taste.add_argument(
+        "--quota-adjacent",
+        dest="adjacent",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    p_taste.add_argument(
         "--radio",
-        "--quota-radio",
         dest="radio",
         type=positive_int,
         default=10,
         help="max radio tracks (default: 10)",
     )
     p_taste.add_argument(
+        "--quota-radio",
+        dest="radio",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    p_taste.add_argument(
         "--external",
-        "--quota-external",
         dest="external",
         type=positive_int,
         default=5,
         help="max external-graph tracks (default: 5)",
     )
     p_taste.add_argument(
+        "--quota-external",
+        dest="external",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    p_taste.add_argument(
         "--tag",
-        "--quota-tag",
         dest="tag",
         type=positive_int,
         default=5,
         help="max tag-search tracks (default: 5)",
     )
     p_taste.add_argument(
-        "--per-container",
+        "--quota-tag",
+        dest="tag",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    p_taste.add_argument(
+        "--per-album",
         dest="per_container",
         type=positive_int,
         default=2,
         help="max tracks per album/container (default: 2)",
+    )
+    p_taste.add_argument(
+        "--per-container",
+        dest="per_container",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     p_taste.add_argument(
         "--per-artist",
@@ -1071,11 +1188,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_queues.add_argument(
         "--per-queue",
-        "--per-queue-limit",
         dest="per_queue_limit",
         type=positive_int,
         default=25,
         help="max tracks per queue playlist (default: 25)",
+    )
+    p_queues.add_argument(
+        "--per-queue-limit",
+        dest="per_queue_limit",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     p_queues.add_argument(
         "--total-cap",
@@ -1138,11 +1261,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="auto radio built from one track URL/id",
         parents=[
             build_auth_parent(suppress_defaults=True),
-            build_run_control_parent(
-                suppress_defaults=True,
-                limit_default=None,
-                limit_help="max tracks in the radio (default: 50)",
-            ),
+            build_run_control_parent(suppress_defaults=True),
             build_display_parent(suppress_defaults=True),
             verbose_silent,
             build_duration_parent(suppress_defaults=True),
@@ -1191,16 +1310,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate = sub.add_parser(
         "migrate-layout",
         help=None,
-        parents=[
-            build_run_control_parent(suppress_defaults=True),
-            build_display_parent(suppress_defaults=True),
-            verbose_silent,
-        ],
+        parents=[verbose_silent],
+    )
+    p_migrate.add_argument(
+        "--output",
+        "-o",
+        default=_output_default(),
+        help=f"output root directory (env: YTM_OUTPUT; default: {DEFAULT_OUTPUT})",
+    )
+    p_migrate.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        default=False,
+        help="print the move plan without moving anything",
+    )
+    p_migrate.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="move without asking",
     )
     p_migrate.add_argument(
         "--undo",
         action="store_true",
         default=False,
+        help="undo the last recorded migration",
+    )
+    p_migrate.add_argument(
+        "--singles-dir",
+        dest="singles_dir_alias",
+        type=valid_singles_dir,
+        default=argparse.SUPPRESS,
         help=argparse.SUPPRESS,
     )
     p_migrate._hidden = True

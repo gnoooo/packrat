@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import pathlib
 import socket
 
 import pytest
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _dummy_headers_file():
+    """Tests pass --headers /tmp/x; make it a harmless empty JSON file."""
+    path = pathlib.Path("/tmp/x")
+    if not path.exists():
+        path.write_text("{}", encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)

@@ -608,6 +608,8 @@ def build_catalog(
     albums_only: bool = False,
     no_singles: bool = False,
     duration_window: bool = False,
+    min_duration: int = 90,
+    max_duration: int = 540,
     scope: str = "all",
     top_limit: int | None = None,
     max_per_album: int | None = None,
@@ -677,7 +679,7 @@ def build_catalog(
     owned_keys: set[tuple[str, str]] = set()
 
     def window_ok(duration: int) -> bool:
-        return not duration_window or 90 <= duration <= 540
+        return not duration_window or min_duration <= duration <= max_duration
 
     # Resolve the tracklist of EVERY release up front (tagged releases must
     # show counts too), with a cache so nothing is fetched twice.
@@ -1297,6 +1299,8 @@ def apply_selection(
     output_root: pathlib.Path,
     archive_path: str | pathlib.Path,
     duration_window: bool = False,
+    min_duration: int = 90,
+    max_duration: int = 540,
     singles_dir: str = SINGLES_DIR_DEFAULT,
     delay: float = 7.0,
 ) -> dict[str, Any] | None:
@@ -1319,7 +1323,7 @@ def apply_selection(
     selected_meta_rows: set[int] = set()
 
     def window_ok(duration: int) -> bool:
-        return not duration_window or 90 <= duration <= 540
+        return not duration_window or min_duration <= duration <= max_duration
 
     # Already-kept release entries first.
     for row in rows:

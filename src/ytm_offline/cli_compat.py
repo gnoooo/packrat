@@ -184,9 +184,17 @@ def adapt_artist(args: argparse.Namespace) -> int:
     ):
         setattrs_missing(args, **{flag: False})
 
+    min_duration = getattr(args, "min_duration", None)
+    max_duration = getattr(args, "max_duration", None)
     setattrs_missing(
         args,
-        duration_window=getattr(args, "duration_window_alias", False),
+        duration_window=(
+            getattr(args, "duration_window_alias", False)
+            or min_duration is not None
+            or max_duration is not None
+        ),
+        min_duration=min_duration or 90,
+        max_duration=max_duration or 540,
         scope="all",
         top_limit=None,
         max_per_album=None,
@@ -202,6 +210,17 @@ def adapt_discover_sections(args: argparse.Namespace) -> int:
 
 
 def adapt_discover_taste(args: argparse.Namespace) -> int:
+    quota = getattr(args, "quota", None)
+    if quota is not None:
+        for name, default in (
+            ("deep", 12),
+            ("adjacent", 10),
+            ("radio", 10),
+            ("external", 5),
+            ("tag", 5),
+        ):
+            if getattr(args, name) == default:
+                setattr(args, name, quota)
     args.quota_deep = args.deep
     args.quota_adjacent = args.adjacent
     args.quota_radio = args.radio

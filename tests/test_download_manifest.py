@@ -46,7 +46,7 @@ def test_generic_prompt_declines(
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
     args = _args(tmp_path, manifest)
-    assert cli.cmd_download_manifest(args) == 0
+    assert cli.cmd_download_manifest(args) == 2
     assert "not downloading" in capsys.readouterr().out
 
 

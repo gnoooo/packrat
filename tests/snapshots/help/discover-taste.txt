@@ -1,31 +1,23 @@
-usage: ytm-offline discover taste [-h] [--headers HEADERS] [--cookies COOKIES]
-                                  [--cookies-from-browser COOKIES_FROM_BROWSER]
-                                  [--output OUTPUT] [--archive ARCHIVE]
-                                  [--delay DELAY] [--max-size MAX_SIZE]
-                                  [--limit LIMIT] [--dry-run] [--yes] [--tui]
-                                  [--theme THEME] [--no-anim] [--no-color]
-                                  [--ascii]
-                                  [--palette {auto,custom,fixed,basic}]
+usage: ytm-offline discover taste [-h] [--headers HEADERS] [--output OUTPUT]
+                                  [--archive ARCHIVE] [--max-size MAX_SIZE]
                                   [--min-duration MIN_DURATION]
-                                  [--max-duration MAX_DURATION] [--deep DEEP]
+                                  [--max-duration MAX_DURATION]
+                                  [--quota QUOTA] [--deep DEEP]
                                   [--adjacent ADJACENT] [--radio RADIO]
                                   [--external EXTERNAL] [--tag TAG]
-                                  [--per-container PER_CONTAINER]
+                                  [--per-album PER_CONTAINER]
                                   [--per-artist PER_ARTIST] [--no-phase3]
 
 options:
   -h, --help            show this help message and exit
-  --deep, --quota-deep DEEP
-                        max deep-cut tracks (default: 12)
-  --adjacent, --quota-adjacent ADJACENT
-                        max adjacent-artist tracks (default: 10)
-  --radio, --quota-radio RADIO
-                        max radio tracks (default: 10)
-  --external, --quota-external EXTERNAL
-                        max external-graph tracks (default: 5)
-  --tag, --quota-tag TAG
-                        max tag-search tracks (default: 5)
-  --per-container PER_CONTAINER
+  --quota QUOTA         max tracks per bucket (overrides the per-bucket
+                        defaults)
+  --deep DEEP           max deep-cut tracks (default: 12)
+  --adjacent ADJACENT   max adjacent-artist tracks (default: 10)
+  --radio RADIO         max radio tracks (default: 10)
+  --external EXTERNAL   max external-graph tracks (default: 5)
+  --tag TAG             max tag-search tracks (default: 5)
+  --per-album PER_CONTAINER
                         max tracks per album/container (default: 2)
   --per-artist PER_ARTIST
                         max tracks per artist (default: 3)
@@ -34,34 +26,13 @@ options:
 Authentication:
   --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
                         YTM_HEADERS)
-  --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
-                        YTM_COOKIES)
-  --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp --cookies-from-browser
-                        (env: YTM_COOKIES_FROM_BROWSER)
 
 Run control:
   --output, -o OUTPUT   output root directory (env: YTM_OUTPUT; default:
                         music)
   --archive ARCHIVE     download archive file (env: YTM_ARCHIVE; default:
                         .ytm_offline_archive)
-  --delay DELAY         seconds between downloads (default: 7.0)
   --max-size MAX_SIZE   skip tracks estimated larger than SIZE (e.g. 3GB)
-  --limit LIMIT         max new tracks to download this run (after dedupe and
-                        selection)
-  --dry-run, -n         write the manifest, download nothing, touch no archive
-  --yes, -y             skip confirmation prompts and use the default
-                        selection
-  --tui                 use the curses TUI
-
-Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
-  --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
-  --no-color            disable TUI colors (env: NO_COLOR)
-  --ascii               use ASCII progress bars in the TUI
-  --palette {auto,custom,fixed,basic}
-                        color tier (auto/custom/fixed/basic) (default: auto)
 
 Selection:
   --min-duration MIN_DURATION

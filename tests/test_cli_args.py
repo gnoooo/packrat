@@ -106,7 +106,7 @@ def test_env_falls_back_to_default(monkeypatch):
         (["--archive", "arc"], "arc", ["sync", "--source", "liked"]),
         (["--delay", "5"], 5.0, ["sync", "--source", "liked"]),
         (["--limit", "10"], 10, ["sync", "--source", "liked"]),
-        (["--yes"], True, ["sync", "--source", "liked"]),
+        (["--yes"], True, ["artist", "X"]),
         (["--dry-run"], True, ["sync", "--source", "liked"]),
         (["--theme", "matrix"], "matrix", ["sync", "--source", "liked"]),
         (["--no-color"], True, ["sync", "--source", "liked"]),
@@ -185,6 +185,8 @@ def test_shared_options_have_same_definition_across_commands(parser):
                 assert action.type == ref.type, f"{name} {opt} type mismatch"
                 # A command may legitimately override help/default for a shared option.
                 if name == "download-manifest" and opt == "--output":
+                    continue
+                if name == "migrate-layout" and opt in ("--dry-run", "--yes"):
                     continue
                 assert action.help == ref.help, f"{name} {opt} help mismatch"
 

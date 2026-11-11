@@ -4,8 +4,8 @@ usage: ytm-offline discover queues [-h] [--headers HEADERS]
                                    [--output OUTPUT] [--archive ARCHIVE]
                                    [--delay DELAY] [--max-size MAX_SIZE]
                                    [--limit LIMIT] [--dry-run] [--yes] [--tui]
-                                   [--theme THEME] [--no-anim] [--no-color]
-                                   [--ascii]
+                                   [--theme {ocean,sunset,matrix,mono}]
+                                   [--no-anim] [--no-color] [--ascii]
                                    [--palette {auto,custom,fixed,basic}]
                                    [--min-duration MIN_DURATION]
                                    [--max-duration MAX_DURATION]
@@ -26,7 +26,7 @@ options:
                         tracks to seed second-hop queues (default: 3)
   --per-artist-per-queue PER_ARTIST_PER_QUEUE
                         max tracks per artist within one queue (default: 3)
-  --per-queue, --per-queue-limit PER_QUEUE_LIMIT
+  --per-queue PER_QUEUE_LIMIT
                         max tracks per queue playlist (default: 25)
   --random-seed RANDOM_SEED
                         seed for reproducible seed selection
@@ -37,7 +37,7 @@ Authentication:
   --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
                         YTM_COOKIES)
   --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp --cookies-from-browser
+                        browser/profile for yt-dlp, e.g. firefox[:profile]
                         (env: YTM_COOKIES_FROM_BROWSER)
 
 Run control:
@@ -49,14 +49,13 @@ Run control:
   --max-size MAX_SIZE   skip tracks estimated larger than SIZE (e.g. 3GB)
   --limit LIMIT         max new tracks to download this run (after dedupe and
                         selection)
-  --dry-run, -n         write the manifest, download nothing, touch no archive
-  --yes, -y             skip confirmation prompts and use the default
-                        selection
+  --dry-run, -n         plan only; write the manifest and download nothing
+  --yes, -y             skip confirmation prompts
   --tui                 use the curses TUI
 
 Display:
-  --theme THEME         TUI color theme (ocean/sunset/matrix/mono) (default:
-                        ocean)
+  --theme {ocean,sunset,matrix,mono}
+                        TUI color theme (default: ocean)
   --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
   --no-color            disable TUI colors (env: NO_COLOR)
   --ascii               use ASCII progress bars in the TUI
