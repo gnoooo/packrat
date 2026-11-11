@@ -4,26 +4,23 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import re
-import sys
 from typing import Any, Callable
 
 from ytmusicapi import YTMusic
 
-from ytm_offline.archive import Archive
-from ytm_offline.batch import run_batch_download
-from ytm_offline.download import estimate_track
-from ytm_offline.manifest import Manifest, atomic_write_text
-from ytm_offline.naming import SINGLES_DIR_DEFAULT
-from ytm_offline.normalize import (
+from packrat.archive import Archive
+from packrat.batch import exit_code_from_result, run_batch_download
+from packrat.manifest import Manifest
+from packrat.naming import SINGLES_DIR_DEFAULT
+from packrat.normalize import (
     album_name as _album_name,
     artist_name as _artist_name,
     duration_seconds as _duration_seconds,
     normalize as _normalize,
     track_key as _track_key,
 )
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import format_size, parse_size
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import format_size, heuristic_size
 
 logger = logging.getLogger(__name__)
 
@@ -46,38 +43,6 @@ def _video_type(raw: dict[str, Any], yt: YTMusic | None = None) -> str | None:
         except Exception as exc:
             logger.debug("optional API lookup failed: %s", exc)
     return None
-
-
-def _is_music_track(
-    raw: dict[str, Any],
-    yt: YTMusic | None,
-    min_duration: int,
-    max_duration: int,
-) -> bool:
-    """Keep only official music tracks in the configured duration window."""
-    # Drop obvious podcasts / live / mix uploads.
-    if raw.get("podcastId") or "podcast" in str(raw.get("type", "")).lower():
-        return False
-
-    video_type = _video_type(raw, yt)
-    if video_type not in ALLOWED_VIDEO_TYPES:
-        return False
-
-    duration = _duration_seconds(raw, yt)
-    if duration is None:
-        return False
-    if not (min_duration <= duration <= max_duration):
-        return False
-
-    # get_song also tells us if it is live content.
-    if yt is not None and raw.get("videoId"):
-        try:
-            song = yt.get_song(raw["videoId"])
-            if song["videoDetails"].get("isLiveContent"):
-                return False
-        except Exception as exc:
-            logger.debug("optional API lookup failed: %s", exc)
-    return True
 
 
 def _to_track(
@@ -214,9 +179,14 @@ def _resolve_album_tracks(
         logger.warning("discovery source failed: %s", exc)
         return []
     tracks = []
+    album_artists = data.get("artists") or []
     for t in data.get("tracks", [])[:limit]:
         t["__container__"] = container
         t["__reason__"] = reason
+        if album_artists:
+            # Album tracks can list a featured artist first; the album artist
+            # is the one that owns the folder.
+            t["artists"] = album_artists
         tracks.append(t)
     return tracks
 
@@ -452,8 +422,6 @@ def run_discover(
     cookies_from_browser: str | None,
     browser_profile: str | None,
     max_size: str | None,
-    dry_run: bool,
-    output_root: str,
     singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> tuple[Manifest, dict[str, Any]]:
     yt = YTMusic(headers_path)
@@ -469,7 +437,7 @@ def run_discover(
         "charts": discover_charts,
         "moods": discover_moods,
         "new_releases": discover_new_releases,
-        }
+    }
 
     for source in sources:
         if source == "charts":
@@ -507,42 +475,17 @@ def run_discover(
             seen_video_ids.add(t["video_id"])
             seen_keys.add((_normalize(t["artist"]), _normalize(t["title"])))
 
-    # Estimate sizes for pending tracks.
-    max_size_bytes = parse_size(max_size) if max_size else None
+    # Estimate sizes from the already-known durations.  Do not run yt-dlp
+    # once per track here: that made discovery startup network-bound and was
+    # repeated again by download_track.  The real max-size check happens in
+    # download_track, where the actual format size is available.
     manifest = Manifest()
     total_est = 0
     skipped_size = 0
     for t in all_tracks:
-        est = None
+        est = heuristic_size(int(t.get("duration") or 0)) or None
         if t["video_id"] not in archive:
-            info = estimate_track(
-                t["video_id"],
-                cookies=cookies,
-                cookies_from_browser=cookies_from_browser,
-                browser_profile=browser_profile,
-            )
-            if info:
-                est = info.get("filesize_approx") or sum(
-                    f.get("filesize_approx") or 0 for f in info.get("requested_formats") or [info]
-                )
-                est = int(est) if est else None
-                if max_size_bytes and est and est > max_size_bytes:
-                    skipped_size += 1
-                    manifest.add(
-                        t["video_id"],
-                        t["title"],
-                        t["artist"],
-                        t["album"],
-                        est,
-                        "skipped_size",
-                        path=None,
-                        source=t["source"],
-                        container=t["container"],
-                        reason=t["reason"],
-                        singles_dir=singles_dir,
-                    )
-                    continue
-                total_est += est or 0
+            total_est += est or 0
         manifest.add(
             t["video_id"],
             t["title"],
@@ -586,6 +529,7 @@ def download_pending(
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     control: Any = None,
     limit: int | None = None,
+    max_size: int | None = None,
 ) -> int:
     """Download the pending tracks from a discovery manifest.
 
@@ -607,11 +551,12 @@ def download_pending(
 
     def save_callback(current_entries: list[dict[str, Any]]) -> None:
         # current_entries is the pending subset; the original dicts are mutated
-        # in place, so manifest.entries already reflects the updates.
+        # in place, so manifest.entries already reflects the updates. Build the
+        # playlist from the whole manifest so resumed runs keep earlier tracks.
         manifest.write(manifest_path, "json")
         downloaded = [
             m3u8_entry(e)
-            for e in current_entries
+            for e in manifest.entries
             if e.get("status") == "downloaded" and e.get("path")
         ]
         if downloaded:
@@ -625,6 +570,7 @@ def download_pending(
         cookies_from_browser=cookies_from_browser,
         browser_profile=browser_profile,
         delay=delay,
+        max_size=max_size,
         event_callback=event_callback,
         control=control,
         archive_path=archive_path,
@@ -635,4 +581,4 @@ def download_pending(
     for status, count in manifest.counts().items():
         if count:
             print(f"  {status}: {count}")
-    return 1 if (summary["failed"] or summary["stopped"]) else 0
+    return exit_code_from_result(summary)

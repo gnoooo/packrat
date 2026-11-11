@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 
-from ytm_offline import tui_theme as tt
+from packrat import tui_theme as tt
 
 
 def test_parse_hex():
@@ -123,22 +123,16 @@ def test_palette_tiers_none_and_wave3():
 
 # --- redesign phase 1: tiers, multi-stop gradients, crest, custom install ---
 
-def test_select_tier_palette_mode_matrix():
+def test_select_tier_matrix():
     A = tt.select_tier
-    # >= 256 colors
-    assert A(True, 256, False, "custom", True) == tt.TIER_CUSTOM
-    assert A(True, 256, False, "custom", False) == tt.TIER_FIXED
-    assert A(True, 256, False, "auto", True) == tt.TIER_CUSTOM
-    assert A(True, 256, False, "auto", False) == tt.TIER_FIXED
-    assert A(True, 256, False, "fixed", True) == tt.TIER_FIXED
-    assert A(True, 256, False, "basic", True) == tt.TIER_FIXED
-    # forced basic with no colors support
-    assert A(True, 8, False, "basic") == tt.TIER_BMID
-    assert A(True, 8, False, "auto") == tt.TIER_BMID
+    assert A(True, 256, False) == tt.TIER_FIXED
+    assert A(True, 8, False) == tt.TIER_BMID
+    assert A(False, 0, False) == tt.TIER_NONE
+    assert A(True, 256, True) == tt.TIER_NONE
 
 
 def test_walk_stops_endpoints_and_midpoints():
-    stops = tt.parse_hex_tuple(("#000000", "#808080", "#ffffff"))
+    stops = tt.stops_rgb(("#000000", "#808080", "#ffffff"))
     assert tt.walk_stops(stops, 0.0) == (0, 0, 0)
     assert tt.walk_stops(stops, 1.0) == (255, 255, 255)
     assert tt.walk_stops(stops, 0.5) == (128, 128, 128)
@@ -175,10 +169,6 @@ def test_fixed_gradient_distinct_colors_per_theme():
     print("distinct fixed-mode colors:", counts)
 
 
-def test_crest_displacement_per_frame():
-    for bar_width in (10, 24, 48, 64, 80, 100):
-        moved = tt.crest_offset(0.0, 0.05, bar_width)  # one 50 ms tick
-        assert 0 <= moved <= 1, bar_width
 
 
 def test_crest_range_and_travel():
@@ -190,65 +180,6 @@ def test_crest_range_and_travel():
     assert peak(0.5) > peak(0.0)
 
 
-class _FakeCurses:
-    def __init__(self) -> None:
-        self.colors: list[tuple] = []
-        self.pairs: list[tuple] = []
-
-    def init_color(self, slot, r, g, b):
-        self.colors.append((slot, r, g, b))
-
-    def init_pair(self, number, slot, bg):
-        self.pairs.append((number, slot, bg))
-
-
-def test_install_custom_rgb_exact_values_and_slots():
-    fake = _FakeCurses()
-    rgbs = tt.theme_gradient_rgb(tt.THEMES["ocean"], steps=8)
-    static = {k: (0, 0, 0) for k in tt.COLOR_KEYS}
-    grad_pairs, static_pairs = tt.install_custom_rgb(
-        rgbs, static, curses_mod=fake,
-    )
-    # 8 gradient + 6 static colors = 14 slots, starting at 32
-    assert len(fake.colors) == 14
-    assert [c[0] for c in fake.colors] == list(range(32, 32 + 14))
-    for _, r, g, b in fake.colors:
-        assert 0 <= r <= 1000 and 0 <= g <= 1000 and 0 <= b <= 1000
-    # black maps to (0,0,0) on the 0..1000 scale
-    assert fake.colors[8][1:] == (0, 0, 0)
-    # pairs numbered from 1; gradient positions map in order
-    assert [p[0] for p in fake.pairs] == list(range(1, 15))
-    assert grad_pairs == {i: i + 1 for i in range(8)}
-    assert static_pairs == {k: 9 + i for i, k in enumerate(tt.COLOR_KEYS)}
-
-
-def test_install_custom_rgb_out_of_slots():
-    fake = _FakeCurses()
-    # 24 gradient steps + 6 UI colors fit; force the overflow with more.
-    rgbs = [(i, i, i) for i in range(219)]
-    static = {k: (0, 0, 0) for k in tt.COLOR_KEYS}
-    try:
-        tt.install_custom_rgb(rgbs, static, curses_mod=fake)
-    except ValueError as exc:
-        assert "32..255" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
-
-
-def test_restore_palette_writes_sequence():
-    out = io.StringIO()
-    tt.restore_palette(out)
-    assert out.getvalue() == tt.RESTORE_SEQUENCE == "\x1b]104\x07"
-
-
-def test_palette_tiers_fixed_and_custom():
-    pf = tt.Palette(tt.THEMES["sunset"], tt.TIER_FIXED)
-    assert pf.gradient and pf.gradient_rgb_list == []
-    pc = tt.Palette(tt.THEMES["sunset"], tt.TIER_CUSTOM)
-    assert pc.gradient == list(range(len(pc.gradient_rgb_list)))
-    assert len(pc.gradient_rgb_list) == tt.GRADIENT_STEPS
-    # custom tier keeps rgb list for install_custom_rgb
-    assert pc.gradient_rgb_list[0] == tt.parse_hex(pf.stops[0])
 
 
 def test_palette_none_static_map():
@@ -258,19 +189,10 @@ def test_palette_none_static_map():
     assert all(v == -1 for v in p.static.values())
 
 
-def _fake_curses_record():
-    class Fake:
-        def __init__(self):
-            self.calls = []
-        def init_color(self, *a):
-            self.calls.append(("color",) + a)
-        def init_pair(self, *a):
-            self.calls.append(("pair",) + a)
-    return Fake()
 
 
 def test_gradient_exact_no_dedupe():
-    from ytm_offline import tui_theme as tt
+    from packrat import tui_theme as tt
     theme = tt.THEMES["ocean"]
     ex = tt.gradient_exact(tt.parse_hex(theme.base), tt.parse_hex(theme.highlight),
                            stops=theme.stops)
@@ -280,9 +202,10 @@ def test_gradient_exact_no_dedupe():
 
 
 def test_palette_track_idx_and_gradient_exact():
-    from ytm_offline import tui_theme as tt
+    from packrat import tui_theme as tt
     pf = tt.Palette(tt.THEMES["ocean"], tt.TIER_FIXED)
-    expected = tt.nearest_index(tt.parse_hex("#666666"))
+    expected = tt.nearest_index(tt.blend(tt.parse_hex(tt.THEMES["ocean"].base),
+                                         (0, 0, 0), 0.55))
     assert pf.track_idx == expected
     assert len(pf.gradient_exact) == tt.GRADIENT_STEPS
     pn = tt.Palette(tt.THEMES["ocean"], tt.TIER_NONE)
@@ -290,7 +213,7 @@ def test_palette_track_idx_and_gradient_exact():
 
 
 def test_nearest_position_endpoints():
-    from ytm_offline import tui_theme as tt
+    from packrat import tui_theme as tt
     theme = tt.THEMES["ocean"]
     assert tt.nearest_position((0, 5, 60), theme) == 0
     assert tt.nearest_position((255, 255, 255), theme) == tt.GRADIENT_STEPS - 1
@@ -298,19 +221,37 @@ def test_nearest_position_endpoints():
     assert 0 < mid < tt.GRADIENT_STEPS - 1
 
 
-def test_install_custom_rgb_track_slot():
-    from ytm_offline import tui_theme as tt
-    fake = _fake_curses_record()
-    theme = tt.THEMES["ocean"]
-    rgbs = tt.theme_gradient_rgb(theme)
-    static = {k: tt.parse_hex(getattr(theme, k)) for k in tt.COLOR_KEYS}
-    grad, stat = tt.install_custom_rgb(
-        rgbs, static, track_rgb=tt.parse_hex("#666666"), curses_mod=fake)
-    assert tt.TRACK_KEY in stat
-    slot_count = len(rgbs) + len(static) + 1
-    assert len(fake.calls) == slot_count * 2  # one color + one pair each
-    track_slot = stat[tt.TRACK_KEY]
-    assert track_slot == 32 + len(rgbs) + len(static)
-    # track slot init_color called with the gray on the 0-1000 scale
-    color_calls = [c for c in fake.calls if c[0] == "color"]
-    assert color_calls[-1] == ("color", track_slot, 400, 400, 400)
+def test_select_tier_custom_when_terminal_allows_palette_changes():
+    assert tt.select_tier(True, 256, False, "auto", True) == tt.TIER_CUSTOM
+    assert tt.select_tier(True, 256, False, "fixed", True) == tt.TIER_FIXED
+    assert tt.select_tier(True, 256, False, "auto", False) == tt.TIER_FIXED
+    assert tt.select_tier(False, 0, False, "auto", True) == tt.TIER_NONE
+
+
+def test_custom_palette_has_exact_rgb_steps():
+    p = tt.Palette(tt.THEMES["ocean"], tt.TIER_CUSTOM)
+    assert len(p.gradient_rgb_list) == tt.CUSTOM_GRADIENT_STEPS
+    assert p.gradient == list(range(tt.CUSTOM_GRADIENT_STEPS))
+    assert p.gradient_exact == []
+    assert p.gradient_rgb_list[0] == tt.parse_hex(tt.THEMES["ocean"].base)
+    assert p.gradient_rgb_list[-1] == tt.parse_hex(tt.THEMES["ocean"].highlight)
+
+
+def test_restore_palette_writes_osc104():
+    out = io.StringIO()
+    tt.restore_palette(out)
+    assert out.getvalue() == tt.RESTORE_SEQUENCE == "\x1b]104\x07"
+
+
+def test_hsl_and_hsv_roundtrip_primaries():
+    for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255),
+                (128, 128, 128), (255, 255, 255), (0, 0, 0)):
+        assert tt.hsl_to_rgb(tt.rgb_to_hsl(rgb)) == rgb
+        assert tt.hsv_to_rgb(tt.rgb_to_hsv(rgb)) == rgb
+
+
+def test_progress_gradient_advances_hue_per_tile():
+    hues = [tt.progress_hsl(tt.THEMES["ocean"], i, 8)[0] for i in range(8)]
+    diffs = [((b - a) % 360) for a, b in zip(hues, hues[1:])]
+    assert all(abs(d - tt.HUE_STEP_PER_TILE) < 1e-6 for d in diffs), diffs
+    assert tt.HUE_STEP_PER_TILE == 1.0

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import locale
 import sys
-import time
 import unicodedata
 
 # --- display width ----------------------------------------------------------
@@ -66,6 +65,7 @@ GLYPHS: dict[str, dict[str, object]] = {
         "bar_fill": "█",
         "bar_edge": "▏▎▍▌▋▊▉",  # 1/8..7/8 sub-cell steps
         "bar_track": "░",
+        "bar_track_line": "▂",
         "thin_fill": "━",
         "thin_edge": "╸",  # half-cell step
         "thin_track": "─",
@@ -74,12 +74,14 @@ GLYPHS: dict[str, dict[str, object]] = {
         "spark": "▁▂▃▄▅▆▇█",
         "play": "▸", "done": "✓", "fail": "✗", "note": "♪",
         "dot": "●", "dot_off": "○", "pause": "‖", "ellipsis": "...", "diamond": "◆",
+        "retry": "↻",
         "clock": "⏱", "brain": "⠿",
     },
     "ascii": {
         "bar_fill": "#",
         "bar_edge": "",
         "bar_track": "-",
+        "bar_track_line": "-",
         "thin_fill": "=",
         "thin_edge": "",
         "thin_track": "-",
@@ -88,6 +90,7 @@ GLYPHS: dict[str, dict[str, object]] = {
         "spark": "._-~=*#",
         "play": ">", "done": "+", "fail": "x", "note": "~",
         "dot": "*", "dot_off": "o", "pause": "||", "ellipsis": "...", "diamond": "+",
+        "retry": "r",
         "clock": "T", "brain": ".",
     },
 }
@@ -156,30 +159,6 @@ def thin_bar(g: dict, width: int, percent: float) -> str:
     rest = max(0, width - full - len(edge))
     return str(g["thin_fill"]) * full + edge + str(g["thin_track"]) * rest
 
-
-# --- spinner / sparkline ----------------------------------------------------
-
-
-def spinner_frame(g: dict, now: float | None = None, fps: float = 10.0) -> str:
-    frames = str(g["spinner"])
-    t = time.monotonic() if now is None else now
-    return frames[int(t * fps) % len(frames)]
-
-
-def sparkline(g: dict, samples: list[float], width: int) -> str:
-    """Rescale samples into `width` spark cells; empty/all-zero = lowest level."""
-    levels = str(g["spark"])
-    if width <= 0:
-        return ""
-    cells = samples[-width:] if samples else []
-    if len(cells) < width:
-        cells = [0.0] * (width - len(cells)) + cells
-    peak = max(cells) if cells else 0.0
-    if peak <= 0:
-        return levels[0] * width
-    return "".join(
-        levels[min(len(levels) - 1, int(v / peak * (len(levels) - 1)))] for v in cells
-    )
 
 
 # --- braille throughput graph (2x4 dots per cell) ---------------------------

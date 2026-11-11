@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ytm_offline.sizes import estimate_size, format_size, parse_size
+from packrat.sizes import estimate_size, format_size, parse_size
 
 
 def test_estimate_size_from_filesize_approx():
@@ -23,3 +23,10 @@ def test_estimate_size_missing():
 def test_size_round_trip():
     assert parse_size("3GB") == 3_000_000_000
     assert format_size(1024) == "1.0 KB"
+
+
+def test_estimate_size_prefers_exact_filesize():
+    assert estimate_size({"filesize": 500, "filesize_approx": 999}) == 500
+    assert estimate_size({"requested_formats": [
+        {"filesize": 100}, {"filesize_approx": 200},
+    ]}) == 300

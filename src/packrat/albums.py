@@ -3,27 +3,25 @@
 from __future__ import annotations
 
 import pathlib
-import re
 from collections import Counter, defaultdict
 from typing import Any
 
 from ytmusicapi import YTMusic
 
-from ytm_offline.archive import Archive
-from ytm_offline.discover import ALLOWED_VIDEO_TYPES, _video_type
-from ytm_offline.normalize import (
+from packrat.archive import Archive
+from packrat.discover import ALLOWED_VIDEO_TYPES, _video_type
+from packrat.normalize import (
     EDITION_WORDS,
-    album_name as _album_name,
     artist_name as _artist_name,
     duration_seconds as _duration_seconds,
     normalize as _normalize,
     strip_edition,
 )
-from ytm_offline.manifest import Manifest
-from ytm_offline.batch import run_batch_download
-from ytm_offline.naming import clean, track_path
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import format_size, heuristic_size, parse_size
+from packrat.manifest import Manifest
+from packrat.batch import download_pending_manifest
+from packrat.naming import clean, track_path
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import format_size, heuristic_size, parse_size
 
 
 _UNWANTED_ALBUM_WORDS = (
@@ -148,7 +146,6 @@ def discover_albums(
     min_duration: int = 90,
     max_duration: int = 540,
     max_size: str | None = None,
-    dry_run: bool = True,
 ) -> dict[str, Any]:
     """Discover whole albums from top liked artists."""
     yt = YTMusic(headers_path)
@@ -171,6 +168,9 @@ def discover_albums(
             info = yt.get_artist(browse_id)
         except Exception:
             continue
+        # The liked-track name may be an alias (e.g. NEW SCHOOL LEADERS);
+        # use the artist page's canonical name for folders and entries.
+        artist_name = info.get("name") or artist_name
 
         album_items: list[dict[str, Any]] = list(
             info.get("albums", {}).get("results", [])
@@ -205,7 +205,7 @@ def discover_albums(
                 dur = _duration_seconds(t)
                 if dur is None or not (min_duration <= dur <= max_duration):
                     continue
-                key = (_normalize(_artist_name(t)), _normalize(t.get("title", "")))
+                key = (_normalize(artist_name), _normalize(t.get("title", "")))
                 if key in owned_keys:
                     owned_in_album += 1
                     continue
@@ -219,7 +219,7 @@ def discover_albums(
                     {
                         "video_id": vid,
                         "title": t.get("title", "Unknown"),
-                        "artist": _artist_name(t),
+                        "artist": artist_name,
                         "album": album_title,
                         "duration": dur,
                         "path": str(path),
@@ -294,60 +294,12 @@ def discover_albums(
     }
 
 
-def download_albums(
-    output_root: pathlib.Path,
-    archive_path: str | pathlib.Path,
-    cookies: str | None = None,
-    cookies_from_browser: str | None = None,
-    browser_profile: str | None = None,
-    max_size: str | None = None,
-    delay: float = 7.0,
-    event_callback: Callable[[dict[str, Any]], None] | None = None,
-    control: Any = None,
-    limit: int | None = None,
-) -> dict[str, Any]:
+def download_albums(output_root: pathlib.Path, archive_path: str | pathlib.Path, **kwargs: Any) -> dict[str, Any]:
     """Download pending tracks from albums.manifest.json."""
-    manifest_path = output_root / "playlists" / "albums.manifest.json"
-    if not manifest_path.exists():
-        return {"error": f"manifest not found: {manifest_path}"}
-    manifest = Manifest.load(manifest_path)
-    entries = manifest.pending()
-    if limit and len(entries) > limit:
-        entries = entries[:limit]
-    if not entries:
-        return {"error": "no pending tracks in albums manifest"}
-
-    if event_callback:
-        event_callback(
-            {
-                "type": "start",
-                "payload": {
-                    "mode": "albums",
-                    "total": len(entries),
-                    "total_est_bytes": sum(
-                        (e.get("est_size") or 0) for e in entries
-                    ),
-                    "max_size_bytes": parse_size(max_size) if max_size else None,
-                },
-            }
-        )
-
-    def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        manifest.entries = current_entries
-        manifest.write(manifest_path)
-
-    summary = run_batch_download(
-        entries,
-        output_root=output_root,
-        save_callback=save_callback,
-        cookies=cookies,
-        cookies_from_browser=cookies_from_browser,
-        browser_profile=browser_profile,
-        max_size=parse_size(max_size) if max_size else None,
-        delay=delay,
-        event_callback=event_callback,
-        control=control,
-        archive_path=archive_path,
-        mode="albums",
+    return download_pending_manifest(
+        "albums",
+        output_root / "playlists" / "albums.manifest.json",
+        output_root,
+        archive_path,
+        **kwargs,
     )
-    return {"summary": summary, "manifest_path": str(manifest_path)}

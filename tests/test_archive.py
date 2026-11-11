@@ -1,6 +1,6 @@
 """Archive semantics characterization tests."""
 
-from ytm_offline.archive import Archive
+from packrat.archive import Archive
 
 
 def test_archive_loads_existing_ids(tmp_path):

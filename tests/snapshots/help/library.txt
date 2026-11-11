@@ -1,10 +1,15 @@
-usage: ytm-offline library [-h] [--headers HEADERS] [--top TOP]
+usage: packrat library [-h] [--headers FILE] [--top N]
+
+List your playlists. To download one, use its ID with 'sync --source
+playlist:<ID>'.
+
+Common options:
+  --top N         how many playlists to list (default: 25)
+
+First-time setup:
+  --headers FILE  your YouTube Music login file; create it with `packrat
+                  login` (env: PACKRAT_HEADERS; default:
+                  ~/.config/packrat/browser.json)
 
 options:
-  -h, --help         show this help message and exit
-  --top TOP          max playlists to show (default: 25)
-
-Authentication:
-  --headers HEADERS  path to ytmusicapi browser-headers JSON file (env:
-                     YTM_HEADERS; default: ~/.config/ytmusic-
-                     composer/browser.json)
+  -h, --help      show this help message and exit

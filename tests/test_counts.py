@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from ytm_offline import artists, runs
+from packrat import artists, runs
 
 
 def test_disk_owned_keys_parses_album_and_single_files(tmp_path: pathlib.Path):
@@ -60,8 +60,8 @@ def test_runs_record_and_read_back(tmp_path: pathlib.Path):
 def test_batch_appends_runs_real_batches(tmp_path, monkeypatch):
     # A real batch (artist or download-manifest mode) appends to runs.jsonl
     # at the end so future catalogs can estimate time from throughput.
-    from ytm_offline import batch
-    from ytm_offline.download import DownloadResult
+    from packrat import batch
+    from packrat.download import DownloadResult
 
     monkeypatch.setattr(
         batch,

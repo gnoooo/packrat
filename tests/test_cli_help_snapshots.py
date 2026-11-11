@@ -7,13 +7,14 @@ import pathlib
 
 import pytest
 
-from ytm_offline import cli
+from packrat import cli
 
 SNAP = pathlib.Path(__file__).parent / "snapshots" / "help"
 
 COMMANDS = [
     (),
     ("auth",),
+    ("login",),
     ("library",),
     ("download-one",),
     ("sync",),
@@ -25,10 +26,6 @@ COMMANDS = [
     ("discover", "queues"),
     ("discover", "albums"),
     ("discover", "radio"),
-    ("ui",),
-    ("ui", "demo"),
-    ("ui", "glyphs"),
-    ("migrate-layout",),
 ]
 
 

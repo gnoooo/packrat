@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
 import sys
 import time
@@ -15,23 +16,59 @@ from typing import Any
 
 from ytmusicapi import YTMusic
 
-from ytm_offline.archive import Archive
-from ytm_offline.batch import run_batch_download
-from ytm_offline.naming import (
+from packrat.archive import Archive
+from packrat.naming import (
     SINGLES_DIR_DEFAULT,
     clean,
-    is_single,
     track_path,
 )
-from ytm_offline.normalize import EDITION_WORDS, normalize as _normalize, strip_edition
-from ytm_offline.artist_playlists import (
+from packrat.normalize import EDITION_WORDS, normalize as _normalize, strip_edition
+
+
+
+def _install_channel_parser_workaround() -> None:
+    """Skip channel carousels that have no header.
+
+    ytmusicapi 1.12.3 assumes every musicCarouselShelfRenderer has a title
+    header; some artist pages now include an untitled video carousel, which
+    raises KeyError('header') and breaks get_artist.  Filtering those rows
+    keeps the rest of the parser untouched.
+    """
+    try:
+        from ytmusicapi.navigation import CAROUSEL, CAROUSEL_TITLE, nav
+        from ytmusicapi.parsers.i18n import Parser
+    except ImportError:  # pragma: no cover - ytmusicapi shape changed
+        return
+    original = Parser.parse_channel_contents
+    if getattr(original, "_packrat_safe", False):
+        return
+
+    def safe(self, results):
+        filtered = []
+        for row in results:
+            if "musicCarouselShelfRenderer" in row:
+                try:
+                    nav(row, CAROUSEL + CAROUSEL_TITLE)
+                except (KeyError, TypeError):
+                    continue
+            filtered.append(row)
+        return original(self, filtered)
+
+    safe._packrat_safe = True  # type: ignore[attr-defined]
+    Parser.parse_channel_contents = safe  # type: ignore[method-assign]
+
+
+_install_channel_parser_workaround()
+# Re-exported for callers that historically imported these from artists
+# (cli, migrate, tests); the implementations live in artist_playlists.
+from packrat.artist_playlists import (  # noqa: F401
     artist_all_entries,
     download_artist,
     save_manifest,
     write_artist_playlists,
 )
-from ytm_offline import runs
-from ytm_offline.sizes import format_size, heuristic_size, parse_size
+from packrat import runs
+from packrat.sizes import format_size, heuristic_size, parse_size
 
 
 _CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
@@ -376,7 +413,7 @@ def _dedupe_top_versions(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept
 
 
-def get_top_songs(yt: YTMusic, artist_id: str, limit: int | None = None) -> dict[str, Any]:
+def get_top_songs(yt: YTMusic, artist_id: str) -> dict[str, Any]:
     """FULL 'Top songs' via the songs section's see-all playlist browseId."""
     artist = yt.get_artist(artist_id)
     songs_section = artist.get("songs") or {}
@@ -384,26 +421,23 @@ def get_top_songs(yt: YTMusic, artist_id: str, limit: int | None = None) -> dict
     browse_id = songs_section.get("browseId")
     if browse_id:
         try:
-            playlist = yt.get_playlist(playlistId=browse_id, limit=limit)
+            playlist = yt.get_playlist(playlistId=browse_id)
             all_tracks = playlist.get("tracks") or []
         except Exception:
             pass
-    if limit is not None:
-        all_tracks = all_tracks[:limit]
     tracks = []
+    canonical = artist.get("name") or ""
     for raw in all_tracks:
         if not raw.get("videoId"):
             continue
-        artists = raw.get("artists") or []
         tracks.append(
             {
                 "video_id": raw["videoId"],
                 "title": raw.get("title", ""),
-                "artist": artists[0].get("name") if artists else "",
+                "artist": canonical,
                 "album": (raw.get("album") or {}).get("name", ""),
                 "duration_seconds": raw.get("duration_seconds")
                 or _parse_duration(raw.get("duration")),
-                "album_id": (raw.get("album") or {}).get("id", ""),
             }
         )
     return {
@@ -473,14 +507,12 @@ def build_top_songs(
     archive_path: str | pathlib.Path,
     output_root: pathlib.Path,
     *,
-    top_limit: int | None = None,
-    max_per_album: int | None = None,
     singles_dir: str = SINGLES_DIR_DEFAULT,
     disk_keys: set[tuple[str, str]] | None = None,
     reserve_keys: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build pending entries for an artist's top songs with owned-dedupe."""
-    discography = get_top_songs(yt, browse_id, limit=top_limit)
+    discography = get_top_songs(yt, browse_id)
     artist_name = discography["artist"]
     archive = Archive(archive_path)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -488,8 +520,7 @@ def build_top_songs(
         disk_keys = disk_owned_keys(output_root)
     reserve = reserve_keys or set()
 
-    counts: dict[str, int] = {"alternates": 0, "max_per_album": 0}
-    capacity: dict[str, int] = {}
+    counts: dict[str, int] = {"alternates": 0}
     entries: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str]] = set()
     already_owned = 0
@@ -506,12 +537,6 @@ def build_top_songs(
         video_id = track["video_id"]
         duration = track.get("duration_seconds") or 0
         album = track.get("album") or ""
-        if max_per_album and album:
-            used = capacity.get(track["album_id"], 0)
-            if used >= max_per_album:
-                counts["max_per_album"] += 1
-                continue
-            capacity[track["album_id"]] = used + 1
         owned = video_id in archive or key in disk_keys or key in reserve
         if owned:
             already_owned += 1
@@ -522,7 +547,7 @@ def build_top_songs(
             {
                 "video_id": video_id,
                 "title": track["title"],
-                "artist": track["artist"] or artist_name,
+                "artist": artist_name,
                 "album": album,
                 "track_num": None,
                 "duration": duration,
@@ -572,8 +597,13 @@ def _parse_duration(text: Any) -> int | None:
 def resolve_release_tracks(
     yt: YTMusic,
     release: dict[str, Any],
+    artist_name: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Fetch one release's tracks via get_album; None when unavailable."""
+    """Fetch one release's tracks via get_album; None when unavailable.
+
+    ``artist_name`` is the catalog artist.  Release tracks can list a featured
+    artist first; the catalog artist is what the folder must use.
+    """
     try:
         album = yt.get_album(release["browseId"])
     except Exception:
@@ -583,7 +613,7 @@ def resolve_release_tracks(
         if not raw.get("videoId"):
             continue
         artists = raw.get("artists") or []
-        artist = artists[0].get("name", "") if artists else ""
+        artist = artist_name or (artists[0].get("name", "") if artists else "")
         duration = raw.get("duration_seconds") or _parse_duration(raw.get("duration"))
         tracks.append(
             {
@@ -613,12 +643,12 @@ def build_catalog(
     min_duration: int = 90,
     max_duration: int = 540,
     scope: str = "all",
-    top_limit: int | None = None,
-    max_per_album: int | None = None,
     max_size: str | None = None,
     delay: float = 7.0,
     singles_dir: str = SINGLES_DIR_DEFAULT,
     pause: float = 0.5,
+    resolve_excluded: bool = True,
+    resolve_workers: int = 4,
 ) -> dict[str, Any]:
     """Fetch, filter and dedupe an artist catalog; return manifest payload.
 
@@ -627,36 +657,20 @@ def build_catalog(
     """
     yt = YTMusic(headers_path)
     disk_keys = disk_owned_keys(output_root)
-    if scope == "top-songs":
-        top = build_top_songs(
-            yt,
-            browse_id,
-            archive_path=archive_path,
-            output_root=output_root,
-            top_limit=top_limit,
-            max_per_album=max_per_album,
-            singles_dir=singles_dir,
-            disk_keys=disk_keys,
-        )
-        discography = {"releases": [], "name": top["artist"], "subscribers": ""}
-        kept: list[dict[str, Any]] = []
-        dropped: list[tuple[dict[str, Any], str]] = []
-    else:
-        top = None
-        discography = get_discography(yt, browse_id)
-    artist_name = discography["name"] or (top or {}).get("artist", "")
+    top = None
+    discography = get_discography(yt, browse_id)
+    artist_name = discography["name"]
     releases = discography["releases"]
 
     kept, excluded = filter_releases(
-        kept if scope == "top-songs" else releases,
+        releases,
         include_live=include_live,
         include_compilations=include_compilations,
         include_remixes=include_remixes,
         albums_only=albums_only,
         no_singles=no_singles,
     )
-    if scope != "top-songs":
-        kept, dropped = dedupe_editions(kept)
+    kept, dropped = dedupe_editions(kept)
     excluded["edition_duplicates"] = len(dropped)
     excluded.update(top["excluded_counts"] if top else {})
     kept_ids = {r["browseId"] for r in kept}
@@ -683,21 +697,46 @@ def build_catalog(
     def window_ok(duration: int) -> bool:
         return not duration_window or min_duration <= duration <= max_duration
 
-    # Resolve the tracklist of EVERY release up front (tagged releases must
-    # show counts too), with a cache so nothing is fetched twice.
+    # Resolve tracklists up front.  Only kept releases are needed for a
+    # non-interactive download; excluded rows are display-only metadata.
     resolve_cache: dict[str, list[dict[str, Any]] | None] = {}
-    total_releases = len(releases)
+    to_resolve = (
+        releases if resolve_excluded
+        else [r for r in releases if r["browseId"] in kept_ids]
+    )
+    total_releases = len(to_resolve)
+    skipped_excluded: set[str] = set()
 
-    def resolve(release: dict[str, Any]) -> list[dict[str, Any]] | None:
-        bid = release["browseId"]
-        if bid in resolve_cache:
-            return resolve_cache[bid]
-        if resolve_cache and pause > 0:
-            time.sleep(pause)
-        print(f"resolving releases {len(resolve_cache) + 1}/{total_releases}", end="\r", flush=True)
-        tracks = resolve_release_tracks(yt, release)
-        resolve_cache[bid] = tracks
-        return tracks
+    if resolve_workers > 1 and len(to_resolve) > 1:
+        local = threading.local()
+
+        def fetch(release: dict[str, Any]) -> tuple[str, list[dict[str, Any]] | None]:
+            client = getattr(local, "yt", None)
+            if client is None:
+                client = YTMusic(headers_path)
+                local.yt = client
+            return release["browseId"], resolve_release_tracks(client, release, artist_name)
+
+        with ThreadPoolExecutor(max_workers=min(resolve_workers, len(to_resolve))) as pool:
+            futures = {pool.submit(fetch, release): release for release in to_resolve}
+            for done, future in enumerate(as_completed(futures), start=1):
+                release = futures[future]
+                try:
+                    bid, tracks = future.result()
+                except Exception:
+                    bid, tracks = release["browseId"], None
+                resolve_cache[bid] = tracks
+                print(f"resolving releases {done}/{total_releases}", end="\r", flush=True)
+    else:
+        for done, release in enumerate(to_resolve, start=1):
+            if pause > 0 and done > 1:
+                time.sleep(pause)
+            print(f"resolving releases {done}/{total_releases}", end="\r", flush=True)
+            resolve_cache[release["browseId"]] = resolve_release_tracks(
+                yt, release, artist_name
+            )
+    if total_releases:
+        print()
 
     classified: dict[str, list[tuple[dict[str, Any], int, tuple[str, str]]]] = {
         r["browseId"]: [] for r in kept
@@ -705,12 +744,14 @@ def build_catalog(
     track_counts: dict[str, int] = {}
     display_counts: dict[str, tuple[int, int] | None] = {}
 
-    # Pass A: resolve all releases, decide owned (archive id / disk/key).
-    # Kept rows seed owned_keys so top songs dedupe against the real catalog;
-    # tagged (excluded) rows only collect display counts.
+    # Pass A: decide owned (archive id / disk/key) for resolved releases.
     for release in releases:
         bid = release["browseId"]
-        tracks = resolve(release)
+        if bid not in resolve_cache:
+            skipped_excluded.add(bid)
+            display_counts[bid] = None
+            continue
+        tracks = resolve_cache[bid]
         if tracks is None:
             display_counts[bid] = None
             if bid in kept_ids:
@@ -753,8 +794,6 @@ def build_catalog(
             browse_id,
             archive_path=archive_path,
             output_root=output_root,
-            top_limit=top_limit,
-            max_per_album=max_per_album,
             singles_dir=singles_dir,
             disk_keys=disk_keys,
             reserve_keys=owned_keys,
@@ -810,6 +849,9 @@ def build_catalog(
             counts = display_counts.get(bid)
             if counts is not None:
                 meta["tracks"], meta["new_tracks"] = counts
+            elif bid in skipped_excluded:
+                meta["reason"] = ", ".join(tags) or "excluded (not resolved)"
+                meta["resolved"] = False
             else:
                 meta["unavailable"] = True
             meta["reason"] = ", ".join(tags) or (
@@ -886,6 +928,7 @@ def owned_file_exists(output_root: pathlib.Path, track: dict[str, Any], release:
         )
         if singles_layout.exists():
             return True
+        # Legacy layout: the single title was used as an album folder.
         return track_path(
             output_root,
             track.get("artist", ""),
@@ -893,7 +936,6 @@ def owned_file_exists(output_root: pathlib.Path, track: dict[str, Any], release:
             track.get("title", ""),
             track_num=track.get("track_num"),
             ext="m4a",
-            release_type="single",
         ).exists()
     return track_path(
         output_root,
@@ -927,7 +969,7 @@ def _entry_for(
     return {
         "video_id": track["video_id"],
         "title": track["title"],
-        "artist": track.get("artist") or artist_name,
+        "artist": artist_name,
         "album": release.get("title", ""),
         "track_num": track.get("track_num"),
         "duration": duration,
@@ -1215,7 +1257,7 @@ def apply_selection(
                 "year_int": meta.get("year"),
                 "kind": meta.get("type", "album"),
             }
-            tracks = resolve_release_tracks(yt, release)
+            tracks = resolve_release_tracks(yt, release, artist_name)
         if tracks is None:
             continue
         release = {

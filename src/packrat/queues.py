@@ -10,19 +10,19 @@ from typing import Any, Callable
 
 from ytmusicapi import YTMusic
 
-from ytm_offline.archive import Archive
-from ytm_offline.batch import run_batch_download
-from ytm_offline.discover import ALLOWED_VIDEO_TYPES, _video_type
-from ytm_offline.normalize import (
+from packrat.archive import Archive
+from packrat.batch import download_pending_manifest
+from packrat.discover import ALLOWED_VIDEO_TYPES, _video_type
+from packrat.normalize import (
     album_name as _album_name,
     artist_name as _artist_name,
     duration_seconds as _duration_seconds,
     normalize as _normalize,
 )
-from ytm_offline.manifest import Manifest
-from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, track_path
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import format_size, heuristic_size, parse_size
+from packrat.manifest import Manifest
+from packrat.naming import SINGLES_DIR_DEFAULT, clean, track_path
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import format_size, heuristic_size, parse_size
 
 
 def _load_liked_tracks(
@@ -178,7 +178,6 @@ def discover_queues(
     min_duration: int = 90,
     max_duration: int = 540,
     random_seed: int | None = None,
-    dry_run: bool = True,
     singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> dict[str, Any]:
     """Build manifests and .m3u8 playlists from playback queues."""
@@ -287,7 +286,7 @@ def discover_queues(
             artist=t["artist"],
             album=t["album"],
             est_size=heuristic_size(t["duration"]),
-            status="pending" if dry_run else "pending",
+            status="pending",
             path=t["path"],
             seed=t["seed"],
             seed_video_id=t["seed_video_id"],
@@ -311,64 +310,15 @@ def discover_queues(
     }
 
 
-def download_queues(
-    output_root: pathlib.Path,
-    archive_path: str | pathlib.Path,
-    cookies: str | None = None,
-    cookies_from_browser: str | None = None,
-    browser_profile: str | None = None,
-    max_size: str | None = None,
-    delay: float = 7.0,
-    event_callback: Callable[[dict[str, Any]], None] | None = None,
-    control: Any = None,
-    limit: int | None = None,
-) -> dict[str, Any]:
+def download_queues(output_root: pathlib.Path, archive_path: str | pathlib.Path, **kwargs: Any) -> dict[str, Any]:
     """Download pending tracks from queues.manifest.json."""
-    manifest_path = output_root / "playlists" / "queues.manifest.json"
-    if not manifest_path.exists():
-        return {"error": f"manifest not found: {manifest_path}"}
-    manifest = Manifest.load(manifest_path)
-    entries = manifest.pending()
-    if limit and len(entries) > limit:
-        entries = entries[:limit]
-    if not entries:
-        return {"error": "no pending tracks in queues manifest"}
-
-    if event_callback:
-        event_callback(
-            {
-                "type": "start",
-                "payload": {
-                    "mode": "queues",
-                    "total": len(entries),
-                    "total_est_bytes": sum(
-                        (e.get("est_size") or 0) for e in entries
-                    ),
-                    "max_size_bytes": parse_size(max_size) if max_size else None,
-                },
-            }
-        )
-
-    def save_callback(current_entries: list[dict[str, Any]]) -> None:
-        # current_entries is the pending subset; the original dicts are
-        # mutated in place so manifest.entries already reflects updates.
-        manifest.write(manifest_path)
-
-    summary = run_batch_download(
-        entries,
-        output_root=output_root,
-        save_callback=save_callback,
-        cookies=cookies,
-        cookies_from_browser=cookies_from_browser,
-        browser_profile=browser_profile,
-        max_size=parse_size(max_size) if max_size else None,
-        delay=delay,
-        event_callback=event_callback,
-        control=control,
-        archive_path=archive_path,
-        mode="queues",
+    return download_pending_manifest(
+        "queues",
+        output_root / "playlists" / "queues.manifest.json",
+        output_root,
+        archive_path,
+        **kwargs,
     )
-    return {"summary": summary, "manifest_path": str(manifest_path)}
 
 
 _VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -412,7 +362,10 @@ def build_radio(
     """
     video_id = parse_video_id(seed_spec)
     if not video_id:
-        return {"error": f"cannot parse video id from: {seed_spec}"}
+        return {
+            "error": f"Could not find a YouTube video ID in {seed_spec!r}. "
+            "Pass a song link or 11-character video ID."
+        }
 
     yt = YTMusic(headers_path)
     archive = Archive(archive_path)
@@ -436,12 +389,12 @@ def build_radio(
         per_artist_per_queue,
         output_root,
         set(),
-        max_tracks=(request_limit - 1) if request_limit else None,
+        max_tracks=request_limit,
         hop=1,
     )
-    requested_tracks = len(accepted) + 1  # include the seed
+    requested_tracks = len(accepted)
     if limit:
-        accepted = accepted[: limit - 1]
+        accepted = accepted[:limit]
     entries = []
     for t in accepted:
         entries.append(

@@ -1,6 +1,6 @@
 """Golden tests for m3u8 generation."""
 
-from ytm_offline.playlist import write_m3u8
+from packrat.playlist import write_m3u8
 
 
 def test_write_m3u8_produces_extinf_and_relative_paths(tmp_path):

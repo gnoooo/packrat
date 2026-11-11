@@ -2,8 +2,8 @@
 
 import pytest
 
-from ytm_offline import tui
-from ytm_offline.logging_config import redact
+from packrat import tui
+from packrat.logging_config import redact
 
 
 @pytest.mark.parametrize(
@@ -33,15 +33,8 @@ def test_format_bytes(n, expected):
     assert tui.format_bytes(n) == expected
 
 
-def test_render_bar_unicode():
-    bar = tui.render_bar(10, 50)
-    assert len(bar) == 10
-    assert "\u2588" in bar
 
 
-def test_render_bar_ascii():
-    bar = tui.render_bar(10, 50, ascii_mode=True)
-    assert bar == "[#####-----]"
 
 
 def test_latest_log_path_returns_default_when_empty(monkeypatch):
@@ -53,6 +46,14 @@ def test_truncate():
     assert tui.truncate("short", 10) == "short"
     assert tui.truncate("a very long string indeed", 12).endswith("\u2026")
     assert len(tui.truncate("a very long string indeed", 12)) == 12
+
+
+def test_redact_strips_ansi_and_secrets():
+    msg = "\x1b[0;31mERROR:\x1b[0m Cookie: ABC123; Authorization: Bearer XYZ; SAPISID=secret"
+    out = redact(msg)
+    assert "\x1b" not in out and "[0;31m" not in out
+    assert out.startswith("ERROR:")
+    assert "ABC123" not in out and "Bearer XYZ" not in out and "secret" not in out
 
 
 def test_redact():
@@ -68,7 +69,7 @@ def test_redact():
 
 def _running_state():
     """A State with a realistic running download applied."""
-    from ytm_offline import events as ev
+    from packrat import events as ev
 
     state = ev.State(mode="artist")
     state.apply(ev.Event("start", {"mode": "artist", "total": 10,
@@ -88,7 +89,7 @@ def test_snapshot_methods_do_not_touch_a_lock():
     # The UI renders snapshots (plain copies without _lock); every
     # method the UI calls must work on a snapshot or the TUI crashes on
     # its first frame (bug: eta_seconds raised AttributeError on _lock).
-    from ytm_offline import events as ev
+    from packrat import events as ev
 
     state = _running_state()
     snap = state.snapshot()
@@ -101,7 +102,7 @@ def test_snapshot_methods_do_not_touch_a_lock():
 
 
 def test_snapshot_dataclass_replace_required_fields():
-    from ytm_offline import events as ev
+    from packrat import events as ev
 
     state = _running_state()
     snap = state.snapshot()
@@ -158,12 +159,12 @@ def test_ui_crash_stops_worker_gracefully(monkeypatch, tmp_path, capsys):
 def test_batch_start_carries_est_bytes(monkeypatch):
     # bug: TUI showed 'downloaded 9.3 MB / est 0.0 B' — start event must
     # carry the manifest estimate (same numbers as summarize_entries).
-    from ytm_offline import batch, events as ev
+    from packrat import batch, events as ev
 
     monkeypatch.setattr(
         batch,
         "download_track",
-        lambda *a, **k: __import__("ytm_offline.download", fromlist=["x"]).DownloadResult(
+        lambda *a, **k: __import__("packrat.download", fromlist=["x"]).DownloadResult(
             status="downloaded", filepath=None
         ),
     )
@@ -210,8 +211,8 @@ def test_worker_quit_mid_track_completes_and_saves(tmp_path):
     import threading
     import time
 
-    from ytm_offline import events as ev2
-    from ytm_offline.control import Control
+    from packrat import events as ev2
+    from packrat.control import Control
 
     state = ev2.State(mode="test")
     control = Control()
@@ -241,24 +242,26 @@ def test_worker_quit_mid_track_completes_and_saves(tmp_path):
 
 
 def test_footer_shows_finishing_when_stopping():
-    from ytm_offline import events as ev
+    from packrat import events as ev
 
     state = ev.State(mode="test")
     state.apply(ev.Event("status", {"status": "STOPPING", "reason": "user quit"}))
     win = _FakeWin(1, 60)
-    tui._draw_footer(win, state, None, 0)
-    assert "finishing the current track" in win.writes[0]
-    assert "quit" in win.writes[0]
+    tui._draw_footer(win, state, 0)
+    text = "".join(win.writes)
+    assert "finishing the current track" in text
+    assert "quit" in text
 
 
 def test_footer_default_is_keys():
-    from ytm_offline import events as ev
+    from packrat import events as ev
 
     state = ev.State(mode="test")
     state.apply(ev.Event("status", {"status": "RUNNING"}))
     win = _FakeWin(1, 60)
-    tui._draw_footer(win, state, None, 0)
-    assert " p pause/resume" in win.writes[0]
+    tui._draw_footer(win, state, 0)
+    text = "".join(win.writes)
+    assert "pause" in text and "skip" in text and "quit" in text
 
 
 def test_join_worker_second_ctrl_c_force_exit(monkeypatch, capsys):

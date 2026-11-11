@@ -10,32 +10,28 @@ from typing import Any
 
 from ytmusicapi import YTMusic
 
-from ytm_offline.archive import Archive
-from ytm_offline.discover import (
+from packrat.archive import Archive
+from packrat.discover import (
     ALLOWED_VIDEO_TYPES,
     _collect_tracks,
-    _is_music_track,
     _resolve_album_tracks,
     _resolve_playlist_tracks,
-    _to_track,
 )
-from ytm_offline.normalize import (
-    album_name as _album_name,
+from packrat.normalize import (
     artist_name as _artist_name,
-    duration_seconds as _duration_seconds,
     normalize as _normalize,
     track_key as _track_key,
 )
-from ytm_offline.lastfm import LastFMClient
-from ytm_offline.manifest import Manifest
-from ytm_offline.sizes import format_size, heuristic_size, parse_size
+from packrat.lastfm import LastFMClient
+from packrat.manifest import Manifest, atomic_write_text
+from packrat.sizes import format_size, heuristic_size, parse_size
 
 
 class _DummyArchive:
     """Drop-in replacement for Archive when we only need the set API."""
 
-    def __init__(self, ids: set[str]) -> None:
-        self._ids = ids
+    def __init__(self, ids: set[str] | list[str]) -> None:
+        self._ids = set(ids)
 
     def __contains__(self, video_id: object) -> bool:
         return str(video_id) in self._ids
@@ -222,8 +218,10 @@ def build_profile(
     }
 
     profile_path = output_root / "playlists" / "profile.json"
-    profile_path.parent.mkdir(parents=True, exist_ok=True)
-    profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(
+        profile_path,
+        json.dumps(profile, indent=2, ensure_ascii=False),
+    )
 
     return profile
 
@@ -248,6 +246,28 @@ def _score_components(
     return comps
 
 
+def _finish_bucket(
+    candidates: list[dict[str, Any]],
+    bucket: str,
+    quota: int,
+    per_container: int,
+    per_artist: int,
+    yt: YTMusic,
+    min_duration: int,
+    max_duration: int,
+    profile: dict[str, Any],
+    seen_video_ids: set[str],
+    seen_keys: set[tuple[str, str]],
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    selected, funnel = _collect_tracks(
+        candidates, bucket, quota, per_container, per_artist, yt,
+        min_duration, max_duration,
+        _DummyArchive(profile["library_video_ids"]),
+        seen_video_ids, seen_keys, return_funnel=True,
+    )
+    return selected, len(candidates), funnel
+
+
 def _bucket_deep_cuts(
     yt: YTMusic,
     profile: dict[str, Any],
@@ -258,7 +278,7 @@ def _bucket_deep_cuts(
     max_duration: int,
     seen_video_ids: set[str],
     seen_keys: set[tuple[str, str]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     candidates: list[dict[str, Any]] = []
     max_artists = min(15, len(profile["top_artists"]))
     for entry in profile["top_artists"][:max_artists]:
@@ -311,21 +331,10 @@ def _bucket_deep_cuts(
                 candidates.append(t)
         if len(candidates) >= quota * 6:
             break
-    selected, funnel = _collect_tracks(
-        candidates,
-        "deep_cuts",
-        quota,
-        per_container,
-        per_artist,
-        yt,
-        min_duration,
-        max_duration,
-        _DummyArchive(profile["library_video_ids"]),
-        seen_video_ids,
-        seen_keys,
-        return_funnel=True,
+    return _finish_bucket(
+        candidates, "deep_cuts", quota, per_container, per_artist, yt,
+        min_duration, max_duration, profile, seen_video_ids, seen_keys,
     )
-    return selected, len(candidates), funnel
 
 
 def _bucket_adjacent(
@@ -338,7 +347,7 @@ def _bucket_adjacent(
     max_duration: int,
     seen_video_ids: set[str],
     seen_keys: set[tuple[str, str]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     candidates: list[dict[str, Any]] = []
     main_artists = {a["name"] for a in profile.get("top_artists", [])}
     related: dict[str, str] = {}
@@ -389,21 +398,10 @@ def _bucket_adjacent(
         if len(candidates) >= quota * 5:
             break
 
-    selected, funnel = _collect_tracks(
-        candidates,
-        "adjacent",
-        quota,
-        per_container,
-        per_artist,
-        yt,
-        min_duration,
-        max_duration,
-        _DummyArchive(profile["library_video_ids"]),
-        seen_video_ids,
-        seen_keys,
-        return_funnel=True,
+    return _finish_bucket(
+        candidates, "adjacent", quota, per_container, per_artist, yt,
+        min_duration, max_duration, profile, seen_video_ids, seen_keys,
     )
-    return selected, len(candidates), funnel
 
 
 def _pick_radio_seeds(liked_music: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -423,7 +421,7 @@ def _bucket_radio(
     max_duration: int,
     seen_video_ids: set[str],
     seen_keys: set[tuple[str, str]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     candidates: list[dict[str, Any]] = []
     liked_music = profile.get("_liked_music", [])
     seeds = _pick_radio_seeds(liked_music)
@@ -452,21 +450,10 @@ def _bucket_radio(
         if len(candidates) >= quota * 5:
             break
 
-    selected, funnel = _collect_tracks(
-        candidates,
-        "radio",
-        quota,
-        per_container,
-        per_artist,
-        yt,
-        min_duration,
-        max_duration,
-        _DummyArchive(profile["library_video_ids"]),
-        seen_video_ids,
-        seen_keys,
-        return_funnel=True,
+    return _finish_bucket(
+        candidates, "radio", quota, per_container, per_artist, yt,
+        min_duration, max_duration, profile, seen_video_ids, seen_keys,
     )
-    return selected, len(candidates), funnel
 
 
 def _diverse_seeds(profile: dict[str, Any], total: int = 20) -> list[str]:
@@ -537,21 +524,10 @@ def _bucket_external_graph(
         if len(candidates) >= quota * 3:
             break
 
-    selected, funnel = _collect_tracks(
-        candidates,
-        "external_graph",
-        quota,
-        per_container,
-        per_artist,
-        yt,
-        min_duration,
-        max_duration,
-        _DummyArchive(profile["library_video_ids"]),
-        seen_video_ids,
-        seen_keys,
-        return_funnel=True,
+    return _finish_bucket(
+        candidates, "external_graph", quota, per_container, per_artist, yt,
+        min_duration, max_duration, profile, seen_video_ids, seen_keys,
     )
-    return selected, len(candidates), funnel
 
 
 def _bucket_tag_search(
@@ -565,7 +541,7 @@ def _bucket_tag_search(
     max_duration: int,
     seen_video_ids: set[str],
     seen_keys: set[tuple[str, str]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
     candidates: list[dict[str, Any]] = []
     profile_tags = [t["name"] for t in profile.get("tags", [])]
     if not profile_tags:
@@ -577,7 +553,7 @@ def _bucket_tag_search(
                     tag_counter[tag.lower()] += 1
             profile_tags = [name for name, _ in tag_counter.most_common(10)]
     if not profile_tags:
-        return candidates, 0
+        return candidates, 0, {}
 
     for tag in profile_tags[:5]:
         try:
@@ -600,21 +576,10 @@ def _bucket_tag_search(
         if len(candidates) >= quota * 3:
             break
 
-    selected = _collect_tracks(
-        candidates,
-        "tag_search",
-        quota,
-        per_container,
-        per_artist,
-        yt,
-        min_duration,
-        max_duration,
-        _DummyArchive(profile["library_video_ids"]),
-        seen_video_ids,
-        seen_keys,
+    return _finish_bucket(
+        candidates, "tag_search", quota, per_container, per_artist, yt,
+        min_duration, max_duration, profile, seen_video_ids, seen_keys,
     )
-    return selected, len(candidates)
-
 
 def _tag_candidates(
     candidates: list[dict[str, Any]],
@@ -644,7 +609,6 @@ def run_discover_phase4(
     min_duration: int,
     max_duration: int,
     max_size: str | None,
-    dry_run: bool,
     external_similar: int = 10,
 ) -> tuple[Manifest, dict[str, Any]]:
     yt = YTMusic(headers_path)
@@ -788,7 +752,7 @@ def run_discover_phase4(
             status = "skipped_size"
             skipped_by_size += 1
         else:
-            status = "pending" if dry_run else "pending"
+            status = "pending"
 
         entry = dict(track)
         entry.update({

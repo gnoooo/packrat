@@ -1,43 +1,53 @@
-usage: ytm-offline download-manifest [-h] [--cookies COOKIES]
-                                     [--cookies-from-browser COOKIES_FROM_BROWSER]
-                                     [--output OUTPUT] [--archive ARCHIVE]
-                                     [--delay DELAY] [--max-size MAX_SIZE]
-                                     [--limit LIMIT] [--dry-run] [--yes]
-                                     [--tui]
-                                     [--theme {ocean,sunset,matrix,mono}]
-                                     [--no-anim] [--no-color] [--ascii]
-                                     [--palette {auto,custom,fixed,basic}]
-                                     --manifest MANIFEST [--failed-only]
+usage: packrat download-manifest [-h] [--cookies FILE]
+                                 [--cookies-from-browser BROWSER[:PROFILE]]
+                                 [--output DIR] [--archive FILE]
+                                 [--delay SECONDS] [--max-size SIZE]
+                                 [--limit N] [--dry-run] [--yes] [--tui]
+                                 [--theme {ocean,sunset,matrix,mono}]
+                                 [--no-anim] [--no-color] [--ascii]
+                                 [--palette {auto,fixed,basic}]
+                                 [--manifest FILE] [--failed-only]
+
+Finish or retry downloads from a saved plan. With no --manifest, the newest
+plan in the output folder is used. Also available as 'resume'.
+
+Common options:
+  --output, -o DIR      folder where songs are saved (default: inferred from
+                        the plan)
+  --limit N             download at most N new songs this run
+  --dry-run, -n         show what would be downloaded, without downloading
+                        anything
+  --yes, -y             don't ask before downloading
+  --manifest FILE       saved plan file (default: newest plan in the output
+                        folder)
+
+First-time setup:
+  --cookies FILE        advanced: a cookies.txt file exported from your
+                        browser (env: PACKRAT_COOKIES)
+  --cookies-from-browser BROWSER[:PROFILE]
+                        recommended: read cookies from a browser: firefox,
+                        chrome, edge, ...; add :profile for a specific profile
+                        (env: PACKRAT_COOKIES_FROM_BROWSER)
+
+Advanced:
+  --archive FILE        download history file, so finished songs are not
+                        downloaded again (env: PACKRAT_ARCHIVE; default:
+                        .packrat_archive)
+  --delay SECONDS       seconds to wait between songs (default: 7.0)
+  --max-size SIZE       skip songs bigger than SIZE (example: 3GB)
+  --failed-only         only retry songs that failed
+
+Advanced display:
+  --tui                 show the full-screen progress view
+  --theme {ocean,sunset,matrix,mono}
+                        colors for the full-screen view (default: ocean)
+  --no-anim             turn off animation in the full-screen view (env:
+                        PACKRAT_TUI_ANIM=0)
+  --no-color            no colors (env: NO_COLOR)
+  --ascii               plain characters instead of symbols
+  --palette {auto,fixed,basic}
+                        how colors are chosen: auto, fixed, basic (default:
+                        auto)
 
 options:
   -h, --help            show this help message and exit
-  --manifest MANIFEST   path to a manifest JSON file
-  --failed-only         retry only entries whose status is failed
-
-Authentication:
-  --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
-                        YTM_COOKIES)
-  --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp, e.g. firefox[:profile]
-                        (env: YTM_COOKIES_FROM_BROWSER)
-
-Run control:
-  --output, -o OUTPUT   output root directory (default: parent of playlists/)
-  --archive ARCHIVE     download archive file (env: YTM_ARCHIVE; default:
-                        .ytm_offline_archive)
-  --delay DELAY         seconds between downloads (default: 7.0)
-  --max-size MAX_SIZE   skip tracks estimated larger than SIZE (e.g. 3GB)
-  --limit LIMIT         max new tracks to download this run (after dedupe and
-                        selection)
-  --dry-run, -n         plan only; write the manifest and download nothing
-  --yes, -y             skip confirmation prompts
-  --tui                 use the curses TUI
-
-Display:
-  --theme {ocean,sunset,matrix,mono}
-                        TUI color theme (default: ocean)
-  --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
-  --no-color            disable TUI colors (env: NO_COLOR)
-  --ascii               use ASCII progress bars in the TUI
-  --palette {auto,custom,fixed,basic}
-                        color tier (auto/custom/fixed/basic) (default: auto)

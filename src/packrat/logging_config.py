@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
 class RedactFilter(logging.Filter):
-    """Mask auth tokens from log records."""
+    """Mask auth tokens and strip terminal color escapes from log records."""
 
     _PATTERNS = [
         (re.compile(r"(?i)(Cookie:\s*)[^\s\r\n]+"), r"\1<redacted>"),
@@ -20,15 +23,16 @@ class RedactFilter(logging.Filter):
     ]
 
     def filter(self, record: logging.LogRecord) -> bool:
-        # Copy the record so that mutating msg/args does not affect other handlers.
-        redacted = logging.makeLogRecord(record.__dict__)
-        redacted.msg = self.redact(record.getMessage())
-        redacted.args = ()  # already interpolated; avoids msg % args double-formatting
-        return redacted
+        # Filters that *return* a replacement LogRecord are only honored on
+        # Python 3.12+. Mutate in place so redaction also happens on the
+        # project's minimum supported version (3.10/3.11).
+        record.msg = self.redact(record.getMessage())
+        record.args = ()  # already interpolated; avoids msg % args double-formatting
+        return True
 
     @classmethod
     def redact(cls, text: Any) -> str:
-        s = str(text)
+        s = _ANSI_RE.sub("", str(text))
         for pat, repl in cls._PATTERNS:
             s = pat.sub(repl, s)
         return s
@@ -77,7 +81,7 @@ def setup_logging(
         log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    log_file = log_dir / f"ytm-offline-{ts}.log"
+    log_file = log_dir / f"packrat-{ts}.log"
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)

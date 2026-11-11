@@ -2,7 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from ytm_offline import albums as albums_module
+from packrat import albums as albums_module
+from packrat import batch as batch_module
 
 
 def _make_liked_track(video_id, title, artist):
@@ -84,3 +85,39 @@ def test_discover_albums_picks_standard_skips_live(
     assert result["total_new_tracks"] == 2
     assert all("Live at Venue" not in a["album"] for a in result["albums"])
     assert (tmp_path / "playlists" / "albums.manifest.json").exists()
+
+
+def test_download_albums_keeps_previously_downloaded_entries(tmp_path):
+    """save_callback must not replace the manifest with the pending subset."""
+    import json
+
+    from packrat.manifest import Manifest
+
+    playlists = tmp_path / "playlists"
+    playlists.mkdir(parents=True)
+    manifest = Manifest()
+    manifest.entries = [
+        {"video_id": "old", "title": "Old", "artist": "A", "album": "Al",
+         "est_size": 1, "status": "downloaded", "path": "/x/old.m4a"},
+        {"video_id": "new", "title": "New", "artist": "A", "album": "Al",
+         "est_size": 1, "status": "pending", "path": None},
+    ]
+    manifest.write(playlists / "albums.manifest.json")
+
+    def _batch(entries, **kwargs):
+        entries[0]["status"] = "downloaded"
+        entries[0]["path"] = "/x/new.m4a"
+        kwargs["save_callback"](entries)
+        return {
+            "downloaded": 1, "archived": 0, "skipped_size": 0,
+            "failed": 0, "stopped": False, "stop_reason": "completed",
+        }
+
+    with patch.object(batch_module, "run_batch_download", side_effect=_batch):
+        result = albums_module.download_albums(
+            output_root=tmp_path, archive_path=tmp_path / "archive",
+        )
+
+    assert "summary" in result
+    saved = json.loads((playlists / "albums.manifest.json").read_text())
+    assert [e["video_id"] for e in saved["entries"]] == ["old", "new"]

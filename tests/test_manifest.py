@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from ytm_offline.manifest import Manifest, SCHEMA_VERSION
+from packrat.manifest import Manifest, SCHEMA_VERSION
 
 
 def test_manifest_writes_version(tmp_path: pathlib.Path) -> None:

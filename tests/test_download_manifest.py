@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ytm_offline import cli
+from packrat import cli
 
 
 def _args(tmp_path: pathlib.Path, manifest: pathlib.Path, **kwargs: object):
@@ -29,7 +29,7 @@ def test_manifest_missing(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture)
     missing = tmp_path / "nope.manifest.json"
     args = _args(tmp_path, missing)
     assert cli.cmd_download_manifest(args) == 1
-    assert "manifest not found" in capsys.readouterr().err
+    assert "Saved plan not found" in capsys.readouterr().err
 
 
 def test_generic_prompt_declines(
@@ -47,7 +47,7 @@ def test_generic_prompt_declines(
     monkeypatch.setattr("builtins.input", lambda _: "n")
     args = _args(tmp_path, manifest)
     assert cli.cmd_download_manifest(args) == 2
-    assert "not downloading" in capsys.readouterr().out
+    assert "Not downloading" in capsys.readouterr().out
 
 
 def test_generic_runs_batch_download(
@@ -69,7 +69,7 @@ def test_generic_runs_batch_download(
     manifest.write_text(json.dumps({"entries": entries}), encoding="utf-8")
 
     def fake_run(entries_arg, **kwargs):
-        assert kwargs.get("archive_path") == ".ytm_offline_archive"
+        assert kwargs.get("archive_path") == ".packrat_archive"
         assert kwargs.get("mode") == "manifest"
         return {
             "downloaded": 1,
@@ -80,7 +80,7 @@ def test_generic_runs_batch_download(
         }
 
     args = _args(tmp_path, manifest, yes=True)
-    with patch("ytm_offline.cli.run_batch_download", side_effect=fake_run):
+    with patch("packrat.cli.run_batch_download", side_effect=fake_run):
         assert cli.cmd_download_manifest(args) == 0
     out = capsys.readouterr().out
     assert "pending tracks: 1" in out
@@ -117,7 +117,7 @@ def test_artist_manifest_routes_to_download_artist(
         }
 
     args = _args(tmp_path, manifest, yes=True)
-    with patch("ytm_offline.cli.artists_module.download_artist", side_effect=fake_download_artist):
+    with patch("packrat.cli.artists_module.download_artist", side_effect=fake_download_artist):
         assert cli.cmd_download_manifest(args) == 0
     out = capsys.readouterr().out
     assert "downloaded 2" in out
@@ -136,8 +136,85 @@ def test_artist_manifest_reports_error(
 
     args = _args(tmp_path, manifest, yes=True)
     with patch(
-        "ytm_offline.cli.artists_module.download_artist",
+        "packrat.cli.artists_module.download_artist",
         return_value={"error": "no pending tracks"},
     ):
         assert cli.cmd_download_manifest(args) == 1
     assert "no pending tracks" in capsys.readouterr().err
+
+
+def test_artist_download_saves_to_the_given_manifest_path(tmp_path):
+    from packrat import artist_playlists
+
+    manifest = tmp_path / "playlists" / "custom-name.manifest.json"
+    manifest.parent.mkdir(parents=True)
+    payload = {
+        "command": "artist",
+        "label": "Test",
+        "entries": [
+            {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+             "duration": 100, "est_size": 1, "status": "pending",
+             "path": None, "error": None},
+        ],
+    }
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _batch(entries, **kwargs):
+        entries[0]["status"] = "downloaded"
+        entries[0]["path"] = str(tmp_path / "A" / "Al" / "01 - T.m4a")
+        kwargs["save_callback"](entries)
+        return {
+            "downloaded": 1, "archived": 0, "skipped_size": 0,
+            "failed": 0, "stopped": False, "stop_reason": "completed",
+        }
+
+    with patch.object(artist_playlists, "run_batch_download", side_effect=_batch):
+        result = artist_playlists.download_artist(
+            "Test", tmp_path, str(tmp_path / "archive"),
+            payload=payload, manifest_path=manifest,
+        )
+
+    assert result["manifest_path"] == str(manifest)
+    saved = json.loads(manifest.read_text())
+    assert saved["entries"][0]["status"] == "downloaded"
+
+
+def test_resume_without_manifest_uses_newest_plan(tmp_path, monkeypatch, capsys):
+    import os
+
+    playlists = tmp_path / "playlists"
+    playlists.mkdir()
+    old = playlists / "old.manifest.json"
+    new = playlists / "new.manifest.json"
+    for path, video_id in ((old, "old"), (new, "new")):
+        path.write_text(json.dumps({"entries": [
+            {"video_id": video_id, "title": "T", "artist": "A",
+             "album": "Al", "est_size": 1, "status": "pending"},
+        ]}), encoding="utf-8")
+    os.utime(old, (1, 1))
+    os.utime(new, (2, 2))
+
+    captured = {}
+
+    def _batch(entries, **_kwargs):
+        captured["ids"] = [e["video_id"] for e in entries]
+        return {
+            "downloaded": 0, "archived": 0, "skipped_size": 0,
+            "failed": 0, "stopped": False, "stop_reason": "completed",
+        }
+
+    monkeypatch.setattr("packrat.cli.run_batch_download", _batch)
+    args = cli.build_parser().parse_args(
+        ["resume", "--output", str(tmp_path), "--yes"]
+    )
+    assert cli.cmd_download_manifest(args) == 0
+    assert captured["ids"] == ["new"]
+    assert "Using saved plan" in capsys.readouterr().out
+
+
+def test_resume_without_plans_explains(tmp_path, capsys):
+    args = cli.build_parser().parse_args(
+        ["resume", "--output", str(tmp_path)]
+    )
+    assert cli.cmd_download_manifest(args) == 1
+    assert "No saved plan found" in capsys.readouterr().err

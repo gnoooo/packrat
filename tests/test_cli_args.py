@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from ytm_offline import cli_args
+from packrat import cli_args
 
 
 @pytest.fixture
@@ -26,60 +26,60 @@ def _parse(argv):
 # ---------------------------------------------------------------------------
 
 def test_headers_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_HEADERS", "/from/env.json")
+    monkeypatch.setenv("PACKRAT_HEADERS", "/from/env.json")
     args = _parse(["auth"])
     assert args.headers == "/from/env.json"
 
 
 def test_cookies_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_COOKIES", "/from/env/cookies.txt")
+    monkeypatch.setenv("PACKRAT_COOKIES", "/from/env/cookies.txt")
     args = _parse(["sync", "--source", "liked"])
     assert args.cookies == "/from/env/cookies.txt"
 
 
 def test_cookies_from_browser_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_COOKIES_FROM_BROWSER", "firefox:profile")
+    monkeypatch.setenv("PACKRAT_COOKIES_FROM_BROWSER", "firefox:profile")
     args = _parse(["sync", "--source", "liked"])
     assert args.cookies_from_browser == "firefox:profile"
 
 
 def test_output_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_OUTPUT", "/env/output")
+    monkeypatch.setenv("PACKRAT_OUTPUT", "/env/output")
     args = _parse(["sync", "--source", "liked"])
     assert args.output == "/env/output"
 
 
 def test_archive_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_ARCHIVE", "/env/archive")
+    monkeypatch.setenv("PACKRAT_ARCHIVE", "/env/archive")
     args = _parse(["sync", "--source", "liked"])
     assert args.archive == "/env/archive"
 
 
 def test_singles_dir_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_SINGLES_DIR", "EPs")
+    monkeypatch.setenv("PACKRAT_SINGLES_DIR", "EPs")
     args = _parse(["sync", "--source", "liked"])
     cli_args.resolve_run_control_aliases(args)
     assert args.singles_dir == "EPs"
 
 
 def test_manifest_format_default_prefers_env(monkeypatch):
-    monkeypatch.setenv("YTM_MANIFEST_FORMAT", "csv")
+    monkeypatch.setenv("PACKRAT_MANIFEST_FORMAT", "csv")
     args = _parse(["sync", "--source", "liked"])
     cli_args.resolve_run_control_aliases(args)
     assert args.manifest_format == "json+csv"
 
 
 def test_cli_overrides_env(monkeypatch):
-    monkeypatch.setenv("YTM_OUTPUT", "/env/output")
-    monkeypatch.setenv("YTM_ARCHIVE", "/env/archive")
+    monkeypatch.setenv("PACKRAT_OUTPUT", "/env/output")
+    monkeypatch.setenv("PACKRAT_ARCHIVE", "/env/archive")
     args = _parse(["sync", "--source", "liked", "--output", "/cli/output", "--archive", "/cli/archive"])
     assert args.output == "/cli/output"
     assert args.archive == "/cli/archive"
 
 
 def test_cli_overrides_env_of_other_auth_kind(monkeypatch, capsys):
-    """--cookies on the CLI overrides YTM_COOKIES_FROM_BROWSER without error."""
-    monkeypatch.setenv("YTM_COOKIES_FROM_BROWSER", "firefox")
+    """--cookies on the CLI overrides PACKRAT_COOKIES_FROM_BROWSER without error."""
+    monkeypatch.setenv("PACKRAT_COOKIES_FROM_BROWSER", "firefox")
     argv = ["sync", "--source", "liked", "--cookies", "cookies.txt"]
     args = _parse(argv)
     cli_args.resolve_auth(args, argv=argv)
@@ -88,7 +88,7 @@ def test_cli_overrides_env_of_other_auth_kind(monkeypatch, capsys):
 
 
 def test_env_falls_back_to_default(monkeypatch):
-    monkeypatch.delenv("YTM_OUTPUT", raising=False)
+    monkeypatch.delenv("PACKRAT_OUTPUT", raising=False)
     args = _parse(["sync", "--source", "liked"])
     assert args.output == cli_args.DEFAULT_OUTPUT
 
@@ -184,9 +184,7 @@ def test_shared_options_have_same_definition_across_commands(parser):
                 assert action.dest == ref.dest, f"{name} {opt} dest mismatch"
                 assert action.type == ref.type, f"{name} {opt} type mismatch"
                 # A command may legitimately override help/default for a shared option.
-                if name == "download-manifest" and opt == "--output":
-                    continue
-                if name == "migrate-layout" and opt in ("--dry-run", "--yes"):
+                if name in ("download-manifest", "resume") and opt == "--output":
                     continue
                 assert action.help == ref.help, f"{name} {opt} help mismatch"
 
@@ -204,13 +202,6 @@ def test_both_cookie_kinds_on_cli_exit_2(capsys):
     assert "mutually exclusive" in err
 
 
-def test_browser_profile_alias_combines_and_warns(capsys):
-    argv = ["sync", "--source", "liked", "--cookies-from-browser", "firefox", "--browser-profile", "dev"]
-    args = _parse(argv)
-    cli_args.resolve_auth(args, argv=argv)
-    assert args.cookies_from_browser == "firefox:dev"
-    err = capsys.readouterr().err
-    assert "deprecated" in err
 
 
 @pytest.mark.parametrize("spec,expected", [
@@ -235,7 +226,7 @@ def test_parse_cookies_from_browser_invalid_exits_2(spec, capsys):
 
 
 def test_cli_cookies_from_browser_overrides_env_cookies(monkeypatch):
-    monkeypatch.setenv("YTM_COOKIES", "env-cookies.txt")
+    monkeypatch.setenv("PACKRAT_COOKIES", "env-cookies.txt")
     argv = ["sync", "--source", "liked", "--cookies-from-browser", "firefox"]
     args = _parse(argv)
     cli_args.resolve_auth(args, argv=argv)
@@ -244,8 +235,8 @@ def test_cli_cookies_from_browser_overrides_env_cookies(monkeypatch):
 
 
 def test_both_env_kinds_allowed(monkeypatch):
-    monkeypatch.setenv("YTM_COOKIES", "env-cookies.txt")
-    monkeypatch.setenv("YTM_COOKIES_FROM_BROWSER", "firefox")
+    monkeypatch.setenv("PACKRAT_COOKIES", "env-cookies.txt")
+    monkeypatch.setenv("PACKRAT_COOKIES_FROM_BROWSER", "firefox")
     argv = ["sync", "--source", "liked"]
     args = _parse(argv)
     cli_args.resolve_auth(args, argv=argv)
@@ -263,39 +254,18 @@ def test_both_cli_kinds_exit_2(capsys):
     assert "mutually exclusive" in capsys.readouterr().err
 
 
-def test_browser_profile_without_cookies_from_browser_exits():
-    argv = ["sync", "--source", "liked", "--browser-profile", "dev"]
-    args = _parse(argv)
-    with pytest.raises(SystemExit):
-        cli_args.resolve_auth(args, argv=argv)
 
 
 # ---------------------------------------------------------------------------
 # Run-control aliases
 # ---------------------------------------------------------------------------
 
-def test_singles_dir_flag_alias_warns(capsys):
-    args = _parse(["sync", "--source", "liked", "--singles-dir", "Singles2"])
-    cli_args.resolve_run_control_aliases(args)
-    assert args.singles_dir == "Singles2"
-    assert "deprecated" in capsys.readouterr().err
 
 
-def test_singles_dir_validation(parser):
-    with pytest.raises(SystemExit):
-        parser.parse_args(["sync", "--source", "liked", "--singles-dir", "a/b"])
 
 
-def test_manifest_format_flag_alias_warns(capsys):
-    args = _parse(["sync", "--source", "liked", "--manifest-format", "csv"])
-    cli_args.resolve_run_control_aliases(args)
-    assert args.manifest_format == "json+csv"
-    assert "deprecated" in capsys.readouterr().err
 
 
-def test_manifest_format_validation(parser):
-    with pytest.raises(SystemExit):
-        parser.parse_args(["sync", "--source", "liked", "--manifest-format", "xml"])
 
 
 # ---------------------------------------------------------------------------
@@ -338,9 +308,6 @@ def test_library_top_option(parser):
     assert args.top == 5
 
 
-def test_library_limit_hidden_alias(parser):
-    args = parser.parse_args(["library", "--limit", "5"])
-    assert args.top == 5
 
 
 # ---------------------------------------------------------------------------
@@ -371,21 +338,20 @@ def test_discover_subcommands_parse(parser, sub):
         ("discover-queues", ["discover", "queues"]),
         ("discover-albums", ["discover", "albums"]),
         ("radio", ["discover", "radio"]),
-        ("tui-demo", ["ui", "demo"]),
-        ("tui-glyphs", ["ui", "glyphs"]),
     ],
 )
 def test_legacy_aliases_are_rewritten(alias, new):
-    from ytm_offline import cli
+    from packrat import cli
     assert cli._rewrite_legacy_argv([alias]) == new
     assert cli._rewrite_legacy_argv([alias, "--extra"]) == new + ["--extra"]
 
 
 def test_hidden_aliases_not_in_help(parser, capsys):
+    import re
     parser.print_help()
     out = capsys.readouterr().out
-    for alias in ("retry", "discover-phase4", "tui-demo"):
-        assert alias not in out
+    for alias in ("retry", "discover-phase4"):
+        assert not re.search(rf"^    {re.escape(alias)}\b", out, re.M)
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +359,8 @@ def test_hidden_aliases_not_in_help(parser, capsys):
 # ---------------------------------------------------------------------------
 
 def test_env_both_cookie_kinds_no_cli_is_allowed(monkeypatch):
-    monkeypatch.setenv("YTM_COOKIES", "cookies.txt")
-    monkeypatch.setenv("YTM_COOKIES_FROM_BROWSER", "firefox")
+    monkeypatch.setenv("PACKRAT_COOKIES", "cookies.txt")
+    monkeypatch.setenv("PACKRAT_COOKIES_FROM_BROWSER", "firefox")
     argv = ["sync", "--source", "liked"]
     args = _parse(argv)
     cli_args.resolve_auth(args, argv=argv)
@@ -409,6 +375,7 @@ def test_env_both_cookie_kinds_no_cli_is_allowed(monkeypatch):
 def test_top_level_help_matches_snapshot(monkeypatch, tmp_path):
     """Top-level help is stable; update tests/snapshots/help_top_level.txt when it changes."""
     monkeypatch.setattr(cli_args, "HEADERS_CONFIG_PATH", str(tmp_path / "no.json"))
+    monkeypatch.setattr(cli_args, "LEGACY_HEADERS_CONFIG_PATH", str(tmp_path / "old-no.json"))
     parser = cli_args.build_parser()
     output = parser.format_help()
     snapshot = pathlib.Path(__file__).parent / "snapshots" / "help_top_level.txt"

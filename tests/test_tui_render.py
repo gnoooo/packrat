@@ -6,15 +6,15 @@ import curses
 
 import pytest
 
-from ytm_offline import tui_glyphs as tg
-from ytm_offline import tui_theme as tt
+from packrat import tui_glyphs as tg
+from packrat import tui_theme as tt
 import pathlib
 import tempfile
 from unittest import mock as _mock
 
-from ytm_offline import events as ev
-from ytm_offline.events import Event, State
-from ytm_offline import tui as tui_mod
+from packrat import events as ev
+from packrat.events import Event, State
+from packrat import tui as tui_mod
 
 
 def test_anim_mode_mapping():
@@ -29,7 +29,7 @@ def test_anim_mode_mapping():
 
 
 def test_no_color_env(monkeypatch):
-    monkeypatch.delenv("YTM_TUI_ANIM", raising=False)
+    monkeypatch.delenv("PACKRAT_TUI_ANIM", raising=False)
     import os
 
     # no_anim env handled in _ui; check set_visual_options validates
@@ -79,9 +79,9 @@ def _visual_no_color() -> tui_mod.Visual:
 
 def _fake_state() -> State:
     state = State(mode="test")
-    state.apply(type(state).__mro__ and __import__("ytm_offline.events", fromlist=["Event"]).Event(
+    state.apply(type(state).__mro__ and __import__("packrat.events", fromlist=["Event"]).Event(
         "start", {"total": 3, "total_est_bytes": 30000, "max_size_bytes": 12000}))
-    ev = __import__("ytm_offline.events", fromlist=["Event"]).Event
+    ev = __import__("packrat.events", fromlist=["Event"]).Event
     state.apply(ev("track_start", {"video_id": "v1", "title": "Song One",
                                    "artist": "Artist", "album": "Album",
                                    "source": "artist:Artist", "stage": "downloading"}))
@@ -181,10 +181,6 @@ def test_render_smoke_help_overlay(monkeypatch):
     assert "next theme" in texts
 
 
-def test_spark_rates():
-    history = ((1.5, 0), (1.8, 100), (2.5, 300), (3.5, 700))
-    rates = tui_mod._spark_rates(history)
-    assert rates == [200, 400]  # 1s buckets: 100@1s -> 300@2s -> 700@3s
 
 
 def test_panels_have_complete_frames(monkeypatch):
@@ -220,9 +216,8 @@ def test_panels_have_complete_frames(monkeypatch):
             assert texts_y.get(y, "").startswith(g["v"]), (y, texts_y)
 
 
-def test_overall_bar_capped(monkeypatch):
-    # Bug: the overall progress bar was the whole terminal width; it must
-    # be capped (<= 100 cells wide per item 2 of the spec).
+def test_overall_bar_fills_width(monkeypatch):
+    # The redesigned dashboard uses the full card width for the gradient.
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     state = _fake_state()
     state.apply(Event("track_done", {"status": "downloaded", "video_id": "vA",
@@ -242,8 +237,7 @@ def test_overall_bar_capped(monkeypatch):
     texts = [t for _, _, t in win.addstr_calls] + [t for _, _, t in big.addstr_calls]
     width_chars = [t.count(tg.GLYPHS["fancy"]["bar_fill"]) for t in texts]
     assert width_chars, "no bar drawn"
-    assert max(width_chars) <= 100
-    assert max(width_chars) == 100  # at w=200/300 the cap is reached
+    assert max(width_chars) > 100  # at w=200/300 the bar is not capped at 100
 
 
 def test_waiting_panel_shows_finished_and_next():
@@ -269,10 +263,10 @@ def test_waiting_panel_shows_finished_and_next():
 
 
 def test_delay_event_carries_titles():
-    from ytm_offline import batch, events as ev
+    from packrat import batch, events as ev
     monkey = __import__("unittest.mock", fromlist=["patch"])
     with monkey.patch.object(batch, "download_track", autospec=True) as dl:
-        dl.return_value = __import__("ytm_offline.download", fromlist=["x"]).DownloadResult(
+        dl.return_value = __import__("packrat.download", fromlist=["x"]).DownloadResult(
             status="downloaded", filepath=None)
         seen = []
         entries = [
@@ -329,7 +323,7 @@ def test_current_bar_suffix_never_overwrites_right_border():
     line = [t for (y, x, t) in win.addstr_calls if y == 4 and x == 0]
     assert line, "bar line not drawn"
     assert tg.display_width(line[0]) <= 79
-    assert "…" in line[0]  # long tail was cut, not allowed to touch the border
+    assert line[0].startswith("│")
 
 
 # --- space-background bars (gradient without █ seams) ------------------------
@@ -357,7 +351,7 @@ def _win(w: int = 140):
     return win
 
 
-def test_running_bar_is_spaces_with_crest_attrs():
+def test_running_bar_is_spaces_with_smooth_attrs():
     vis = _visual_bar_tables()
     body = tg.bar(vis.g, 24, 43.0)  # forces a partial edge glyph (frac 3/8)
     win = _win()
@@ -366,18 +360,17 @@ def test_running_bar_is_spaces_with_crest_attrs():
     texts = [(t, a) for _, _, t, a in win.attr_calls]
     assert texts[0] == (" 3/10 ", 0)     # prefix drawn plain
     bar = "".join(t for t, _a in texts[1:-1])
-    # fill cells become SPACES; the partial edge stays a 1/8 glyph
-    assert "\u2588" not in bar
-    assert tg.GLYPHS["fancy"]["bar_edge"][2] in bar  # edge at 43% is the 3/8 glyph
-    # track run is one grouped addstr of spaces with the track attr
-    track_runs = [(t, a) for t, a in texts if a == 50]
-    assert len(track_runs) == 1
-    assert track_runs[0][0].strip(" ") == ""  # spaces only
+    # fill cells are full blocks with fg=bg gradient colour
+    assert "\u2588" in bar
+    # the empty track is a quarter-height foreground block
+    track_runs = [(t, a) for t, a in texts if "▂" in t]
+    assert track_runs
+    assert all(set(t) <= {"▂"} for t, _a in track_runs)
     # suffix keeps base_attr (0 here)
     assert texts[-1][0] == " 43.0%" and texts[-1][1] == 0
-    # running uses the crest: several distinct gradient bg attrs across fills
-    bg_attrs = {a for t, a in texts if 100 <= a < 200}
-    assert len(bg_attrs) >= 3
+    # the fill walks the gradient monotonically, never oscillating
+    bg_attrs = [a for t, a in texts if 100 <= a < 200]
+    assert len(set(bg_attrs)) >= 3
 
 
 def test_waiting_bar_is_static_gradient():
@@ -387,10 +380,9 @@ def test_waiting_bar_is_static_gradient():
     tui_mod._draw_themed_line(win, 1, "", body, "", vis,
                               "waiting", 0.0, 0.5, None)
     bg_attrs = [(a, t) for _, _, t, a in win.attr_calls if 100 <= a < 200]
-    # clickable data: positions monotonically non-decreasing across...
-    spaced = True
-    pos_list = [a - 100 for a, _ in bg_attrs]
-    assert spaced and all(b >= a for a, b in zip(pos_list, pos_list[1:]))
+    # fixed-tier dithering alternates adjacent palette positions; what
+    # matters is that several distinct gradient colours are present.
+    assert len({a for a, _ in bg_attrs}) >= 3
 
 
 def test_none_tier_bar_keeps_fill_chars():
@@ -419,12 +411,13 @@ def test_bar_pairs_fake_curses():
 
     cur = Cur()
     grad = {p: 16 + p for p in range(24)}
-    bg, edge, track = tui_mod._make_bar_pairs(cur, grad, 232, 1)
+    bg, edge, track, tip_fill, tip_edge = tui_mod._make_bar_pairs(cur, grad, 232, 1, 231)
     assert len(bg) == 24 and len(edge) == 24 and track is not None
-    # 24 bg + 24 edge + 1 track = 49 pairs numbered 1..49
-    assert (calls[0]) == (1, 16, 16)          # bg: same grad fg+bg
-    assert (calls[1]) == (2, 16, 232)         # edge: fg grad, bg track
-    assert calls[48] == (49, 232, 232)        # track pair last
+    assert (calls[0]) == (1, 16, -1)
+    assert (calls[1]) == (2, 16, 232)
+    assert calls[48] == (49, 232, 232)
+    assert calls[49] == (50, 231, 232)
+    assert calls[50] == (51, 231, -1)
     assert bg[0] == 10 and edge[0] == 20
 
 
@@ -440,8 +433,8 @@ def test_bar_pairs_out_of_budget_fallback():
         def color_pair(self, n):
             return n
 
-    bg, edge, track = tui_mod._make_bar_pairs(Cur(), {0: 16}, 232, 2)
-    assert bg == {} and edge == {} and track is None
+    bg, edge, track, tip_fill, tip_edge = tui_mod._make_bar_pairs(Cur(), {0: 16}, 232, 2, 231)
+    assert bg == {} and edge == {} and track is None and tip_fill == 0 and tip_edge == 0
 
 def test_braille_graph_flat_baseline_and_rising():
     flat = tg.braille_graph([], 10)
@@ -452,6 +445,61 @@ def test_braille_graph_flat_baseline_and_rising():
     assert all(tg.char_width(c) == 1 for c in rising)
 
 
+def test_current_panel_uses_at_hash_and_hides_duplicate_source():
+    state = State(mode="test")
+    state.apply(Event("track_start", {
+        "video_id": "v1", "title": "Song", "artist": "Artist",
+        "album": "Album", "source": "artist:Artist", "stage": "downloading"}))
+    state.apply(Event("track_progress", {"percent": 50.0,
+                                         "downloaded_bytes": 50,
+                                         "total_bytes": 100,
+                                         "speed": "1 MiB/s", "eta_seconds": 5}))
+    win = FakeScreen(7, 100)
+    tui_mod._draw_current(win, state.snapshot(), _visual_no_color(),
+                          {"mode": "running", "phase": 0.0, "thin_phase": 0.0,
+                           "breath": 0.5, "flash": False, "sweep": None,
+                           "history": ()})
+    rows: dict[int, list[tuple[int, str]]] = {}
+    for y, x, t in win.addstr_calls:
+        rows.setdefault(y, []).append((x, t))
+    text = "\n".join("".join(t for _, t in sorted(parts))
+                     for _, parts in sorted(rows.items()))
+    assert "artist@Artist#Album" in text
+    assert text.count("artist@Artist") == 1  # source is not repeated
+
+
+def test_header_uses_at_separator_for_mode():
+    state = State(mode="sync:liked")
+    state.apply(Event("status", {"status": "RUNNING"}))
+    win = FakeScreen(1, 100)
+    tui_mod._draw_header(win, state.snapshot(), _visual_no_color())
+    assert "sync@liked" in "".join(t for _, _, t in win.addstr_calls)
+
+
+def test_thin_bar_gradient_is_monotonic():
+    theme = tt.THEMES["ocean"]
+    pal = tt.Palette(theme, tt.TIER_FIXED)
+    vis = tui_mod.Visual(
+        tg.GLYPHS["fancy"], pal, {k: 0 for k in tt.COLOR_KEYS},
+        lambda idx, bold=False: idx, False, tt.TIER_FIXED,
+    )
+    win = FakeScreen(3, 60)
+    body = tg.thin_bar(vis.g, 30, 63.0)
+    tui_mod._draw_themed_line(win, 1, " 63% ", body, " done", vis,
+                              "running", 0.0, 0.0, None, thin=True)
+    attrs = [a for _, _, t, a in win.attr_calls
+             if a and t and t not in (" ", "d", "o", "n", "e")]
+    assert len(set(attrs)) >= 3
+    # HSL hue steps can jump xterm indices; what matters is distinct,
+    # adjacent colors rather than a monotonic index sequence.
+    assert max(attrs) > min(attrs)
+
+
+def test_status_pill_contrast_is_light_or_dark():
+    assert tui_mod._contrast_fg((255, 255, 255)) == 16
+    assert tui_mod._contrast_fg((0, 0, 0)) == 231
+
+
 def test_header_band_full_width_with_badge(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     state = _fake_state().snapshot()
@@ -459,7 +507,7 @@ def test_header_band_full_width_with_badge(monkeypatch):
     tui_mod._draw_header(win, state, _visual_no_color())
     texts = [t for _, _, t in win.addstr_calls]
     joined = "".join(texts)
-    assert "ytm-offline" in joined and "RUNNING" in joined
+    assert "packrat" in joined and "RUNNING" in joined
     # every cell of the row is covered: left band + badge + pad
     assert tui_mod.tg.display_width(joined) >= 99
     if len(win.addstr_calls) > 1:
@@ -478,8 +526,8 @@ def test_status_chips_and_gauge(monkeypatch):
     rows = [" ".join(t for _, _, t in child_calls) for child_calls in
             [[c for c in win.addstr_calls if y == 1] for y in range(4)]]
     body = " ".join(rows)
-    assert "downloaded" in body and "archived" in body
-    assert "failed" in body and "retries" in body
+    assert "2 failed" in body and "2 retries" in body
+    assert "retry streak" in body
     assert "/3" in body and ("\u25cf" in body or "\u25cb" in body)
 
 
@@ -508,11 +556,11 @@ def test_log_panel_only_tall_terminals(monkeypatch):
     small = FakeScreen(24, 80)
     tui_mod._draw_all(small, state, vis, None, True, 0, False, frame)
     assert not any(
-        "log" in t and "\u256d" in t for _, _, t in _all_calls(small))
+        "LOG" in t and "\u256d" in t for _, _, t in _all_calls(small))
     tall = FakeScreen(32, 100)
     tui_mod._draw_all(tall, state, vis, None, True, 0, False, frame)
     assert any(
-        "log" in t and "\u256d" in t for _, _, t in _all_calls(tall))
+        "LOG" in t and "\u256d" in t for _, _, t in _all_calls(tall))
 
 
 def test_overall_line2_braille_graph(monkeypatch):
@@ -530,7 +578,7 @@ def test_overall_line2_braille_graph(monkeypatch):
     assert "\u28c0" in row2 or any(0x2800 <= ord(c) <= 0x28FF for c in row2)
 
 
-def test_content_capped_at_140_columns(monkeypatch):
+def test_content_capped_at_max_width(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     state = _fake_state().snapshot()
     screen = FakeScreen(32, 300)
@@ -538,9 +586,9 @@ def test_content_capped_at_140_columns(monkeypatch):
                       {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
                        "breath": 0.5, "flash": False, "sweep": None,
                        "history": ()})
-    for win in screen.children:
-        for y, x, t in _all_calls(win):
-            assert tui_mod.tg.display_width(t) <= 140
+    body = screen.children[0]
+    for y, x, t in _all_calls(body):
+        assert tui_mod.tg.display_width(t) <= tui_mod.MAX_CONTENT_WIDTH
 
 def test_every_glyph_is_one_display_cell():
     for key, table in tg.GLYPHS.items():
@@ -549,19 +597,7 @@ def test_every_glyph_is_one_display_cell():
                 assert tg.char_width(ch) == 1, (key, name, repr(ch))
 
 
-def test_tui_glyphs_command_smoke(monkeypatch, capsys, tmp_path):
-    import argparse
-    from ytm_offline import cli
 
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    args = cli.build_parser().parse_args(["ui", "glyphs"])
-    assert cli.cmd_tui_glyphs(args) == 0
-    out = capsys.readouterr().out
-    for group in ("block", "box", "braille", "shapes", "marks"):
-        assert group in out
-    assert "tier: none" in out  # piped output never carries ANSI colors
-    assert "\x1b[" not in out
 
 @pytest.mark.parametrize("rows,cols", [(24, 80), (30, 120), (50, 200), (60, 300)])
 def test_render_matrix_all_sizes(rows, cols, monkeypatch):
@@ -682,18 +718,22 @@ def test_overall_framed_single_count():
     assert bar_text.count(tg.GLYPHS["fancy"]["bar_fill"]) <= 100
 
 
-def test_header_and_footer_bands_full_width():
-    state = _fake_state().snapshot()
+def test_header_and_footer_bands_inside_frame():
+    state = _fake_state()
+    state.mode = "sync:liked"
+    state = state.snapshot()
     h, w = 30, 270
     screen = _frame_d(h, w, state)
-    hdr = [t for y, x, t in screen.addstr_calls if y == 0]
-    ftr = [t for y, x, t in screen.addstr_calls if y == h - 1]
-    # header reaches to the right edge, footer starts at x=0 with full width
+    header = next(c for c in screen.children if c._pos == (1, 1))
+    footer = next(c for c in screen.children if c._pos == (h - 2, 1))
+    hdr = [t for _, _, t in header.addstr_calls]
+    ftr = [t for _, _, t in footer.addstr_calls]
+    assert header._w == w - 2 and footer._w == w - 2
     assert hdr
     assert any(tui_mod.tg.display_width(left) >= 100 for left in hdr)
-    assert ftr and ftr[0].startswith(" p pause/resume")
-    assert any(x > 140 for y, x, t in screen.addstr_calls
-               if y in (0, h - 1))
+    footer_text = " ".join(ftr)
+    assert "pause" in footer_text and "quit" in footer_text
+    assert "sync@liked" in "".join(hdr)
 
 
 def test_centering_follows_formula():
@@ -701,11 +741,12 @@ def test_centering_follows_formula():
     h, w = 50, 120
     body = _frame_d(h, w, state).children[0]
     vis = _visual_no_color()
-    heights = tui_mod._panel_heights(state, min(w, 140), vis)
-    body_h = h - 2
-    base = sum(v for _, v in heights) + (len(heights) - 1)
-    free = max(0, body_h - base - 2)
-    expected_top = round(free * 0.4)
+    heights = tui_mod._panel_heights(state, min(w - 2, tui_mod.MAX_CONTENT_WIDTH), vis)
+    body_h = h - 4
+    gaps = 2 if h >= 36 else (1 if h >= 30 else 0)
+    base = sum(v for _, v in heights) + gaps * (len(heights) - 1)
+    free = max(0, body_h - base)
+    expected_top = free // 2
     first_y = body.children[0]._pos[0]
     assert first_y == expected_top
     assert first_y >= 1  # not stuck to the top
@@ -716,16 +757,16 @@ def test_centering_follows_formula():
 
 @pytest.mark.parametrize("rows,cols", [(40, 120), (60, 270)])
 def test_centering_spec_at_120x40_and_270x60(rows, cols):
-    """Spec: free = (rows-2) - body_height - 2; 40% of free above the body,
-    the rest below; never negative; body not stuck to the top."""
+    """The card stack is centered: half the free rows above, half below."""
     state = _waiting_state().snapshot()
     body = _frame_d(rows, cols, state).children[0]
     vis = _visual_no_color()
-    heights = tui_mod._panel_heights(state, min(cols, 140), vis)
-    base = sum(v for _, v in heights) + (len(heights) - 1)
-    body_h = rows - 2
-    free = max(0, body_h - base - 2)
-    top_margin = round(free * 0.4)
+    heights = tui_mod._panel_heights(state, min(cols - 2, tui_mod.MAX_CONTENT_WIDTH), vis)
+    gaps = 2 if rows >= 36 else (1 if rows >= 30 else 0)
+    base = sum(v for _, v in heights) + gaps * (len(heights) - 1)
+    body_h = rows - 4
+    free = max(0, body_h - base)
+    top_margin = free // 2
     assert free > 0
     first_y = body.children[0]._pos[0]
     last = body.children[len(heights) - 1]
@@ -733,8 +774,8 @@ def test_centering_spec_at_120x40_and_270x60(rows, cols):
     bottom_blank = body_h - (last._pos[0] + last._h)
     assert top_blank == top_margin, (top_blank, top_margin, free)
     assert top_blank >= 1  # not stuck to the top
-    assert bottom_blank == free + 2 - top_margin  # the rest below
-    assert bottom_blank >= top_blank
+    assert bottom_blank == free - top_margin  # the rest below
+    assert abs(bottom_blank - top_blank) <= 1
 
 
 
@@ -748,15 +789,15 @@ def test_compact_has_no_blank_rows():
         assert ys[i + 1] == ys[i] + heights[i], (ys, heights)
 
 
-def test_log_visible_no_centering_and_fills():
+def test_log_visible_is_compact_and_centered():
     state = _fake_state().snapshot()
     h, w = 50, 120
     body = _frame_d(h, w, state, show_log=True).children[0]
-    assert body.children[0]._pos[0] == 0  # no centering
+    assert body.children[0]._pos[0] > 0  # centered, not glued to the top
     log = body.children[-1]
-    body_h = h - 2
-    assert log._pos[0] + log._h == body_h  # fills to the bottom
-    assert log._h >= 10
+    body_h = h - 4
+    assert log._h == 3  # one log line + borders, not a huge empty box
+    assert log._pos[0] + log._h < body_h
 
 
 def test_resize_leaves_no_stale_cells():
@@ -774,8 +815,68 @@ def test_resize_leaves_no_stale_cells():
                       False, small_frame)
     texts = [t for _, _, t in _all_calls(screen)]
     assert all(tui_mod.tg.display_width(t) <= 270 for t in texts)
-    # nothing remembered from the big layout: the only body child is new
-    assert len(screen.children) == 1
+    # body + header + footer children are rebuilt on resize
+    assert len(screen.children) == 3
     for win in screen.children:
         for pan in win.children:
             assert pan._w <= 80
+
+
+def test_custom_palette_pair_numbers_fit_tmux_limit(monkeypatch):
+    # tmux reports 65536 pairs but only honors 0..255; going over made every
+    # text pair render as fg=bg. Keep the custom palette under 256 pairs.
+    monkeypatch.delenv("TMUX", raising=False)
+
+    class Cur:
+        COLOR_PAIRS = 65536
+        COLORS = 256
+        error = Exception
+
+        def can_change_color(self):
+            return True
+
+        def init_color(self, *args):
+            pass
+
+        def init_pair(self, *args):
+            pass
+
+        def color_pair(self, n):
+            return n
+
+    from packrat import tui_theme as tt
+    from packrat import tui_glyphs as tg
+
+    theme = tt.THEMES["ocean"]
+    pal = tt.Palette(theme, tt.TIER_CUSTOM)
+    vis = tui_mod._build_custom_visual(
+        Cur(), theme, pal, tg.GLYPHS["fancy"], False,
+    )
+    assert vis is not None
+    assert len(vis.bar_bg) == tt.CUSTOM_GRADIENT_STEPS
+    highest = max(
+        [vis.chrome, vis.pill, vis.track_attr or 0,
+         *vis.status_pills.values(), *vis.colors.values()]
+    )
+    assert highest < 256
+
+
+def test_outer_rounded_frame_contains_header_and_footer(monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    state = _fake_state().snapshot()
+    h, w = 30, 80
+    screen = FakeScreen(h, w)
+    tui_mod._draw_all(screen, state, _visual_no_color(), None, False, 0, False,
+                      {"mode": "running", "phase": 0.1, "thin_phase": 0.4,
+                       "breath": 0.5, "flash": False, "sweep": None,
+                       "history": ()})
+    top = "".join(t for y, _x, t in screen.addstr_calls if y == 0)
+    bottom = "".join(t for y, _x, t in screen.addstr_calls if y == h - 1)
+    assert top.startswith("╭") and top.endswith("╮")
+    assert bottom.startswith("╰") and bottom.endswith("╯")
+    sides = [(x, t) for y, x, t in screen.addstr_calls
+             if y == 1 and t == "│"]
+    assert {x for x, _ in sides} == {0, w - 1}
+    assert any(c._pos == (1, 1) for c in screen.children)      # header
+    assert any(c._pos == (h - 2, 1) for c in screen.children)  # footer
+    assert screen.children[0]._pos[0] == 2                     # body

@@ -8,7 +8,7 @@ import logging
 import os
 import pathlib
 import tempfile
-from typing import Any, Iterable
+from typing import Any
 
 
 SCHEMA_VERSION = 1

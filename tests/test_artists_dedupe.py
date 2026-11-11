@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ytm_offline import artists as artists_module
+from packrat import artists as artists_module
 
 
 def _make_top_entry(video_id, title, artist="Artist", duration=180):
@@ -202,3 +202,64 @@ def test_dedupe_editions_numbered_parenthetical_false_positive():
         ]
     )
     assert len(kept) == 2 and not dropped
+
+
+class _FakeAlbumYT:
+    def get_album(self, browseId):
+        return {
+            "year": "2024",
+            "tracks": [{
+                "videoId": "v1",
+                "title": "FRDP",
+                "trackNumber": 1,
+                "artists": [{"name": "Sheena Ringo"}, {"name": "ATARASHII GAKKO!"}],
+                "duration_seconds": 183,
+            }],
+        }
+
+
+def test_release_tracks_use_catalog_artist_not_featured_artist():
+    tracks = artists_module.resolve_release_tracks(
+        _FakeAlbumYT(), {"browseId": "album"}, "ATARASHII GAKKO!",
+    )
+    assert tracks and tracks[0]["artist"] == "ATARASHII GAKKO!"
+
+
+class _FakeTopYT:
+    def get_artist(self, browse_id):
+        return {
+            "name": "ATARASHII GAKKO!",
+            "songs": {"results": [{
+                "videoId": "v1",
+                "title": "FRDP",
+                "artists": [{"name": "Sheena Ringo"}, {"name": "ATARASHII GAKKO!"}],
+                "album": {"name": "Carnival"},
+                "duration_seconds": 183,
+            }]},
+        }
+
+
+def test_top_songs_use_catalog_artist_not_featured_artist():
+    top = artists_module.get_top_songs(_FakeTopYT(), "artist-id")
+    assert top["tracks"][0]["artist"] == "ATARASHII GAKKO!"
+
+
+def test_entry_for_forces_catalog_artist():
+    entry = artists_module._entry_for(
+        {"video_id": "v1", "title": "FRDP", "artist": "Sheena Ringo",
+         "duration_seconds": 183},
+        {"title": "Carnival", "kind": "album", "year": "2024"},
+        "ATARASHII GAKKO!",
+    )
+    assert entry["artist"] == "ATARASHII GAKKO!"
+    assert entry["album"] == "Carnival"
+
+
+def test_channel_parser_skips_headerless_carousels():
+    from gettext import NullTranslations
+    from ytmusicapi.parsers.i18n import Parser
+
+    parser = Parser(NullTranslations())
+    # A video carousel without the header that ytmusicapi 1.12.3 assumes.
+    results = [{"musicCarouselShelfRenderer": {"contents": []}}]
+    assert parser.parse_channel_contents(results) == {}

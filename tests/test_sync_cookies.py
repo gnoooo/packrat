@@ -4,7 +4,7 @@ import pathlib
 import stat
 from unittest.mock import MagicMock, patch
 
-from ytm_offline import sync
+from packrat import sync
 
 
 def test_browser_cookie_file_sets_mode_0600():

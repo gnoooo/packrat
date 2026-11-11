@@ -9,7 +9,9 @@ headers.json
 lastfm.key
 
 # Downloads and state
+.music/
 music/
+.packrat_archive
 .ytm_offline_archive
 
 # Run history (user data, wherever it is written)

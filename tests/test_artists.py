@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import pathlib
 
-from ytm_offline import artists
-from ytm_offline.naming import track_path
+from packrat import artists
+from packrat.naming import track_path
 
 
 def _release(title: str, year: str, type_: str, browse: str, section: str = "albums") -> dict:
@@ -163,3 +163,17 @@ def test_release_kind_sections():
     assert artists.release_kind({"type": "", "_section": "singles"}) == "single"
     assert artists.release_kind({"type": "Single", "_section": "singles"}) == "single"
     assert artists.release_kind({"type": "EP", "_section": "albums"}) == "ep"
+
+
+def test_owned_file_exists_legacy_single_layout(tmp_path: pathlib.Path):
+    """Old single folders (<Artist>/<SingleTitle>/NN - title.m4a) count."""
+    legacy = track_path(
+        tmp_path, "Artist", "Old Single", "Song", track_num=1
+    )
+    legacy.parent.mkdir(parents=True)
+    legacy.touch()
+    track = {"video_id": "v1", "title": "Song", "artist": "Artist",
+             "track_num": 1}
+    assert artists.owned_file_exists(
+        tmp_path, track, {"title": "Old Single", "kind": "single"}
+    )

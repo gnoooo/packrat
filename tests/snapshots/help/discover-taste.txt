@@ -1,41 +1,44 @@
-usage: ytm-offline discover taste [-h] [--headers HEADERS] [--output OUTPUT]
-                                  [--archive ARCHIVE] [--max-size MAX_SIZE]
-                                  [--min-duration MIN_DURATION]
-                                  [--max-duration MAX_DURATION]
-                                  [--quota QUOTA] [--deep DEEP]
-                                  [--adjacent ADJACENT] [--radio RADIO]
-                                  [--external EXTERNAL] [--tag TAG]
-                                  [--per-album N] [--per-artist PER_ARTIST]
-                                  [--no-phase3]
+usage: packrat discover taste [-h] [--headers FILE] [--output DIR]
+                              [--archive FILE] [--max-size SIZE]
+                              [--min-duration SECONDS]
+                              [--max-duration SECONDS] [--quota N] [--deep N]
+                              [--adjacent N] [--radio N] [--external N]
+                              [--tag N] [--per-album N] [--per-artist N]
+                              [--family-cap N] [--skip-previous]
+
+Common options:
+  --output, -o DIR      folder where songs are saved (env: PACKRAT_OUTPUT;
+                        default: .music)
+  --quota N             how many songs per category (overrides the defaults
+                        below)
+  --skip-previous       skip songs already in the last discover plan
+
+First-time setup:
+  --headers FILE        your YouTube Music login file; create it with `packrat
+                        login` (env: PACKRAT_HEADERS; default:
+                        ~/.config/packrat/browser.json)
+
+Advanced:
+  --archive FILE        download history file, so finished songs are not
+                        downloaded again (env: PACKRAT_ARCHIVE; default:
+                        .packrat_archive)
+  --max-size SIZE       skip songs bigger than SIZE (example: 3GB)
+  --min-duration SECONDS
+                        ignore songs shorter than this many seconds (default:
+                        90)
+  --max-duration SECONDS
+                        ignore songs longer than this many seconds (default:
+                        540)
+  --deep N              songs from deep in an artist's catalog (default: 12)
+  --adjacent N          songs by similar artists (default: 10)
+  --radio N             songs from radio stations (default: 10)
+  --external N          songs from Last.fm recommendations, needs
+                        LASTFM_API_KEY (default: 5)
+  --tag N               songs found by genre tag (default: 5)
+  --per-album N         how many songs per album (default: 2)
+  --per-artist N        how many songs per artist (default: 3)
+  --family-cap N        limit songs per artist family, 0 = no limit (default:
+                        0)
 
 options:
   -h, --help            show this help message and exit
-  --quota QUOTA         max tracks per bucket (overrides the per-bucket
-                        defaults)
-  --deep DEEP           max deep-cut tracks (default: 12)
-  --adjacent ADJACENT   max adjacent-artist tracks (default: 10)
-  --radio RADIO         max radio tracks (default: 10)
-  --external EXTERNAL   max external-graph tracks (default: 5)
-  --tag TAG             max tag-search tracks (default: 5)
-  --per-album N         max tracks per album/container (default: 2)
-  --per-artist PER_ARTIST
-                        max tracks per artist (default: 3)
-  --no-phase3           do not dedupe against the phase 3 discover manifest
-
-Authentication:
-  --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
-                        YTM_HEADERS; default: ~/.config/ytmusic-
-                        composer/browser.json)
-
-Run control:
-  --output, -o OUTPUT   output root directory (env: YTM_OUTPUT; default:
-                        music)
-  --archive ARCHIVE     download archive file (env: YTM_ARCHIVE; default:
-                        .ytm_offline_archive)
-  --max-size MAX_SIZE   skip tracks estimated larger than SIZE (e.g. 3GB)
-
-Selection:
-  --min-duration MIN_DURATION
-                        minimum track duration in seconds (default: 90)
-  --max-duration MAX_DURATION
-                        maximum track duration in seconds (default: 540)

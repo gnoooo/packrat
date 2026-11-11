@@ -45,12 +45,22 @@ def heuristic_size(duration: int, bytes_per_second: int = 16000) -> int:
 
 
 def estimate_size(info: dict | None) -> int | None:
-    """Best-effort size from a yt-dlp info dict."""
+    """Best-effort size from a yt-dlp info dict.
+
+    Exact ``filesize`` wins over ``filesize_approx``; merged/requested
+    formats sum their per-format sizes.
+    """
     if not info:
         return None
+    if info.get("filesize"):
+        return int(info["filesize"])
     if info.get("filesize_approx"):
         return int(info["filesize_approx"])
     requested = info.get("requested_formats") or []
     if requested:
-        return int(sum(f.get("filesize_approx") or 0 for f in requested))
+        total = sum(
+            f.get("filesize") or f.get("filesize_approx") or 0
+            for f in requested
+        )
+        return int(total) if total else None
     return None

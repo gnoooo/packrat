@@ -1,9 +1,12 @@
-usage: ytm-offline auth [-h] [--headers HEADERS]
+usage: packrat auth [-h] [--headers FILE]
+
+Check that your YouTube Music login works. If you have no login file yet, run
+'packrat login' first.
+
+First-time setup:
+  --headers FILE  your YouTube Music login file; create it with `packrat
+                  login` (env: PACKRAT_HEADERS; default:
+                  ~/.config/packrat/browser.json)
 
 options:
-  -h, --help         show this help message and exit
-
-Authentication:
-  --headers HEADERS  path to ytmusicapi browser-headers JSON file (env:
-                     YTM_HEADERS; default: ~/.config/ytmusic-
-                     composer/browser.json)
+  -h, --help      show this help message and exit

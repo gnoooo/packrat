@@ -1,9 +1,0 @@
-usage: ytm-offline migrate-layout [-h] [--output OUTPUT] [--dry-run] [--yes]
-                                  [--undo]
-
-options:
-  -h, --help           show this help message and exit
-  --output, -o OUTPUT  output root directory (env: YTM_OUTPUT; default: music)
-  --dry-run, -n        print the move plan without moving anything
-  --yes, -y            move without asking
-  --undo               undo the last recorded migration

@@ -1,13 +1,16 @@
-usage: ytm-offline discover [-h] {sections,taste,queues,albums,radio} ...
+usage: packrat discover [-h] <sections|taste|queues|albums|radio> ...
+
+Find new music to download. Pick one of the choices below.
 
 positional arguments:
-  {sections,taste,queues,albums,radio}
-    sections            Home/Charts/Moods/New Releases
-    taste               plan taste-adjacent tracks beyond YT Music sections
-                        (no download)
-    queues              playback-queue playlists from liked-track seeds
-    albums              whole albums from top liked artists
-    radio               auto radio built from one track URL/id
+  <sections|taste|queues|albums|radio>
+    sections            popular music from Home, Charts, Moods and New
+                        Releases
+    taste               find music similar to what you already like (plan
+                        only)
+    queues              playlists based on YouTube Music radio queues
+    albums              whole albums from artists you like
+    radio               a radio station based on one song
 
 options:
   -h, --help            show this help message and exit

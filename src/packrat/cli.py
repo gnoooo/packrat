@@ -1,4 +1,4 @@
-"""Command-line interface for ytm_offline."""
+"""Command-line interface for packrat."""
 
 from __future__ import annotations
 
@@ -15,22 +15,22 @@ from typing import Any, Sequence
 
 from ytmusicapi import YTMusic
 
-from ytm_offline import albums as albums_module
-from ytm_offline import artists as artists_module
-from ytm_offline import cli_compat
-from ytm_offline import discover as discover_module
-from ytm_offline import discover_phase4 as discover_phase4_module
-from ytm_offline import queues as queues_module
-from ytm_offline import sync as sync_module
-from ytm_offline import tui as tui_module
-from ytm_offline import cli_args
-from ytm_offline.batch import exit_code_from_result, run_batch_download
-from ytm_offline.download import _final_filepath
-from ytm_offline.manifest import Manifest
-from ytm_offline.naming import SINGLES_DIR_DEFAULT
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import format_size, parse_size
-from ytm_offline.sync import browser_cookie_file
+from packrat import albums as albums_module
+from packrat import artists as artists_module
+from packrat import cli_compat
+from packrat import discover as discover_module
+from packrat import discover_phase4 as discover_phase4_module
+from packrat import queues as queues_module
+from packrat import sync as sync_module
+from packrat import tui as tui_module
+from packrat import cli_args
+from packrat.batch import exit_code_from_result, run_batch_download
+from packrat.download import _browser_tuple, _final_filepath
+from packrat.logging_config import redact as _redact
+from packrat.manifest import Manifest
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import format_size, parse_size
+from packrat.sync import browser_cookie_file
 
 
 def print_result_summary(result: Any) -> None:
@@ -53,25 +53,29 @@ def print_result_summary(result: Any) -> None:
 
 
 def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
-    """Ask before a download; --yes skips. No TTY without --yes is an error."""
+    """Ask before a download; --yes skips. No interactive terminal is an error."""
     if getattr(args, "yes", False):
         return True
     if not sys.stdin.isatty():
         print(
-            "not downloading: no TTY and --yes was not given",
+            "Not downloading: this terminal can't ask for confirmation. "
+            "Add --yes to continue.",
             file=sys.stderr,
         )
         return False
     answer = input(prompt).strip().lower()
-    return answer in ("", "y", "yes")
+    if answer in ("", "y", "yes"):
+        return True
+    print("Not downloading.", file=sys.stderr)
+    return False
 
 
 _AUDIO_EXTENSIONS = {".m4a", ".mp3", ".opus", ".flac", ".webm", ".aac", ".ogg"}
 
 
 def _print_paths(output_root: pathlib.Path, archive: str) -> None:
-    print(f"output: {output_root.expanduser().resolve()}")
-    print(f"archive: {pathlib.Path(archive).expanduser().resolve()}")
+    print(f"output folder: {output_root.expanduser().resolve()}")
+    print(f"download history: {pathlib.Path(archive).expanduser().resolve()}")
 
 
 def _check_archive_safety(args: argparse.Namespace, output_root: pathlib.Path) -> bool:
@@ -88,98 +92,172 @@ def _check_archive_safety(args: argparse.Namespace, output_root: pathlib.Path) -
     if not has_audio:
         return True
     print(
-        f"warning: archive {archive.resolve()} does not exist but "
-        f"{output_root.resolve()} already contains audio",
+        f"Warning: the download history file {archive.resolve()} is missing, "
+        f"but {output_root.resolve()} already contains music.",
         file=sys.stderr,
     )
-    print("use --force-new-archive to skip this check", file=sys.stderr)
+    print(
+        "Starting a new history file may download songs you already have.",
+        file=sys.stderr,
+    )
+    print(
+        "Use --force-new-archive to continue with a new history file.",
+        file=sys.stderr,
+    )
     if not sys.stdin.isatty():
-        print("not downloading: confirmation required", file=sys.stderr)
+        print(
+            "Not downloading: this terminal can't ask. "
+            "Use --force-new-archive to continue with a new download history.",
+            file=sys.stderr,
+        )
         return False
-    answer = input("continue with a new archive? [y/N] ").strip().lower()
-    return answer in ("y", "yes")
+    answer = input("Continue with a new download history? [y/N] ").strip().lower()
+    if answer in ("y", "yes"):
+        return True
+    print("Not downloading.", file=sys.stderr)
+    return False
 
 
-def _redact(msg: object) -> str:
-    """Mask sensitive token values from messages that may be logged."""
-    text = str(msg)
-    patterns = [
-        (r"(?i)(Cookie:\s*)[^\s\r\n]+", r"\1<redacted>"),
-        (r"(?i)(Authorization:\s*)[^\s\r\n]+", r"\1<redacted>"),
-        (r"(?i)(SAPISID\s*=\s*)[^\s;,&]+", r"\1<redacted>"),
-    ]
-    for pat, repl in patterns:
-        text = re.sub(pat, repl, text)
-    return text
-
-
-HEADERS_CONFIG_PATH = "~/.config/ytmusic-composer/browser.json"
-
-
-def _headers_default() -> str | None:
-    env = os.environ.get("YTM_HEADERS")
-    if env:
-        return env
-    p = pathlib.Path(HEADERS_CONFIG_PATH).expanduser()
-    return str(p) if p.exists() else None
-
-
-def _cookies_default() -> str | None:
-    return os.environ.get("YTM_COOKIES")
+def _print_login_help() -> None:
+    """Explain how to create the YouTube Music login file."""
+    print(
+        "No YouTube Music login found.\n"
+        "Create one with:\n"
+        "  packrat login\n"
+        "Or point to an existing file with --headers PATH (or set PACKRAT_HEADERS).",
+        file=sys.stderr,
+    )
 
 
 def load_ytmusic(headers_path: str) -> YTMusic:
     """Load a ytmusicapi browser-headers auth file."""
     p = pathlib.Path(headers_path)
     if not p.exists():
-        raise FileNotFoundError(f"headers file not found: {p}")
+        raise FileNotFoundError(f"login file not found: {p}")
     return YTMusic(str(p))
 
 
-def cmd_migrate_layout(args: argparse.Namespace) -> int:
-    """Move legacy single folders into the Singles layout."""
-    from ytm_offline import migrate
 
-    return migrate.run_migrate(
-        args.output,
-        dry_run=args.dry_run,
-        yes=args.yes,
-        undo=args.undo,
-        singles_dir=getattr(args, "singles_dir", "Singles"),
-    )
+
+_LOGIN_STEPS = """\
+To log in, you need the request headers from a logged-in music.youtube.com tab:
+
+  1. Open https://music.youtube.com in your browser and sign in.
+  2. Open Developer Tools (F12) and choose the Network tab.
+  3. Reload the page, then click a request to /browse.
+  4. Copy its "Request Headers".
+  5. Paste them below, then press Ctrl-D (on Windows: Ctrl-Z, Enter).
+"""
+
+
+def _remove_empty_login(path: pathlib.Path, existed: bool) -> None:
+    """Do not leave a blank file behind after a failed first login."""
+    if existed:
+        return
+    try:
+        if path.exists() and path.stat().st_size == 0:
+            path.unlink()
+    except OSError:
+        pass
+
+
+def cmd_login(args: argparse.Namespace) -> int:
+    """Create the YouTube Music login file from pasted browser headers."""
+    target = pathlib.Path(
+        getattr(args, "file", None)
+        or getattr(args, "headers", None)
+        or cli_args._headers_default()
+        or cli_args.HEADERS_CONFIG_PATH
+    ).expanduser()
+
+    if not sys.stdin.isatty():
+        print(
+            "Login needs an interactive terminal: it asks you to paste browser "
+            "headers.\nRun 'packrat login' directly in a terminal.",
+            file=sys.stderr,
+        )
+        return 2
+
+    existed = target.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.touch(mode=0o600, exist_ok=True)
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+
+    print(_LOGIN_STEPS)
+    try:
+        from ytmusicapi.auth.browser import setup_browser
+
+        setup_browser(filepath=str(target))
+    except KeyboardInterrupt:
+        print("\nLogin cancelled.", file=sys.stderr)
+        _remove_empty_login(target, existed)
+        return 130
+    except Exception as exc:
+        print(f"Login failed: {exc}", file=sys.stderr)
+        print("Nothing was saved. Run 'packrat login' to try again.", file=sys.stderr)
+        _remove_empty_login(target, existed)
+        return 1
+    finally:
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
+
+    print(f"Login file saved: {target}")
+    print("Checking it...")
+    try:
+        yt = load_ytmusic(str(target))
+        yt.get_library_playlists(limit=1)
+    except Exception as exc:
+        print(
+            f"Could not verify the login: {exc.__class__.__name__}.\n"
+            "The file was saved; run 'packrat auth' to try again.",
+            file=sys.stderr,
+        )
+        return 1
+    print("Login works.")
+    return 0
 
 
 def cmd_auth(args: argparse.Namespace) -> int:
-    """Validate ytmusicapi auth and print a short account summary."""
+    """Check the YouTube Music login and print a short summary."""
     try:
         yt = load_ytmusic(args.headers)
     except FileNotFoundError as exc:
-        print(f"auth failed: {exc}", file=sys.stderr)
+        print(f"Login failed: {exc}", file=sys.stderr)
+        _print_login_help()
         return 1
 
     try:
         yt.get_library_playlists(limit=1)
         liked = yt.get_liked_songs(limit=1)
     except Exception as exc:
-        cls = exc.__class__.__name__
         print(
-            f"auth failed: {cls} (headers may be expired or invalid)",
+            f"Login failed ({exc.__class__.__name__}). Your login may have "
+            "expired. Run: ytmusicapi browser --file "
+            "~/.config/packrat/browser.json",
             file=sys.stderr,
         )
         return 1
 
     if not liked.get("tracks"):
-        print("auth OK, but library appears empty")
+        print("Login works, but your library looks empty.")
         return 0
 
-    print("auth OK")
+    print("Login works.")
     return 0
 
 
 def cmd_library(args: argparse.Namespace) -> int:
     """List library playlists."""
     yt = load_ytmusic(args.headers)
-    playlists = yt.get_library_playlists(limit=args.limit)
+    playlists = yt.get_library_playlists(limit=args.top)
+    if not playlists:
+        print("No playlists found.")
+        return 0
     for pl in playlists:
         print(f"{pl['playlistId']}\t{pl['title']}")
     return 0
@@ -270,23 +348,34 @@ def _verify_with_mutagen(path: pathlib.Path) -> dict:
 
 
 def cmd_download_one(args: argparse.Namespace) -> int:
-    """Download a single track by video ID and verify the result."""
+    """Download a single song from a link or video ID and verify the result."""
+    video_id = queues_module.parse_video_id(args.video_id)
+    if not video_id:
+        print(
+            f"error: could not find a YouTube video ID in {args.video_id!r}",
+            file=sys.stderr,
+        )
+        print(
+            "Pass a music.youtube.com link, a youtu.be link, or the "
+            "11-character video ID.",
+            file=sys.stderr,
+        )
+        return 2
+
     deno_ok, deno_version = _check_deno()
     if not deno_ok:
-        found = f"found {deno_version!r}" if deno_version else "not found"
-        print(
-            f"deno >=2.3.0 is required but {found}. "
-            "Install Deno and try again; the sandbox will not install it.",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not args.cookies and not args.cookies_from_browser:
-        print(
-            "download-one requires --cookies or --cookies-from-browser",
-            file=sys.stderr,
-        )
-        return 1
+        if deno_version:
+            print(
+                f"Warning: Deno {deno_version} is older than 2.3.0; some songs "
+                "may fail. Install a newer Deno from https://deno.com.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Warning: Deno is not installed; some songs may fail. "
+                "Install it from https://deno.com.",
+                file=sys.stderr,
+            )
 
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -294,7 +383,7 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     import yt_dlp
 
     logger = _YtdlpLogger()
-    url = f"https://music.youtube.com/watch?v={args.video_id}"
+    url = f"https://music.youtube.com/watch?v={video_id}"
 
     ydl_opts: dict = {
         "format": "bestaudio[ext=m4a]/bestaudio",
@@ -315,24 +404,32 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     if args.cookies:
         ydl_opts["cookiefile"] = args.cookies
     if args.cookies_from_browser:
-        ydl_opts["cookiesfrombrowser"] = (
-            args.cookies_from_browser.lower(),
-            getattr(args, "browser_profile", None),
-            None,
-            None,
+        ydl_opts["cookiesfrombrowser"] = _browser_tuple(
+            args.cookies_from_browser, getattr(args, "browser_profile", None)
         )
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as exc:
-        print(f"download failed: {_redact(exc.msg)}", file=sys.stderr)
+        print(f"Download failed: {_redact(exc.msg)}", file=sys.stderr)
+        if not deno_ok:
+            print(
+                "This song may need Deno: install it from https://deno.com.",
+                file=sys.stderr,
+            )
+        if not args.cookies and not args.cookies_from_browser:
+            print(
+                "If this song is private or age-restricted, add your browser "
+                "cookies: --cookies-from-browser firefox",
+                file=sys.stderr,
+            )
         return 1
     except Exception as exc:
         print(f"download failed: {_redact(exc)}", file=sys.stderr)
         return 1
 
-    downloaded = _final_filepath(info, ydl, output_root)
+    downloaded = _final_filepath(info, ydl)
     if not downloaded.exists():
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
@@ -388,6 +485,15 @@ def cmd_discover(args: argparse.Namespace) -> int:
             args.cookies_from_browser = None
 
         sources = [s.strip() for s in args.source.split(",") if s.strip()]
+        valid_sources = {"home", "charts", "moods", "new_releases"}
+        unknown = [s for s in sources if s not in valid_sources]
+        if unknown:
+            print(
+                f"error: unknown source(s): {', '.join(unknown)}; choose from "
+                + ", ".join(sorted(valid_sources)),
+                file=sys.stderr,
+            )
+            return 2
         manifest, summary = discover_module.run_discover(
             headers_path=args.headers,
             sources=sources,
@@ -402,8 +508,6 @@ def cmd_discover(args: argparse.Namespace) -> int:
             cookies_from_browser=args.cookies_from_browser,
             browser_profile=getattr(args, "browser_profile", None),
             max_size=args.max_size,
-            dry_run=args.dry_run,
-            output_root=str(output_root),
             singles_dir=getattr(args, "singles_dir", "Singles"),
         )
 
@@ -437,6 +541,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 archive_path=args.archive,
                 delay=args.delay,
                 limit=getattr(args, "limit", None),
+                max_size=parse_size(args.max_size) if args.max_size else None,
             )
         )
 
@@ -447,15 +552,23 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
 
     discover_manifest_path = None
-    if args.include_phase3:
+    if not args.no_phase3:
         discover_manifest_path = output_root / "playlists" / "discover.manifest.json"
 
+    quota = args.quota
+    if quota is not None:
+        for name, default in (
+            ("deep", 12), ("adjacent", 10), ("radio", 10),
+            ("external", 5), ("tag", 5),
+        ):
+            if getattr(args, name) == default:
+                setattr(args, name, quota)
     quotas = {
-        "deep_cuts": args.quota_deep,
-        "adjacent": args.quota_adjacent,
-        "radio": args.quota_radio,
-        "external_graph": args.quota_external,
-        "tag_search": args.quota_tag,
+        "deep_cuts": args.deep,
+        "adjacent": args.adjacent,
+        "radio": args.radio,
+        "external_graph": args.external,
+        "tag_search": args.tag,
     }
 
     manifest, summary = discover_phase4_module.run_discover_phase4(
@@ -466,10 +579,10 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
         quotas=quotas,
         per_container=args.per_container,
         per_artist=args.per_artist,
+        family_cap=args.family_cap,
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         max_size=args.max_size,
-        dry_run=True,
     )
 
     manifest_path = output_root / "playlists" / "discover-phase4.manifest.json"
@@ -496,6 +609,7 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Sync liked songs or a playlist to disk."""
+    args.source = sync_module.normalize_source(args.source)
     output_root = pathlib.Path(args.output)
     _print_paths(output_root, args.archive)
     if not _check_archive_safety(args, output_root):
@@ -509,22 +623,58 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 ascii_mode=args.ascii,
             )
         )
+    if not args.dry_run and sys.stdin.isatty() and not getattr(args, "yes", False):
+        prompt = (
+            "Download your Liked Songs now? This can download many songs; "
+            "add --limit N to cap. [Y/n] "
+            if args.source == "liked"
+            else "Download this playlist now? [Y/n] "
+        )
+        if not _confirm_download(args, prompt):
+            return 2
     return exit_code_from_result(sync_module.run_sync(args))
 
 
 def cmd_download_manifest(args: argparse.Namespace) -> int:
-    """Resume downloads from any existing manifest file."""
-    manifest_path = pathlib.Path(args.manifest)
+    """Resume downloads from a saved plan (default: the newest one)."""
+    if args.manifest:
+        manifest_path = pathlib.Path(args.manifest)
+    else:
+        root = pathlib.Path(args.output or cli_args._output_default())
+        plans = sorted(
+            (root / "playlists").glob("*.manifest.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if not plans:
+            print(
+                "No saved plan found. Run a download or discovery command "
+                "first, or pass --manifest FILE.",
+                file=sys.stderr,
+            )
+            return 1
+        manifest_path = plans[0]
+        print(f"Using saved plan: {manifest_path}")
     if not manifest_path.exists():
-        print(f"manifest not found: {manifest_path}", file=sys.stderr)
+        print(f"Saved plan not found: {manifest_path}", file=sys.stderr)
         return 1
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(f"cannot read manifest: {exc}", file=sys.stderr)
+        print(f"Cannot read the saved plan: {exc}", file=sys.stderr)
         return 1
 
-    output_root = pathlib.Path(args.output) if args.output else manifest_path.parent.parent
+    if args.output:
+        output_root = pathlib.Path(args.output)
+    elif manifest_path.parent.name == "playlists":
+        output_root = manifest_path.parent.parent
+    else:
+        print(
+            "error: --output is required when the manifest is not inside a "
+            "playlists/ folder",
+            file=sys.stderr,
+        )
+        return 2
     output_root.mkdir(parents=True, exist_ok=True)
     _print_paths(output_root, args.archive)
     if not _check_archive_safety(args, output_root):
@@ -544,6 +694,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             "delay": args.delay,
             "payload": payload,
             "limit": getattr(args, "limit", None),
+            "manifest_path": str(manifest_path),
         }
         if args.tui:
             result = tui_module.run_tui(
@@ -588,10 +739,13 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
         if sys.stdin.isatty():
             answer = input("download now? [y/N] ").strip().lower()
             if answer not in ("y", "yes"):
-                print("not downloading (use --yes to skip the prompt)")
+                print("Not downloading. Use --yes to skip the question.")
                 return 2
         else:
-            print("not downloading: no TTY and --yes was not given", file=sys.stderr)
+            print(
+                "Not downloading: this terminal can't ask. Add --yes to continue.",
+                file=sys.stderr,
+            )
             return 2
 
     stem = manifest_path.stem
@@ -707,14 +861,18 @@ def _print_recap(catalog: dict[str, Any], args: argparse.Namespace) -> None:
 
 def cmd_artist(args: argparse.Namespace) -> int:
     """Discover and download one or more artists' full catalogs."""
-    specs = list(args.artists)
+    specs = [args.target] if getattr(args, "target", None) else []
+    specs.extend(getattr(args, "also", []) or [])
     if args.from_file:
         for line in pathlib.Path(args.from_file).read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
                 specs.append(line)
     if not specs:
-        print("no artist specified", file=sys.stderr)
+        print(
+            'No artist given. Try: packrat artist "Artist name"',
+            file=sys.stderr,
+        )
         return 2
     print("Will process: " + ", ".join(specs))
     if len(specs) > 1 and not args.yes and not args.dry_run and sys.stdin.isatty():
@@ -762,16 +920,24 @@ def cmd_artist(args: argparse.Namespace) -> int:
         else:
             print(f"no artist found for '{spec}'", file=sys.stderr)
             return 2
-        if args.pick:
+        candidate = getattr(args, "candidate", None)
+        if candidate:
             if pick_used:
                 print(
-                    f"ambiguous match for '{spec}': --pick already used;"
-                    " use a channel id/URL instead",
+                    f"ambiguous match for '{spec}': --candidate already used;"
+                    " use an artist link instead",
+                    file=sys.stderr,
+                )
+                return 2
+            if not 1 <= candidate <= len(candidates):
+                print(
+                    f"error: --candidate {candidate} is out of range; "
+                    f"found {len(candidates)} match(es)",
                     file=sys.stderr,
                 )
                 return 2
             pick_used = True
-            resolved.append(candidates[args.pick - 1])
+            resolved.append(candidates[candidate - 1])
         elif sys.stdin.isatty():
             index = artists_module.interactive_pick(candidates)
             if index is None:
@@ -787,7 +953,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                     f"  {i}) {c['name']}  [{subs_shown}]"
                     f"  sample album: {c.get('sample') or '?'}"
                 )
-            print("use --pick N", file=sys.stderr)
+            print("use --candidate N", file=sys.stderr)
             return 2
 
     catalogs: list[dict[str, Any]] = []
@@ -802,26 +968,25 @@ def cmd_artist(args: argparse.Namespace) -> int:
         # only, so pending top songs must not count as coverage: with
         # scope="all" their titles seed owned_keys and releases can show
         # "already owned"/[x] for tracks this run would never download.
-        scope = "albums" if (args.scope == "all" and sys.stdin.isatty()) else args.scope
+        scope = "albums" if sys.stdin.isatty() else "all"
         catalog = artists_module.build_catalog(
             args.headers,
             chosen["browseId"],
             output_root,
             args.archive,
-            include_live=args.include_live,
-            include_compilations=args.include_compilations,
-            include_remixes=args.include_remixes,
-            albums_only=args.albums_only,
-            no_singles=args.no_singles,
-            duration_window=args.duration_window,
+            include_live=getattr(args, "include_live", False),
+            include_compilations=getattr(args, "include_compilations", False),
+            include_remixes=getattr(args, "include_remixes", False),
+            albums_only=getattr(args, "albums_only", False),
+            no_singles=getattr(args, "no_singles", False),
+            duration_window=True,
             min_duration=getattr(args, "min_duration", 90),
             max_duration=getattr(args, "max_duration", 540),
             scope=scope,
-            top_limit=args.top_limit,
-            max_per_album=args.max_per_album,
             max_size=args.max_size,
             delay=args.delay,
             singles_dir=getattr(args, "singles_dir", "Singles"),
+            resolve_excluded=sys.stdin.isatty(),
         )
         catalogs.append(catalog)
 
@@ -844,7 +1009,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                 headers_path=args.headers,
                 output_root=output_root,
                 archive_path=args.archive,
-                duration_window=args.duration_window,
+                duration_window=True,
                 min_duration=getattr(args, "min_duration", 90),
                 max_duration=getattr(args, "max_duration", 540),
                 singles_dir=getattr(args, "singles_dir", "Singles"),
@@ -885,7 +1050,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                 headers_path=args.headers,
                 output_root=output_root,
                 archive_path=args.archive,
-                duration_window=args.duration_window,
+                duration_window=True,
                 min_duration=getattr(args, "min_duration", 90),
                 max_duration=getattr(args, "max_duration", 540),
                 singles_dir=getattr(args, "singles_dir", "Singles"),
@@ -912,7 +1077,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                     headers_path=args.headers,
                     output_root=output_root,
                     archive_path=args.archive,
-                    duration_window=args.duration_window,
+                    duration_window=True,
                     min_duration=getattr(args, "min_duration", 90),
                     max_duration=getattr(args, "max_duration", 540),
                     singles_dir=getattr(args, "singles_dir", "Singles"),
@@ -926,7 +1091,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                     _print_recap(catalog, args)
                 answer = input(_start_prompt()).strip()
             if answer.lower() in ("q", "quit"):
-                print("not downloading.")
+                print("Not downloading.")
                 return 0
 
     if args.dry_run:
@@ -935,7 +1100,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
 
     if not args.yes and not sys.stdin.isatty():
         print(
-            "not downloading: no TTY and --yes was not given",
+            "Not downloading: this terminal can't ask. Add --yes to continue.",
             file=sys.stderr,
         )
         return 2
@@ -951,6 +1116,12 @@ def cmd_artist(args: argparse.Namespace) -> int:
         pending_count = sum(
             1 for e in catalog.get("entries", []) if e.get("status") == "pending"
         )
+        if pending_count == 0:
+            print("nothing new to download")
+            continue
+        if remaining is not None and remaining <= 0:
+            print(f"limit reached; skipping {label}")
+            continue
         catalog_limit = remaining
         if remaining is not None:
             catalog_limit = min(remaining, pending_count)
@@ -998,12 +1169,13 @@ def cmd_radio(args: argparse.Namespace) -> int:
     _print_paths(output_root, args.archive)
     if not _check_archive_safety(args, output_root):
         return 2
+    limit = args.limit or 50
     kwargs = {
         "seed_spec": args.seed,
         "headers_path": args.headers,
         "output_root": pathlib.Path(args.output),
         "archive_path": args.archive,
-        "limit": args.limit,
+        "limit": limit,
         "per_artist_per_queue": args.per_artist,
         "min_duration": args.min_duration,
         "max_duration": args.max_duration,
@@ -1065,7 +1237,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
         return 2
 
     limit = getattr(args, "limit", None)
-    total_cap = args.total_cap
+    total_cap = getattr(args, "total_cap", 200)
     if limit:
         total_cap = max(total_cap, limit * 2, 100)
     result = queues_module.discover_queues(
@@ -1081,7 +1253,6 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         random_seed=args.random_seed,
-        dry_run=True,
         singles_dir=getattr(args, "singles_dir", "Singles"),
     )
 
@@ -1155,7 +1326,6 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         max_size=args.max_size,
-        dry_run=True,
     )
 
     print(f"albums manifest: {result['manifest_path']}")
@@ -1233,11 +1403,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         list(argv if argv is not None else sys.argv[1:])
     )
     raw = cli_compat.move_global_options_after_subcommand(parser, raw)
+    if not raw:
+        parser.print_help()
+        return 0
+    if raw in (["discover"], ["ui"]):
+        _print_group_help(parser, raw[0])
+        return 0
     args = parser.parse_args(raw)
 
     cli_args.resolve_auth(args, raw)
     cli_args.resolve_run_control_aliases(args)
-    cli_compat.warn_deprecated_options(raw)
 
     verbose = cli_args.resolve_verbose(args)
     if verbose:
@@ -1250,20 +1425,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command in _NEEDS_HEADERS:
         if not args.headers:
-            print(
-                "error: YTM_HEADERS: no headers file configured "
-                "(use --headers or set YTM_HEADERS)",
-                file=sys.stderr,
-            )
+            _print_login_help()
             return 2
         if not pathlib.Path(args.headers).expanduser().exists():
             print(
-                f"error: YTM_HEADERS: file not found: {args.headers}",
+                f"Login file not found: {args.headers}",
                 file=sys.stderr,
             )
+            _print_login_help()
             return 2
 
-    from ytm_offline import tui as _tui
+    from packrat import tui as _tui
 
     _tui.set_visual_options(
         getattr(args, "theme", "ocean"),
@@ -1271,8 +1443,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         getattr(args, "palette", "auto"),
     )
 
+    # If the user did not pass cookies explicitly, reuse the browser that
+    # produced the login headers.  The headers file only authenticates
+    # ytmusicapi; yt-dlp needs a real cookie jar for age/bot-gated videos.
+    browser = None
+    needs_cookies = (
+        args.command in {"download-one", "sync", "download-manifest", "artist"}
+        or (args.command == "discover"
+            and getattr(args, "discover_command", "") in {"queues", "albums", "radio"})
+    )
+    if (needs_cookies and hasattr(args, "cookies")
+            and not getattr(args, "cookies", None)
+            and not getattr(args, "cookies_from_browser", None)):
+        headers_path = (getattr(args, "headers", None)
+                        or cli_args._headers_default())
+        browser = cli_args.browser_from_headers(headers_path)
+
     try:
-        return args.func(args)
+        with contextlib.ExitStack() as stack:
+            if browser:
+                try:
+                    cookie_path = stack.enter_context(browser_cookie_file(browser))
+                except Exception as exc:
+                    print(
+                        f"warning: could not read {browser} cookies: "
+                        f"{_friendly_error(exc)}; age-restricted tracks may fail",
+                        file=sys.stderr,
+                    )
+                else:
+                    args.cookies = cookie_path
+            return args.func(args)
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130
@@ -1281,67 +1481,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
 
+def _print_group_help(parser: argparse.ArgumentParser, name: str) -> None:
+    """Print the help for a command group instead of a missing-argument error."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction) and name in action.choices:
+            action.choices[name].print_help()
+            return
+
+
 def _friendly_error(exc: Exception) -> str:
     """Keep auth/API failures readable instead of dumping a raw API response."""
     name = type(exc).__name__
-    if name.startswith("YTMusic") or isinstance(exc, KeyError):
-        return "authentication may be expired or missing; run 'ytm-offline auth'"
+    if name.startswith("YTMusic"):
+        return "authentication may be expired or missing; run 'packrat auth'"
+    if isinstance(exc, KeyError):
+        return "unexpected YouTube Music response; try again (or update ytmusicapi)"
     text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    if isinstance(exc, (ValueError, FileNotFoundError, OSError)):
+        return text[:300] if text else name
     return f"{name}: {text[:300]}" if text else name
 
 
-def cmd_tui_demo(args: argparse.Namespace) -> int:
-    """Simulated batch driven through the real State/Event path."""
-    from ytm_offline import tui
-
-    return tui.run_tui(
-        tui._demo_worker,
-        {"seconds": float(args.seconds)},
-        mode="tui-demo",
-        ascii_mode=args.ascii,
-        no_anim=args.no_anim,
-        no_color=args.no_color,
-        palette=args.palette,
-    )
-
-
-def cmd_tui_glyphs(args: argparse.Namespace) -> int:
-    """Print the glyph groups, a theme gradient strip and the selected tier."""
-    import sys
-    from ytm_offline import tui_glyphs as tg
-    from ytm_offline import tui_theme as tt
-
-    set_name = "ascii" if (getattr(args, "ascii", False) or not tg.supports_fancy()) else "fancy"
-    glyphs = tg.GLYPHS[set_name]
-    no_color = tt.no_color_requested(getattr(args, "no_color", False)) or not sys.stdout.isatty()
-    theme = tt.THEMES.get(getattr(args, "theme", "ocean"), tt.THEMES["ocean"])
-    if no_color:
-        tier = tt.TIER_NONE
-    else:
-        tier = tt.select_tier(True, 256, False,
-                              palette_mode=getattr(args, "palette", "auto"),
-                              can_change_color=False)
-    print(f"glyph set: {set_name}   theme: {theme.name}   tier: {tier}")
-    groups = (
-        ("block", ("bar_fill", "bar_track", "spark")),
-        ("box", ("tl", "tr", "bl", "br", "h", "v", "thin_fill", "thin_edge", "thin_track")),
-        ("braille", ("spinner",)),
-        ("shapes", ("dot", "dot_off", "diamond", "play", "pause")),
-        ("marks", ("note", "done", "fail", "clock", "ellipsis")),
-    )
-    for name, keys in groups:
-        cells = " ".join(str(glyphs[k]) for k in keys if k in glyphs)
-        print(f"{name:>7}: {cells}")
-    strip_w = 24
-    if no_color:
-        print(f"gradient: {'#' * strip_w}")
-        return 0
-    body = "".join(
-        f"\x1b[38;2;{int(c[0])};{int(c[1])};{int(c[2])}m###"
-        for c in (theme.walk(i / (strip_w - 1)) for i in range(strip_w))
-    ) + "\x1b[0m"
-    print(f"gradient: {body}")
-    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

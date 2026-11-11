@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from ytm_offline import cli_compat
+from packrat import cli_compat
 
 
 @pytest.mark.parametrize(
@@ -17,8 +17,6 @@ from ytm_offline import cli_compat
         ("discover-queues", ["discover", "queues"]),
         ("discover-albums", ["discover", "albums"]),
         ("radio", ["discover", "radio"]),
-        ("tui-demo", ["ui", "demo"]),
-        ("tui-glyphs", ["ui", "glyphs"]),
     ],
 )
 def test_rewrite_legacy_argv(old, new, capsys):
@@ -37,12 +35,6 @@ def test_rewrite_legacy_argv_leaves_new_commands_alone(capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_warn_deprecated_options_is_one_line_per_option(capsys):
-    cli_compat.warn_deprecated_options(["--pick", "2", "--top-songs"])
-    lines = capsys.readouterr().err.splitlines()
-    assert len(lines) == 2
-    assert "--pick" in lines[0]
-    assert "--top-songs" in lines[1]
 
 
 def test_move_global_options_after_subcommand():
@@ -54,19 +46,3 @@ def test_move_global_options_after_subcommand():
     assert cli_compat.move_global_options_after_subcommand(
         parser, ["--headers", "x.json", "--tui", "sync", "--source", "liked"]
     ) == ["sync", "--source", "liked", "--headers", "x.json", "--tui"]
-
-
-def test_adapt_library_maps_top_to_limit(monkeypatch):
-    seen = {}
-
-    def fake_handler(name):
-        def run(args):
-            seen["limit"] = args.limit
-            return 0
-
-        return run
-
-    monkeypatch.setattr(cli_compat, "_handler", fake_handler)
-    args = argparse.Namespace(top=7)
-    assert cli_compat.adapt_library(args) == 0
-    assert seen["limit"] == 7

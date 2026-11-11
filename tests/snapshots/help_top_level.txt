@@ -1,47 +1,48 @@
-usage: ytm-offline [-h] [--headers HEADERS] [--cookies COOKIES]
-                   [--cookies-from-browser COOKIES_FROM_BROWSER]
-                   [--theme {ocean,sunset,matrix,mono}] [--no-anim]
-                   [--no-color] [--ascii]
-                   [--palette {auto,custom,fixed,basic}] [-v] [--version]
-                   {auth,library,download-one,sync,download-manifest,artist,discover,ui} ...
+usage: packrat [-h] [--headers FILE] [--cookies FILE]
+               [--cookies-from-browser BROWSER[:PROFILE]] [-v] [--version]
+               {auth,login,library,download-one,sync,download-manifest,resume,artist,discover} ...
 
-Download music from your YouTube Music account for offline use. Run-control
-options (--output, --archive, --delay, --max-size, --limit, --dry-run, --yes)
-work before or after the subcommand; see '<command> -h' for the ones a command
-uses.
+Download music from YouTube Music so you can listen offline. First time? Run
+'packrat login', then 'auth' to check it. Then 'sync' downloads your Liked
+Songs.
 
 positional arguments:
-  {auth,library,download-one,sync,download-manifest,artist,discover,ui}
-    auth                validate ytmusicapi auth
-    library             list library playlists
-    download-one        download and verify one track by video ID
-    sync                sync liked songs or a playlist
-    download-manifest   resume/failed downloads from an existing manifest
-    artist              download one or more artists' full catalogs
-    discover            discover tracks (sections, taste, queues, albums,
-                        radio)
-    ui                  TUI helpers (demo, glyphs)
+  {auth,login,library,download-one,sync,download-manifest,resume,artist,discover}
+    auth                check that your YouTube Music login works
+    login               create your YouTube Music login file
+    library             list your playlists
+    download-one        download one song from a link or video ID
+    sync                download new songs from Liked Songs or a playlist
+    download-manifest (resume)
+                        finish or retry downloads from a saved plan
+    artist              download an artist's albums and singles
+    discover            find new music to download
+
+First-time setup:
+  --headers FILE        your YouTube Music login file; create it with `packrat
+                        login` (env: PACKRAT_HEADERS; default:
+                        ~/.config/packrat/browser.json)
+  --cookies FILE        advanced: a cookies.txt file exported from your
+                        browser (env: PACKRAT_COOKIES)
+  --cookies-from-browser BROWSER[:PROFILE]
+                        recommended: read cookies from a browser: firefox,
+                        chrome, edge, ...; add :profile for a specific profile
+                        (env: PACKRAT_COOKIES_FROM_BROWSER)
+
+Advanced:
+  -v, --verbose         show more detail while running (repeat for even more)
 
 options:
   -h, --help            show this help message and exit
-  -v, --verbose         verbose logging (-v = debug, -vv = yt-dlp verbose)
   --version             show program's version number and exit
 
-Authentication:
-  --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
-                        YTM_HEADERS; default: ~/.config/ytmusic-
-                        composer/browser.json)
-  --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
-                        YTM_COOKIES)
-  --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp, e.g. firefox[:profile]
-                        (env: YTM_COOKIES_FROM_BROWSER)
+Common tasks:
+  packrat login
+  packrat auth
+  packrat sync --limit 20
+  packrat download-one "https://music.youtube.com/watch?v=..."
+  packrat artist "Artist name"
+  packrat discover albums
 
-Display:
-  --theme {ocean,sunset,matrix,mono}
-                        TUI color theme (default: ocean)
-  --no-anim             disable TUI animations (env: YTM_TUI_ANIM=0)
-  --no-color            disable TUI colors (env: NO_COLOR)
-  --ascii               use ASCII progress bars in the TUI
-  --palette {auto,custom,fixed,basic}
-                        color tier (auto/custom/fixed/basic) (default: auto)
+Options like --output, --limit and --dry-run can go before or after the
+command. Run 'packrat <command> --help' for details.

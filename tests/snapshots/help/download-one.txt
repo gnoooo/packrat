@@ -1,21 +1,26 @@
-usage: ytm-offline download-one [-h] [--cookies COOKIES]
-                                [--cookies-from-browser COOKIES_FROM_BROWSER]
-                                [--output OUTPUT]
-                                video_id
+usage: packrat download-one [-h] [--cookies FILE]
+                            [--cookies-from-browser BROWSER[:PROFILE]]
+                            [--output DIR]
+                            LINK_OR_ID
+
+Download one song. Deno (https://deno.com) is recommended; cookies are
+optional for public songs and needed for private songs.
 
 positional arguments:
-  video_id              YouTube Music video ID
+  LINK_OR_ID            a music.youtube.com link, a youtu.be link, or an
+                        11-character video ID
+
+Common options:
+  --output, -o DIR      folder where songs are saved (env: PACKRAT_OUTPUT;
+                        default: .music)
+
+First-time setup:
+  --cookies FILE        advanced: a cookies.txt file exported from your
+                        browser (env: PACKRAT_COOKIES)
+  --cookies-from-browser BROWSER[:PROFILE]
+                        recommended: read cookies from a browser: firefox,
+                        chrome, edge, ...; add :profile for a specific profile
+                        (env: PACKRAT_COOKIES_FROM_BROWSER)
 
 options:
   -h, --help            show this help message and exit
-
-Authentication:
-  --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
-                        YTM_COOKIES)
-  --cookies-from-browser COOKIES_FROM_BROWSER
-                        browser/profile for yt-dlp, e.g. firefox[:profile]
-                        (env: YTM_COOKIES_FROM_BROWSER)
-
-Run control:
-  --output, -o OUTPUT   output root directory (env: YTM_OUTPUT; default:
-                        music)

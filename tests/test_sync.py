@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import pathlib
 
-from ytm_offline.manifest import Manifest
-from ytm_offline.naming import clean, parse_playlist_id, track_filename, track_path
-from ytm_offline.playlist import write_m3u8
-from ytm_offline.sizes import format_size, parse_size
+from packrat.manifest import Manifest
+from packrat.naming import clean, parse_playlist_id, track_filename, track_path
+from packrat.playlist import write_m3u8
+from packrat.sizes import format_size, parse_size
 
 
 def test_clean_removes_unsafe_characters() -> None:

@@ -18,13 +18,13 @@ from typing import Any, Callable
 from ytmusicapi import YTMusic
 from yt_dlp.cookies import extract_cookies_from_browser
 
-from ytm_offline.archive import Archive
-from ytm_offline.batch import exit_code_from_result, run_batch_download
-from ytm_offline.download import estimate_track
-from ytm_offline.manifest import Manifest, atomic_write_text
-from ytm_offline.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import estimate_size, format_size, parse_size
+from packrat.archive import Archive
+from packrat.download import estimate_track  # kept for test/back-compat patch points
+from packrat.batch import exit_code_from_result, run_batch_download
+from packrat.manifest import Manifest
+from packrat.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import format_size, heuristic_size, parse_size
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def _install_cookie_signal_handlers() -> None:
 @contextlib.contextmanager
 def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterator[str]:
     """Extract cookies to a 0600 temp file and guarantee cleanup on exit/crash."""
-    from ytm_offline.cli_args import parse_cookies_from_browser
+    from packrat.cli_args import parse_cookies_from_browser
 
     spec = f"{browser_spec}:{profile}" if profile else browser_spec
     browser_name, parsed_profile, keyring, container = parse_cookies_from_browser(spec)
@@ -98,9 +98,7 @@ def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterat
         keyring=keyring,
         container=container,
     )
-    fd, path = tempfile.mkstemp(
-        suffix=".txt", prefix="ytm_cookies_", dir="/tmp/opencode"
-    )
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="packrat_cookies_")
     os.close(fd)
     try:
         os.chmod(path, 0o600)
@@ -112,8 +110,23 @@ def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterat
         _cleanup_cookie_files()
 
 
-def resolve_tracks(source: str, headers_path: str, limit: int) -> list[dict[str, Any]]:
-    """Fetch track list from liked songs or a playlist."""
+def normalize_source(source: str) -> str:
+    """Accept 'liked', 'playlist:<...>', or a pasted playlist link."""
+    value = (source or "").strip()
+    if value.lower() == "liked":
+        return "liked"
+    if value.startswith("playlist:"):
+        return value
+    if "list=" in value or value.startswith(("http://", "https://", "www.")):
+        return f"playlist:{value}"
+    return value
+
+
+def resolve_tracks(
+    source: str, headers_path: str, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Fetch track list from liked songs or a playlist (None = all)."""
+    source = normalize_source(source)
     yt = YTMusic(headers_path)
     if source == "liked":
         data = yt.get_liked_songs(limit=limit)
@@ -123,7 +136,9 @@ def resolve_tracks(source: str, headers_path: str, limit: int) -> list[dict[str,
         data = yt.get_playlist(playlistId=playlist_id, limit=limit)
         tracks = data.get("tracks", [])
     else:
-        raise ValueError(f"unknown source: {source}")
+        raise ValueError(
+            f"unknown source {source!r}; use 'liked' or 'playlist:<link or ID>'"
+        )
     tracks = tracks[:limit]
     return [_normalize_track(t, i + 1) for i, t in enumerate(tracks)]
 
@@ -151,90 +166,19 @@ def _m3u8_from_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def run_retry(
-    args: argparse.Namespace,
-    event_callback: Callable[[dict[str, Any]], None] | None = None,
-    control: Any = None,
-) -> int:
-    """Retry failed/pending tracks recorded in a manifest."""
-    manifest_path = pathlib.Path(args.manifest)
-    if not manifest_path.exists():
-        logger.error("manifest not found: %s", manifest_path)
-        return 1
-
-    cookie_ctx = (
-        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
-        if args.cookies_from_browser and not args.cookies
-        else contextlib.nullcontext(args.cookies)
-    )
-    with cookie_ctx as cookie_path:
-        if cookie_path and args.cookies_from_browser and not args.cookies:
-            logger.info("caching cookies from %s", args.cookies_from_browser)
-            args.cookies = cookie_path
-            args.cookies_from_browser = None
-
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        entries = data.get("entries", [])
-        output_root = pathlib.Path(args.output)
-        output_root.mkdir(parents=True, exist_ok=True)
-        archive = Archive(args.archive)
-        max_size = parse_size(args.max_size) if args.max_size else None
-
-        source_name = manifest_path.stem.replace(".manifest", "").replace(".failed", "")
-        m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
-        failures_path = output_root / "playlists" / f"{source_name}.failed.json"
-
-        to_retry = [
-            e for e in entries if e["status"] not in ("downloaded", "archived")
-        ]
-        if not to_retry:
-            logger.info("no retryable tracks in manifest")
-            return 0
-
-        logger.info("retrying %d tracks", len(to_retry))
-
-        def save_callback(current_entries: list[dict[str, Any]]) -> None:
-            atomic_write_text(
-                manifest_path,
-                json.dumps({"entries": current_entries}, indent=2),
-            )
-            write_m3u8(m3u8_path, _m3u8_from_entries(current_entries))
-
-        summary = run_batch_download(
-            to_retry,
-            output_root=output_root,
-            save_callback=save_callback,
-            cookies=args.cookies,
-            max_size=max_size,
-            delay=args.delay,
-            event_callback=event_callback,
-            control=control,
-            archive=archive,
-            mode="retry",
-        )
-
-        failures = [e["video_id"] for e in to_retry if e.get("status") == "failed"]
-        _write_failures(failures_path, failures)
-
-        logger.info("retry report:")
-        for status in Manifest.VALID_STATUSES:
-            count = sum(1 for e in to_retry if e.get("status") == status)
-            if count:
-                logger.info("  %s: %d", status, count)
-        return exit_code_from_result(summary)
-
-
 def run_sync(
     args: argparse.Namespace,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     control: Any = None,
 ) -> int:
     """Sync liked songs or a playlist to disk."""
+    args.source = normalize_source(args.source)
+    browser_profile = getattr(args, "browser_profile", None)
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
     cookie_ctx = (
-        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
+        browser_cookie_file(args.cookies_from_browser, browser_profile)
         if args.cookies_from_browser and not args.cookies
         else contextlib.nullcontext(args.cookies)
     )
@@ -246,14 +190,18 @@ def run_sync(
 
         archive = Archive(args.archive)
         source_name = _source_name(args.source)
-        manifest_path = output_root / "playlists" / f"{source_name}.manifest.{args.manifest_format}"
+        manifest_path = output_root / "playlists" / f"{source_name}.manifest.json"
         m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
         failures_path = output_root / "playlists" / f"{source_name}.failed.json"
 
         max_size = parse_size(args.max_size) if args.max_size else None
 
-        tracks = resolve_tracks(args.source, args.headers, args.limit)
+        # Fetch every track: --limit caps downloads after the archive/dedupe
+        # step, so capping the API fetch would silently return archived-only
+        # pages and skip genuinely new tracks.
+        tracks = resolve_tracks(args.source, args.headers, None)
         if not tracks:
+            print("No songs found to download.")
             logger.info("no tracks found for source")
             return 0
 
@@ -280,13 +228,11 @@ def run_sync(
                 }
                 entries.append(entry)
                 continue
-            info = estimate_track(
-                track["video_id"],
-                cookies=args.cookies,
-                cookies_from_browser=args.cookies_from_browser,
-                browser_profile=args.browser_profile,
-            )
-            est_size = estimate_size(info)
+            # No per-track yt-dlp extraction here: that doubled the network
+            # work (once for the estimate, again in download_track) and made
+            # startup scale with the whole library.  Duration is already in
+            # the YouTube Music response.
+            est_size = heuristic_size(int(track.get("duration") or 0)) or None
             entry = {
                 "video_id": track["video_id"],
                 "title": track["title"],
@@ -312,9 +258,7 @@ def run_sync(
             total_est_bytes = sum(e.get("est_size") or 0 for e in pending_entries)
             logger.info("limit applied: %d of %d new tracks", limit, total_pending)
 
-        pending_size = sum(
-            e.get("est_size") or 0 for e in entries if e["status"] == "pending"
-        )
+        pending_size = sum(e.get("est_size") or 0 for e in pending_entries)
         print(f"pending tracks: {len(pending_entries)}")
         print(f"estimated pending size: {format_size(pending_size)}")
         logger.info("pending tracks: %d", len(pending_entries))

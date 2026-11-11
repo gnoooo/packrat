@@ -1,0 +1,12 @@
+usage: packrat login [-h] [--file FILE]
+
+Create the login file this app uses. You copy request headers from a logged-in
+music.youtube.com browser tab; the command explains the steps. Run 'packrat
+auth' afterwards to check it.
+
+Common options:
+  --file FILE  where to save the login file (default:
+               ~/.config/packrat/browser.json)
+
+options:
+  -h, --help   show this help message and exit

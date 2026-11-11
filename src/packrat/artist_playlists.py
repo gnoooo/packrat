@@ -6,11 +6,11 @@ import json
 import pathlib
 from typing import Any
 
-from ytm_offline.batch import run_batch_download
-from ytm_offline.manifest import atomic_write_text
-from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, is_single
-from ytm_offline.playlist import m3u8_entry, write_m3u8
-from ytm_offline.sizes import parse_size
+from packrat.batch import run_batch_download
+from packrat.manifest import atomic_write_text
+from packrat.naming import clean, is_single
+from packrat.playlist import m3u8_entry, write_m3u8
+from packrat.sizes import parse_size
 
 
 def artist_all_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -41,21 +41,13 @@ def write_artist_playlists(
     if not downloaded:
         return []
 
-    def m3u8_entry(entry: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "path": entry["path"],
-            "duration": entry.get("duration", 0),
-            "title": entry.get("title", ""),
-            "artist": entry.get("artist", ""),
-        }
-
     written: list[str] = []
     playlists_dir.mkdir(parents=True, exist_ok=True)
     by_album: dict[str, list[dict[str, Any]]] = {}
     for entry in downloaded:
         if is_single(entry.get("album", ""), entry.get("release_type")):
             continue  # no per-single m3u8; they go into <artist>-singles.m3u8
-        by_album.setdefault(entry.get("album", "Unknown Album"), []).append(entry)
+        by_album.setdefault(entry.get("album") or "Unknown Album", []).append(entry)
     for album, tracks in by_album.items():
         tracks.sort(key=lambda x: int(x.get("track_num") or 0))
         m3u8_path = playlists_dir / f"{clean(album) or 'album'}.m3u8"
@@ -110,13 +102,23 @@ def download_artist(
     control=None,
     payload: dict[str, Any] | None = None,
     limit: int | None = None,
+    manifest_path: str | pathlib.Path | None = None,
 ) -> dict[str, Any]:
-    """Download pending tracks from artist-<label>.manifest.json."""
-    manifest_path = output_root / "playlists" / f"artist-{label}.manifest.json"
+    """Download pending tracks from an artist manifest.
+
+    ``manifest_path`` wins when the caller loaded the payload from a specific
+    file (download-manifest); otherwise ``artist-<label>.manifest.json`` is
+    used.
+    """
+    resolved_manifest = (
+        pathlib.Path(manifest_path)
+        if manifest_path is not None
+        else output_root / "playlists" / f"artist-{clean(label) or 'artist'}.manifest.json"
+    )
     if payload is None:
-        if not manifest_path.exists():
-            return {"error": f"manifest not found: {manifest_path}"}
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not resolved_manifest.exists():
+            return {"error": f"saved plan not found: {resolved_manifest}"}
+        payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     pending = [e for e in entries if e.get("status") == "pending"]
     if limit and len(pending) > limit:
@@ -124,7 +126,7 @@ def download_artist(
     if not pending:
         return {"error": "no pending tracks in manifest"}
 
-    playlists_dir = output_root / "playlists" / "artists" / label
+    playlists_dir = output_root / "playlists" / "artists" / (clean(label) or "artist")
     manifest_max_size = payload.get("max_size")
     if max_size:
         manifest_max_size = parse_size(max_size)
@@ -133,7 +135,7 @@ def download_artist(
         # current_entries is the pending subset; the original dicts are
         # mutated in place so payload["entries"] already reflects updates.
         atomic_write_text(
-            manifest_path,
+            resolved_manifest,
             json.dumps({k: v for k, v in payload.items()}, indent=2),
         )
         write_artist_playlists(payload["entries"], playlists_dir)
@@ -154,7 +156,7 @@ def download_artist(
     )
     return {
         "summary": summary,
-        "manifest_path": str(manifest_path),
+        "manifest_path": str(resolved_manifest),
         "m3u8_dir": str(playlists_dir),
         "m3u8_paths": write_artist_playlists(entries, playlists_dir),
     }

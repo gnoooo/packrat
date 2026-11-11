@@ -11,9 +11,9 @@ from typing import Any, Callable
 
 import yt_dlp
 
-from ytm_offline.logging_config import redact
-from ytm_offline.sizes import estimate_size
-from ytm_offline.naming import SINGLES_DIR_DEFAULT, track_path
+from packrat.logging_config import redact
+from packrat.sizes import estimate_size
+from packrat.naming import SINGLES_DIR_DEFAULT, track_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,18 @@ _RETRYABLE_PATTERNS = (
 def _is_retryable(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(p in msg for p in _RETRYABLE_PATTERNS)
+
+
+def _friendly_download_error(message: str) -> str:
+    """Short, actionable error instead of a full yt-dlp help paragraph."""
+    low = str(message).lower()
+    if "sign in to confirm your age" in low:
+        return ("age-restricted: yt-dlp could not authenticate; use "
+                "--cookies-from-browser <browser> (the account must be age-verified)")
+    if "sign in to confirm" in low or "not a bot" in low:
+        return ("YouTube requested a sign-in/bot check; use "
+                "--cookies-from-browser <browser>")
+    return redact(message)
 
 
 class _YtdlpLogger:
@@ -75,7 +87,7 @@ def _browser_tuple(
 ) -> tuple[str, str | None, str | None, str | None] | None:
     if not browser_spec:
         return None
-    from ytm_offline.cli_args import parse_cookies_from_browser
+    from packrat.cli_args import parse_cookies_from_browser
 
     spec = f"{browser_spec}:{profile}" if profile else browser_spec
     return parse_cookies_from_browser(spec)
@@ -153,8 +165,8 @@ _AUDIO_EXTS = {".m4a", ".mp3", ".webm", ".ogg", ".flac", ".wav", ".opus"}
 
 
 def _final_filepath(
-    info: dict[str, Any], ydl: yt_dlp.YoutubeDL, output_path: pathlib.Path
-) -> pathlib.Path | None:
+    info: dict[str, Any], ydl: yt_dlp.YoutubeDL
+) -> pathlib.Path:
     """Return the actual downloaded file path after yt-dlp postprocessors.
 
     Falls back to scanning the output directory for an audio file with the
@@ -273,7 +285,7 @@ def download_track(
 
     ytdl_logger = _YtdlpLogger()
     progress_hook = (
-        lambda d: _progress_hook(control, event_callback, d)
+        (lambda d: _progress_hook(control, event_callback, d))
         if control or event_callback
         else None
     )
@@ -305,7 +317,7 @@ def download_track(
                     )
                 emit_start("downloading")
                 ydl.process_ie_result(info, download=True)
-                downloaded = _final_filepath(info, ydl, output_path)
+                downloaded = _final_filepath(info, ydl)
                 if not downloaded.exists():
                     return emit_done(
                         status="failed",
@@ -315,12 +327,16 @@ def download_track(
                         retryable=False,
                         player_client=ytdl_logger.player_client,
                     )
+                try:
+                    actual_bytes = downloaded.stat().st_size
+                except OSError:
+                    actual_bytes = est_size or 0
                 return emit_done(
                     status="downloaded",
                     video_id=video_id,
                     title=track.get("title", ""),
                     filepath=downloaded,
-                    bytes=est_size or 0,
+                    bytes=actual_bytes,
                     info=info,
                     player_client=ytdl_logger.player_client,
                 )
@@ -348,7 +364,7 @@ def download_track(
                 status="failed",
                 video_id=video_id,
                 title=track.get("title", ""),
-                error=redact(exc.msg),
+                error=_friendly_download_error(exc.msg),
                 retryable=retryable,
                 player_client=ytdl_logger.player_client,
             )

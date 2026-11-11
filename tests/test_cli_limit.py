@@ -7,15 +7,14 @@ import pathlib
 
 import pytest
 
-from ytm_offline import cli, cli_compat
-from ytm_offline.manifest import Manifest
+from packrat import cli, cli_compat
+from packrat.manifest import Manifest
 
 
 def _args(argv):
     parser = cli.build_parser()
     raw = cli_compat.move_global_options_after_subcommand(parser, argv)
     args = parser.parse_args(raw)
-    cli_compat.warn_deprecated_options(raw)
     return args
 
 
@@ -33,10 +32,10 @@ def test_sync_limit_caps_batch_after_dedupe(tmp_path, monkeypatch):
          "duration": 100}
         for i in range(5)
     ]
-    monkeypatch.setattr("ytm_offline.sync.resolve_tracks", lambda *_a: tracks)
-    monkeypatch.setattr("ytm_offline.sync.Archive", _EmptyArchive)
+    monkeypatch.setattr("packrat.sync.resolve_tracks", lambda *_a: tracks)
+    monkeypatch.setattr("packrat.sync.Archive", _EmptyArchive)
     monkeypatch.setattr(
-        "ytm_offline.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+        "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
     )
     captured = {}
 
@@ -45,7 +44,7 @@ def test_sync_limit_caps_batch_after_dedupe(tmp_path, monkeypatch):
         return {"downloaded": 0, "archived": 0, "skipped_size": 0,
                 "failed": 0, "stopped": False, "stop_reason": "completed"}
 
-    monkeypatch.setattr("ytm_offline.sync.run_batch_download", _batch)
+    monkeypatch.setattr("packrat.sync.run_batch_download", _batch)
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
@@ -74,7 +73,7 @@ def test_download_manifest_limit_caps_batch(tmp_path, monkeypatch):
             "failed": 0, "stopped": False, "stop_reason": "completed",
         }
 
-    monkeypatch.setattr("ytm_offline.cli.run_batch_download", _batch)
+    monkeypatch.setattr("packrat.cli.run_batch_download", _batch)
     rc = cli.main([
         "download-manifest", "--manifest", str(manifest), "--yes",
         "--output", str(tmp_path), "--limit", "2",
@@ -92,7 +91,7 @@ def test_discover_limit_passed_to_download(tmp_path, monkeypatch):
         for i in range(5)
     ]
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (manifest, {
             "total": 5, "per_source": {"home": 5},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -103,7 +102,7 @@ def test_discover_limit_passed_to_download(tmp_path, monkeypatch):
         captured["limit"] = kw.get("limit")
         return 0
 
-    monkeypatch.setattr("ytm_offline.discover.download_pending", _download)
+    monkeypatch.setattr("packrat.discover.download_pending", _download)
     rc = cli.main([
         "discover", "sections", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--source", "home",
@@ -114,9 +113,9 @@ def test_discover_limit_passed_to_download(tmp_path, monkeypatch):
 
 
 def test_artist_limit_passed_to_download(tmp_path, monkeypatch):
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda *_a, **_k: [{"name": "A", "browseId": "b"}],
     )
     catalog = {
@@ -132,11 +131,11 @@ def test_artist_limit_passed_to_download(tmp_path, monkeypatch):
         "totals": {"measured_s_per_track": None, "excluded_counts": {}},
         "manifest_path": str(tmp_path / "artist.json"),
     }
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
-    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: [])
-    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr("packrat.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: [])
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "ytm_offline.artists.summarize_entries",
+        "packrat.artists.summarize_entries",
         lambda *_a, **_k: {
             "new_tracks": 2, "est_human": "1 KB", "est_time_seconds": 60,
             "est_source": "default", "measured_s_per_track": 0,
@@ -150,7 +149,7 @@ def test_artist_limit_passed_to_download(tmp_path, monkeypatch):
             "summary": {"downloaded": 0, "failed": 0, "stopped": False},
         }
 
-    monkeypatch.setattr("ytm_offline.artists.download_artist", _download)
+    monkeypatch.setattr("packrat.artists.download_artist", _download)
     rc = cli.main([
         "artist", "A", "--headers", "/tmp/x", "--yes",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
@@ -160,24 +159,6 @@ def test_artist_limit_passed_to_download(tmp_path, monkeypatch):
     assert captured["limit"] == 1
 
 
-def test_queues_total_cap_is_hidden_limit_alias(tmp_path, monkeypatch):
-    captured = {}
-    def _plan(**kw):
-        captured["total_cap"] = kw.get("total_cap")
-        return {
-            "manifest_path": "m", "seeds_used": 1, "total_tracks": 1,
-            "total_est_size_human": "1 KB",
-            "queues": [{"seed": "S", "tracks": 1, "unique_artists": 1,
-                        "est_size": 1000}],
-        }
-
-    monkeypatch.setattr("ytm_offline.queues.discover_queues", _plan)
-    rc = cli.main([
-        "discover", "queues", "--headers", "/tmp/x",
-        "--output", str(tmp_path), "--dry-run", "--total-cap", "3",
-    ])
-    assert rc == 0
-    assert captured["total_cap"] >= 100
 
 
 def test_radio_limit_caps_after_request(tmp_path, monkeypatch):
@@ -191,7 +172,7 @@ def test_radio_limit_caps_after_request(tmp_path, monkeypatch):
             "tracks": ["A - T"],
         }
 
-    monkeypatch.setattr("ytm_offline.queues.build_radio", _radio)
+    monkeypatch.setattr("packrat.queues.build_radio", _radio)
     rc = cli.main([
         "discover", "radio", "v1", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--dry-run", "--limit", "2",
@@ -202,9 +183,9 @@ def test_radio_limit_caps_after_request(tmp_path, monkeypatch):
 
 def test_artist_select_skips_picker_and_requires_yes(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda *_a, **_k: [{"name": "BABYMETAL", "browseId": "b"}],
     )
     catalog = {
@@ -214,20 +195,20 @@ def test_artist_select_skips_picker_and_requires_yes(tmp_path, monkeypatch):
         "totals": {"measured_s_per_track": None, "excluded_counts": {}},
         "manifest_path": str(tmp_path / "artist.json"),
     }
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
-    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
+    monkeypatch.setattr("packrat.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
     captured = {}
     monkeypatch.setattr(
-        "ytm_offline.artists.parse_selection",
+        "packrat.artists.parse_selection",
         lambda expr: captured.setdefault("expr", expr) or [],
     )
     monkeypatch.setattr(
-        "ytm_offline.artists.apply_selection",
+        "packrat.artists.apply_selection",
         lambda catalog, *_a, **_k: catalog,
     )
-    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "ytm_offline.artists.summarize_entries",
+        "packrat.artists.summarize_entries",
         lambda *_a, **_k: {
             "new_tracks": 1, "est_human": "1 KB", "est_time_seconds": 60,
             "est_source": "default", "measured_s_per_track": 0,
@@ -235,7 +216,7 @@ def test_artist_select_skips_picker_and_requires_yes(tmp_path, monkeypatch):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.artists.download_artist",
+        "packrat.artists.download_artist",
         lambda **_kw: called.append(True) or {
             "manifest_path": "m", "m3u8_dir": "d",
             "summary": {"downloaded": 0, "failed": 0, "stopped": False},
@@ -253,9 +234,9 @@ def test_artist_select_skips_picker_and_requires_yes(tmp_path, monkeypatch):
 
 def test_artist_select_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda *_a, **_k: [{"name": "BABYMETAL", "browseId": "b"}],
     )
     catalog = {
@@ -264,20 +245,20 @@ def test_artist_select_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
         "totals": {"measured_s_per_track": None, "excluded_counts": {}},
         "manifest_path": str(tmp_path / "artist.json"),
     }
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
-    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
-    monkeypatch.setattr("ytm_offline.artists.parse_selection", lambda _expr: [])
-    monkeypatch.setattr("ytm_offline.artists.apply_selection", lambda catalog, *_a, **_k: catalog)
-    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr("packrat.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
+    monkeypatch.setattr("packrat.artists.parse_selection", lambda _expr: [])
+    monkeypatch.setattr("packrat.artists.apply_selection", lambda catalog, *_a, **_k: catalog)
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "ytm_offline.artists.summarize_entries",
+        "packrat.artists.summarize_entries",
         lambda *_a, **_k: {
             "new_tracks": 0, "est_human": "0 B", "est_time_seconds": 0,
             "est_source": "default", "measured_s_per_track": 0,
         },
     )
     called = []
-    monkeypatch.setattr("ytm_offline.artists.download_artist", lambda **_kw: called.append(True))
+    monkeypatch.setattr("packrat.artists.download_artist", lambda **_kw: called.append(True))
     rc = cli.main([
         "artist", "BABYMETAL", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
@@ -294,8 +275,8 @@ def test_artist_scope_top_songs_removed_from_cli():
 
 
 @pytest.mark.parametrize("sub,plan,download", [
-    ("queues", "ytm_offline.queues.discover_queues", "ytm_offline.queues.download_queues"),
-    ("albums", "ytm_offline.albums.discover_albums", "ytm_offline.albums.download_albums"),
+    ("queues", "packrat.queues.discover_queues", "packrat.queues.download_queues"),
+    ("albums", "packrat.albums.discover_albums", "packrat.albums.download_albums"),
 ])
 def test_discover_plan_download_limit(tmp_path, monkeypatch, sub, plan, download):
     captured = {}
@@ -329,3 +310,91 @@ def test_discover_plan_download_limit(tmp_path, monkeypatch, sub, plan, download
     ])
     assert rc == 0
     assert captured["limit"] == 2
+
+
+def test_artist_limit_is_global_across_catalogs(tmp_path, monkeypatch):
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        "packrat.artists.search_artists",
+        lambda _yt, spec: [{"name": spec, "browseId": f"b{spec}"}],
+    )
+
+    def _catalog(_headers, browse_id, *_a, **_k):
+        name = browse_id[1:]
+        entries = [
+            {"video_id": f"{name}{i}", "status": "pending"}
+            for i in range(1 if name == "A" else 2)
+        ]
+        return {
+            "artist": name, "label": name, "browseId": browse_id,
+            "payload": {"entries": entries},
+            "entries": entries,
+            "totals": {"measured_s_per_track": None, "excluded_counts": {}},
+            "manifest_path": str(tmp_path / f"artist-{name}.json"),
+        }
+
+    monkeypatch.setattr("packrat.artists.build_catalog", _catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: [])
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "packrat.artists.summarize_entries",
+        lambda *_a, **_k: {
+            "new_tracks": 1, "est_human": "1 KB", "est_time_seconds": 60,
+            "est_source": "default", "measured_s_per_track": 0,
+        },
+    )
+    calls = []
+
+    def _download(**kw):
+        calls.append((kw["label"], kw["limit"]))
+        return {
+            "manifest_path": "m", "m3u8_dir": "d",
+            "summary": {"downloaded": 1, "failed": 0, "stopped": False},
+        }
+
+    monkeypatch.setattr("packrat.artists.download_artist", _download)
+    rc = cli.main([
+        "artist", "A", "--also", "B", "--headers", "/tmp/x", "--yes",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--limit", "1",
+    ])
+    assert rc == 0
+    assert calls == [("A", 1)]
+
+
+def test_sync_limit_applies_after_archive_filtering(tmp_path, monkeypatch):
+    tracks = [
+        {"video_id": f"v{i}", "title": f"T{i}", "artist": "A", "album": "Al",
+         "duration": 100}
+        for i in range(5)
+    ]
+    monkeypatch.setattr("packrat.sync.resolve_tracks", lambda *_a: tracks)
+
+    class _Archive:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __contains__(self, video_id):
+            return video_id == "v0"
+
+    monkeypatch.setattr("packrat.sync.Archive", _Archive)
+    monkeypatch.setattr(
+        "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+    )
+    captured = {}
+
+    def _batch(entries, **_kw):
+        captured["ids"] = [e["video_id"] for e in entries]
+        return {
+            "downloaded": 0, "archived": 0, "skipped_size": 0,
+            "failed": 0, "stopped": False, "stop_reason": "completed",
+        }
+
+    monkeypatch.setattr("packrat.sync.run_batch_download", _batch)
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--limit", "2",
+    ])
+    assert rc == 0
+    assert captured["ids"] == ["v1", "v2"]

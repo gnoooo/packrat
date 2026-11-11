@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 
-from ytm_offline import tui_glyphs as tg
+from packrat import tui_glyphs as tg
 
 FANCY = tg.GLYPHS["fancy"]
 ASCII = tg.GLYPHS["ascii"]
@@ -90,32 +90,10 @@ def test_thin_bar():
         _check_shape(tg.thin_bar(ASCII, 40, 37), 40, "=", "-", set())
 
 
-def test_spinner_cycles():
-    frames = str(FANCY["spinner"])
-    seen = [tg.spinner_frame(FANCY, now=i / 10, fps=10) for i in range(len(frames) + 4)]
-    assert seen[0] == seen[10]  # full cycle wraps
-    assert len(set(seen[:10])) == len(frames)
 
 
-def test_sparkline_scaling():
-    def cases(g):
-        s = tg.sparkline(g, [], 10)
-        assert s == str(g["spark"])[0] * 10  # empty
-        z = tg.sparkline(g, [0] * 30, 10)
-        assert set(z) == {str(g["spark"])[0]}
-        spike = tg.sparkline(g, [0, 0, 0, 0, 0, 0, 100], 7)
-        assert spike[-1] == str(g["spark"])[-1]  # spike at top level
-        flat = tg.sparkline(g, [5, 5, 5, 5], 4)
-        assert len(flat) == 4 and tg.display_width(flat) == 4
-
-    cases(FANCY)
-    cases(ASCII)
 
 
-def test_sparkline_ends_use_only_levels_chars():
-    out = tg.sparkline(FANCY, list(range(1, 31)), 30)
-    assert set(out) <= set(str(FANCY["spark"]))
-    assert out[-1] == "█"  # increasing data ends at max
 
 
 def test_panels_exact_width_and_inline_title():

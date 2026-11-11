@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ytm-offline"
-version = "0.1.0"
+name = "packrat"
+version = "0.3.0"
 description = "Download music from YouTube Music for offline use."
 requires-python = ">=3.10"
 dependencies = [
@@ -19,7 +19,8 @@ dev = [
 ]
 
 [project.scripts]
-ytm-offline = "ytm_offline.cli:main"
+packrat = "packrat.cli:main"
+ytm-offline = "packrat.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ytm_offline"]
+packages = ["src/packrat"]

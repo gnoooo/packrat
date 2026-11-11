@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ytm_offline import artists
+from packrat import artists
 
 
 def test_parse_selection_grammar():
@@ -190,11 +190,11 @@ def test_all_rule_includes_tagged_and_minus_excludes():
 def _kept_entries() -> list[dict]:
     return [
         {"video_id": "a1", "title": "T1", "artist": "Artist", "duration": 100,
-         "release_row": 0, "release_type": "album"},
+         "release_row": 0, "release_type": "album", "status": "pending"},
         {"video_id": "a2", "title": "T2", "artist": "Artist", "duration": 100,
-         "release_row": 0, "release_type": "album"},
+         "release_row": 0, "release_type": "album", "status": "pending"},
         {"video_id": "s1", "title": "S1", "artist": "Artist", "duration": 100,
-         "release_row": 1, "release_type": "single"},
+         "release_row": 1, "release_type": "single", "status": "pending"},
     ]
 
 
@@ -423,6 +423,7 @@ def test_renderer_fully_owned_dimmed(capsys, monkeypatch):
     ]
     rows = artists.build_sections(_catalog(releases))
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
     artists.print_sections(rows, width=100)
     out = capsys.readouterr().out
     # fully owned multi-track cell dimmed, selected box green
@@ -554,7 +555,7 @@ def test_min_gap_year_counter(capsys):
 
 
 def test_prompt_text_and_truncation():
-    from ytm_offline import cli
+    from packrat import cli
     assert cli._selection_prompt(200) == (
         "selection> (Enter = recommended | 'all' = everything incl. tagged"
         " | selection set = A[1-3],S[2],-S[4] | 'none' to abort)"
@@ -581,9 +582,10 @@ def test_no_tags_rendered_but_classification_kept(capsys):
 def _cmd_artist_args(tmp_path):
     import argparse
     return argparse.Namespace(
-        artists=["BABYMETAL"],
+        target="BABYMETAL",
+        also=[],
         from_file=None,
-        pick=None,
+        candidate=None,
         headers=None if False else "hdrs",
         output=str(tmp_path),
         archive=str(tmp_path / ".archive"),
@@ -594,8 +596,6 @@ def _cmd_artist_args(tmp_path):
         no_singles=False,
         duration_window=False,
         scope="all",
-        top_limit=None,
-        max_per_album=None,
         max_size=None,
         delay=0.0,
         singles_dir="Singles",
@@ -611,14 +611,14 @@ def _cmd_artist_args(tmp_path):
 
 def _interactive_env(monkeypatch, tmp_path, releases, users):
     """Assemble a cd_artist dry environment: fake yt, single artist, fed input."""
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
     )
-    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("packrat.cli.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *a, **k: users.pop(0))
     released = releases + [
         _meta(1, "A Single", mtype="single", section="S", new=1, tracks=1)
@@ -626,19 +626,19 @@ def _interactive_env(monkeypatch, tmp_path, releases, users):
     catalog = _catalog(released, _kept_entries())
     catalog["manifest_path"] = str(tmp_path / "manifest.json")
     catalog["payload"]["manifest_path"] = catalog["manifest_path"]
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *a, **k: catalog)
+    monkeypatch.setattr("packrat.artists.build_catalog", lambda *a, **k: catalog)
     return catalog
 
 
 def test_artist_start_prompt_quit(monkeypatch, tmp_path):
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
     releases = [_meta(0, "An Album", new=2)]
     catalog = _interactive_env(
         monkeypatch, tmp_path, releases, ["", "q"]  # selection Enter, then q
     )
     calls = []
-    monkeypatch.setattr("ytm_offline.artists.download_artist",
+    monkeypatch.setattr("packrat.artists.download_artist",
                         lambda **kw: calls.append(kw) or {"summary": {}})
     args = _cmd_artist_args(tmp_path)
     args.dry_run = False
@@ -648,7 +648,7 @@ def test_artist_start_prompt_quit(monkeypatch, tmp_path):
 
 
 def test_artist_start_prompt_reselect_then_start(monkeypatch, tmp_path, capsys):
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
     releases = [_meta(0, "An Album", new=2)]
     catalog = _interactive_env(
@@ -657,7 +657,7 @@ def test_artist_start_prompt_reselect_then_start(monkeypatch, tmp_path, capsys):
     )
     downloads = []
     monkeypatch.setattr(
-        "ytm_offline.artists.download_artist",
+        "packrat.artists.download_artist",
         lambda **kw: downloads.append(kw) or {
             "summary": {"downloaded": 1, "archived": 0, "skipped_size": 0,
                         "failed": 0, "stopped": 0},
@@ -678,7 +678,7 @@ def test_artist_start_prompt_reselect_then_start(monkeypatch, tmp_path, capsys):
 
 
 def test_artist_yes_skips_start_prompt(monkeypatch, tmp_path):
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
     releases = [_meta(0, "An Album", new=2)]
     catalog = _interactive_env(
@@ -687,7 +687,7 @@ def test_artist_yes_skips_start_prompt(monkeypatch, tmp_path):
     )
     downloads = []
     monkeypatch.setattr(
-        "ytm_offline.artists.download_artist",
+        "packrat.artists.download_artist",
         lambda **kw: downloads.append(kw) or {
             "summary": {"downloaded": 2, "archived": 0, "skipped_size": 0,
                         "failed": 0, "stopped": 0},
@@ -706,14 +706,14 @@ def test_cmd_artist_interactive_scope_has_no_top_song_coverage(
 ):
     # fix: pending top songs must not seed owned_keys when the picker
     # decides the download set — scope stays "albums" for the picker flow.
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
     )
-    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("packrat.cli.sys.stdin.isatty", lambda: True)
     captured: dict = {}
     sentinel = RuntimeError("stop before anything real happens")
 
@@ -729,14 +729,14 @@ def test_cmd_artist_interactive_scope_has_no_top_song_coverage(
 
 
 def test_cmd_artist_noninteractive_keeps_scope(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    import ytm_offline.cli as cli
+    import packrat.cli as cli
 
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *a, **k: MagicMock(name="yt"))
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda yt, spec, limit=6: [{"name": "BABYMETAL", "browseId": "UC1"}],
     )
-    monkeypatch.setattr("ytm_offline.cli.sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("packrat.cli.sys.stdin.isatty", lambda: False)
     captured: dict = {}
     sentinel = RuntimeError("stop")
 

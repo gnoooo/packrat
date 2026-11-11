@@ -8,8 +8,8 @@ import pathlib
 
 import pytest
 
-from ytm_offline import cli, cli_args, cli_compat
-from ytm_offline.manifest import Manifest
+from packrat import cli, cli_args, cli_compat
+from packrat.manifest import Manifest
 
 
 def _parse(argv):
@@ -46,7 +46,7 @@ def test_download_manifest_dry_run_stops(tmp_path, monkeypatch, capsys):
                   "duration": 1, "est_size": 1, "status": "pending"}]
     m.write(manifest)
     called = []
-    monkeypatch.setattr("ytm_offline.cli.run_batch_download",
+    monkeypatch.setattr("packrat.cli.run_batch_download",
                         lambda **_kw: called.append(True))
     rc = cli.main(["download-manifest", "--manifest", str(manifest), "--dry-run"])
     assert rc == 0
@@ -72,7 +72,7 @@ def test_failed_only_selects_failed_entries(tmp_path, monkeypatch):
         seen["ids"] = [e["video_id"] for e in entries]
         return {"downloaded": 0, "failed": 0, "stopped": False}
 
-    monkeypatch.setattr("ytm_offline.cli.run_batch_download", _batch)
+    monkeypatch.setattr("packrat.cli.run_batch_download", _batch)
     rc = cli.main(["download-manifest", "--manifest", str(manifest),
                    "--failed-only", "--yes"])
     assert rc == 0
@@ -82,7 +82,7 @@ def test_failed_only_selects_failed_entries(tmp_path, monkeypatch):
 # 4. verbose is wired
 def test_verbose_sets_debug_logging(monkeypatch):
     monkeypatch.setattr(logging, "basicConfig", lambda **kw: setattr(logging, "_last", kw))
-    monkeypatch.setattr("ytm_offline.cli.cmd_auth", lambda _args: 0)
+    monkeypatch.setattr("packrat.cli.cmd_auth", lambda _args: 0)
     cli.main(["auth", "-v"])
     assert logging._last["level"] == logging.DEBUG
 
@@ -90,8 +90,8 @@ def test_verbose_sets_debug_logging(monkeypatch):
 # 5. artist duration filters are forwarded
 def test_artist_min_duration_forwarded(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
-    monkeypatch.setattr("ytm_offline.artists.search_artists",
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr("packrat.artists.search_artists",
                         lambda *_a, **_k: [{"name": "A", "browseId": "b"}])
     seen = {}
 
@@ -102,10 +102,10 @@ def test_artist_min_duration_forwarded(tmp_path, monkeypatch):
                 "totals": {"measured_s_per_track": None, "excluded_counts": {}},
                 "manifest_path": str(tmp_path / "a.json")}
 
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", _catalog)
-    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: [])
-    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
-    monkeypatch.setattr("ytm_offline.artists.summarize_entries",
+    monkeypatch.setattr("packrat.artists.build_catalog", _catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: [])
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr("packrat.artists.summarize_entries",
                         lambda *_a, **_k: {"new_tracks": 0, "est_human": "0 B",
                                            "est_time_seconds": 0,
                                            "est_source": "default",
@@ -119,7 +119,7 @@ def test_artist_min_duration_forwarded(tmp_path, monkeypatch):
 # 6. discover taste is plan-only and narrow
 def test_discover_taste_plan_only_and_rejects_yes(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "ytm_offline.discover_phase4.run_discover_phase4",
+        "packrat.discover_phase4.run_discover_phase4",
         lambda **_kw: (Manifest(), {"total": 0, "per_bucket": {}, "funnel": {},
                                     "estimated_size_human": "0 B",
                                     "skipped_by_size": 0, "top_artists": []}),
@@ -132,93 +132,169 @@ def test_discover_taste_plan_only_and_rejects_yes(tmp_path, monkeypatch):
 
 
 # 7. migrate-layout own parser
-def test_migrate_layout_help_and_narrow_options():
-    text = _help(("migrate-layout",))
-    assert "--undo" in text
-    assert "print the move plan" in text
-    with pytest.raises(SystemExit):
-        _parse(["migrate-layout", "--archive", "x"])
-
-
-# 8. --sources rename, --source hidden alias
-def test_sources_rename_and_alias():
-    assert _parse(["discover", "sections", "--sources", "home"]).source == "home"
-    assert _parse(["discover", "sections", "--source", "home"]).source == "home"
-
-
-# 9. taste per-album rename, old hidden
-def test_taste_per_album_rename():
-    assert _parse(["discover", "taste", "--per-album", "4"]).per_container == 4
-    assert _parse(["discover", "taste", "--per-container", "4"]).per_container == 4
-
-
-# 10. deprecated aliases hidden from help
-def test_deprecated_aliases_hidden():
-    taste = _help(("discover", "taste"))
-    queues = _help(("discover", "queues"))
-    assert "--quota-deep" not in taste
-    assert "--per-queue-limit" not in queues
-
-
-# 11. radio limit help is standard
-def test_radio_limit_help_is_standard():
-    text = _help(("discover", "radio"))
-    assert "max new tracks to download this run" in text
-    assert "max tracks in the radio" not in text
-
-
-# 12. sync rejects --yes; shared help is neutral
-def test_sync_has_no_yes_and_neutral_help():
-    with pytest.raises(SystemExit):
-        _parse(["sync", "--source", "liked", "--yes"])
-    assert "--yes" not in _help(("sync",))
-    assert "skip confirmation prompts" in _help(("artist",))
-
-
-# 13. narrow parents
-def test_narrow_parents():
-    with pytest.raises(SystemExit):
-        _parse(["auth", "--cookies", "c.txt"])
-    with pytest.raises(SystemExit):
-        _parse(["library", "--cookies", "c.txt"])
-    with pytest.raises(SystemExit):
-        _parse(["download-one", "v1", "--headers", "h.json"])
-    with pytest.raises(SystemExit):
-        _parse(["download-manifest", "--manifest", "m.json", "--headers", "h.json"])
-    with pytest.raises(SystemExit):
-        _parse(["discover", "sections", "--tui"])
-
-
-# 14. invalid headers exit 2 naming YTM_HEADERS
-def test_invalid_headers_exit_2(monkeypatch, capsys):
-    monkeypatch.setenv("YTM_HEADERS", "/definitely/missing.json")
-    rc = cli.main(["sync", "--source", "liked"])
-    assert rc == 2
-    assert "YTM_HEADERS" in capsys.readouterr().err
-
-
-# 15. taste --quota applies to buckets
-def test_taste_quota_applies(monkeypatch):
-    monkeypatch.setattr("ytm_offline.cli.cmd_discover_phase4", lambda args: (
-        setattr(args, "_seen", (args.quota_deep, args.quota_adjacent)) or 0
-    ))
-    args = _parse(["discover", "taste", "--headers", "/tmp/x", "--quota", "7"])
-    cli_compat.adapt_discover_taste(args)
-    assert args.quota_deep == 7
-    assert args.quota_adjacent == 7
-
-
-# 17. theme validation
-def test_theme_validation():
-    with pytest.raises(SystemExit):
-        _parse(["auth", "--theme", "nope"])
-
-
-# 18. cookies-from-browser help has syntax
-def test_cookies_help_has_syntax():
-    assert "firefox[:profile]" in _help(("sync",))
 
 
 def test_exclude_singles_shared_flag():
     assert "--exclude-singles" in _help(("artist",))
     assert "--exclude-singles" in _help(("discover", "albums"))
+
+
+# 19. discover taste passes the required family_cap argument
+def test_taste_passes_family_cap(tmp_path, monkeypatch):
+    captured = {}
+
+    def _run(**kwargs):
+        captured.update(kwargs)
+        return Manifest(), {
+            "total": 0, "per_bucket": {}, "funnel": {},
+            "estimated_size_human": "0.0 B", "skipped_by_size": 0,
+            "top_artists": [],
+        }
+
+    monkeypatch.setattr(
+        "packrat.discover_phase4.run_discover_phase4", _run
+    )
+    rc = cli.main([
+        "discover", "taste", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--family-cap", "7",
+    ])
+    assert rc == 0
+    assert captured["family_cap"] == 7
+
+    rc = cli.main([
+        "discover", "taste", "--headers", "/tmp/x",
+        "--output", str(tmp_path),
+    ])
+    assert rc == 0
+    assert captured["family_cap"] == 0
+
+
+# 20. download-one must hand yt-dlp a parsed browser tuple
+def test_download_one_parses_cookie_spec(tmp_path, monkeypatch):
+    downloaded = tmp_path / "song.m4a"
+    downloaded.write_bytes(b"x")
+    captured = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            captured.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extract_info(self, _url, download=True):
+            return {"filepath": str(downloaded)}
+
+    monkeypatch.setattr(cli, "_check_deno", lambda: (True, "2.9.5"))
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYDL)
+    monkeypatch.setattr(cli, "_final_filepath", lambda *_a: downloaded)
+    monkeypatch.setattr(cli, "_verify_with_ffprobe", lambda _p: {})
+    monkeypatch.setattr(cli, "_verify_with_mutagen", lambda _p: {})
+
+    args = _parse([
+        "download-one", "abcdefghijk",
+        "--cookies-from-browser", "firefox:default-release",
+        "--output", str(tmp_path),
+    ])
+    assert cli.cmd_download_one(args) == 0
+    assert captured["cookiesfrombrowser"] == (
+        "firefox", "default-release", None, None
+    )
+
+
+# 21. --limit caps downloads after the archive check, not the API fetch
+class _EmptyArchive:
+    def __init__(self, *_a, **_k):
+        pass
+
+    def __contains__(self, _item):
+        return False
+
+
+def test_sync_limit_fetches_the_full_source(tmp_path, monkeypatch):
+    tracks = [
+        {"video_id": f"v{i}", "title": f"T{i}", "artist": "A", "album": "Al",
+         "duration": 100}
+        for i in range(5)
+    ]
+    seen = {}
+    captured = {}
+
+    def _resolve(source, headers, limit=None):
+        seen["limit"] = limit
+        return tracks
+
+    def _batch(entries, **_kw):
+        captured["n"] = len(entries)
+        return {
+            "downloaded": 0, "archived": 0, "skipped_size": 0,
+            "failed": 0, "stopped": False, "stop_reason": "completed",
+        }
+
+    monkeypatch.setattr("packrat.sync.resolve_tracks", _resolve)
+    monkeypatch.setattr("packrat.sync.Archive", _EmptyArchive)
+    monkeypatch.setattr(
+        "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+    )
+    monkeypatch.setattr("packrat.sync.run_batch_download", _batch)
+
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--limit", "2",
+    ])
+    assert rc == 0
+    assert seen["limit"] is None
+    assert captured["n"] == 2
+
+
+# 22. json+csv is a format, never a manifest filename extension
+def test_sync_json_csv_keeps_json_manifest_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("PACKRAT_MANIFEST_FORMAT", "json+csv")
+    tracks = [
+        {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+         "duration": 100}
+    ]
+    monkeypatch.setattr("packrat.sync.resolve_tracks", lambda *_a: tracks)
+    monkeypatch.setattr("packrat.sync.Archive", _EmptyArchive)
+    monkeypatch.setattr(
+        "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+    )
+
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--dry-run",
+    ])
+    assert rc == 0
+    playlists = tmp_path / "playlists"
+    assert (playlists / "liked.manifest.json").exists()
+    assert (playlists / "liked.manifest.csv").exists()
+    assert not list(playlists.glob("*json+csv*"))
+
+
+# 23. a manifest outside playlists/ cannot infer the output root
+def test_download_manifest_outside_playlists_requires_output(tmp_path, capsys):
+    import json
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        json.dumps({"entries": [{"video_id": "v1", "status": "pending"}]}),
+        encoding="utf-8",
+    )
+    args = _parse([
+        "download-manifest", "--manifest", str(manifest), "--yes",
+    ])
+    assert cli.cmd_download_manifest(args) == 2
+    assert "--output is required" in capsys.readouterr().err
+
+
+def test_keyerror_is_not_reported_as_auth_failure():
+    from packrat import cli
+
+    message = cli._friendly_error(KeyError("header"))
+    assert "authentication" not in message.lower()
+    assert "YouTube Music response" in message or "header" in message

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from ytm_offline import cli
-from ytm_offline.batch import exit_code_from_result, run_batch_download
-from ytm_offline.download import DownloadResult
+from packrat import cli
+from packrat.batch import exit_code_from_result, run_batch_download
+from packrat.download import DownloadResult
 
 
 def test_none_is_success():
@@ -69,7 +69,7 @@ def test_real_run_aborts_after_three_consecutive_errors(tmp_path):
         for i in range(4)
     ]
     fail = DownloadResult(status="failed", error="403", retryable=True)
-    with patch("ytm_offline.batch.download_track", return_value=fail):
+    with patch("packrat.batch.download_track", return_value=fail):
         summary = run_batch_download(
             entries, output_root=tmp_path, delay=0,
             archive_path=None, mode="test",
@@ -87,8 +87,8 @@ def test_real_run_clean_user_stop_is_success(tmp_path):
          "status": "pending"}
     ]
     ok = DownloadResult(status="downloaded", filepath=tmp_path / "f.m4a")
-    with patch("ytm_offline.batch.download_track", return_value=ok):
-        with patch("ytm_offline.control.Control") as ctrl:
+    with patch("packrat.batch.download_track", return_value=ok):
+        with patch("packrat.control.Control") as ctrl:
             ctrl.return_value.should_stop.return_value = True
             summary = run_batch_download(
                 entries, output_root=tmp_path, delay=0,
@@ -124,7 +124,7 @@ def test_cli_manifest_exit_zero_on_clean_quit(
         "failed": 0, "skipped": 0, "failures": [],
         "stopped": True, "stop_reason": "user",
     }
-    with patch("ytm_offline.tui.run_tui", return_value=batch_result):
+    with patch("packrat.tui.run_tui", return_value=batch_result):
         assert cli.cmd_download_manifest(args) == 0
     out = capsys.readouterr().out
     assert "{" not in out  # no raw dict printed
@@ -149,7 +149,7 @@ def test_cli_manifest_exit_one_on_failures(
         "failed": 1, "skipped": 0, "failures": ["v1"],
         "stopped": False, "stop_reason": "completed",
     }
-    with patch("ytm_offline.tui.run_tui", return_value=batch_result):
+    with patch("packrat.tui.run_tui", return_value=batch_result):
         assert cli.cmd_download_manifest(args) == 1
     out = capsys.readouterr().out
     assert "{" not in out

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pathlib
 from unittest.mock import MagicMock, patch
 
-from ytm_offline import artists as artists_module
-from ytm_offline.naming import singles_path, track_path
+from packrat import artists as artists_module
+from packrat.naming import track_path
 
 
 def test_single_release_type_goes_to_singles_without_track_number():
@@ -50,17 +50,6 @@ def test_singles_dir_custom(tmp_path: pathlib.Path):
     assert p == tmp_path / "Artist" / "singles_old" / "Song.m4a"
 
 
-def test_singles_path_collision_disambiguated(tmp_path: pathlib.Path):
-    a = singles_path(tmp_path, "Artist", "Same Title")
-    (tmp_path / "Artist" / "Singles").mkdir(parents=True)
-    (tmp_path / "Artist" / "Singles" / "Same_Title.m4a").write_text("x")
-    b = singles_path(tmp_path, "Artist", "Same Title", year=2024)
-    (tmp_path / "Artist" / "Singles" / "Same_Title_2024.m4a").write_text("x")
-    c = singles_path(tmp_path, "Artist", "Same Title")
-    assert a == tmp_path / "Artist" / "Singles" / "Same_Title.m4a"
-    assert b == tmp_path / "Artist" / "Singles" / "Same_Title_2024.m4a"
-    assert c != tmp_path / "Artist" / "Singles" / "Same_Title.m4a"
-    assert "2024" not in c.name
 
 
 def _single_release(title: str, year: str, browse: str, section: str = "singles", type_: str = "Single") -> dict:

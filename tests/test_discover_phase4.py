@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from ytm_offline import discover_phase4 as p4
+from packrat import discover_phase4 as p4
 
 
 def test_official_music_filter():
@@ -37,3 +37,38 @@ def test_load_manifest_ids(tmp_path: pathlib.Path):
         {"video_id": "v1"}, {"video_id": "v2"}, {"video_id": None},
     ]}), encoding="utf-8")
     assert p4._load_manifest_ids(path) == {"v1", "v2"}
+
+
+class _FakeYT:
+    def __init__(self, tracks):
+        self._tracks = tracks
+
+    def search(self, query, filter, limit):
+        return list(self._tracks)
+
+
+class _NoLastFM:
+    def available(self):
+        return False
+
+
+def test_tag_search_bucket_returns_funnel():
+    raw = {
+        "videoId": "v1",
+        "title": "Tagged Song",
+        "artists": [{"name": "Artist"}],
+        "album": {"name": "Album"},
+        "duration_seconds": 200,
+        "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    }
+    profile = {
+        "tags": [{"name": "rock", "count": 3}],
+        "library_video_ids": set(),
+        "top_artists": [],
+    }
+    selected, candidates, funnel = p4._bucket_tag_search(
+        _FakeYT([raw]), profile, _NoLastFM(), 5, 2, 3, 90, 540, set(), set()
+    )
+    assert candidates == 1
+    assert [t["video_id"] for t in selected] == ["v1"]
+    assert isinstance(funnel, dict) and funnel["resolved"] == 1

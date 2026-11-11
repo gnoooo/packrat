@@ -3,7 +3,7 @@
 import pathlib
 from unittest.mock import MagicMock, patch
 
-from ytm_offline import queues as queues_module
+from packrat import queues as queues_module
 
 
 def _make_track(video_id, title, artist, duration=180, vtype="MUSIC_VIDEO_TYPE_ATV"):
@@ -61,3 +61,35 @@ def test_discover_queues_builds_manifest(mock_archive, mock_ytmusic, tmp_path):
 
     m3u8_files = list((tmp_path / "playlists" / "queues").rglob("*.m3u8"))
     assert len(m3u8_files) >= result["seeds_used"]
+
+
+def test_build_radio_limit_caps_entries(tmp_path, monkeypatch):
+    """--limit is max new tracks; the radio must not download limit-1."""
+    fake_tracks = [
+        {"video_id": f"t{i}", "title": f"T{i}", "artist": f"A{i}",
+         "album": "Al", "duration": 200}
+        for i in range(20)
+    ]
+
+    class _YT:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def get_song(self, _video_id):
+            return {"videoDetails": {"title": "Seed"}}
+
+    monkeypatch.setattr(queues_module, "YTMusic", _YT)
+    monkeypatch.setattr(
+        queues_module, "Archive", lambda *_a, **_k: type(
+            "A", (), {"__contains__": lambda self, _item: False}
+        )()
+    )
+    monkeypatch.setattr(
+        queues_module, "_build_queue", lambda *_a, **_k: (fake_tracks, [])
+    )
+    result = queues_module.build_radio(
+        "abcdefghijk", "headers.json", tmp_path, tmp_path / "arc",
+        limit=5, dry_run=True,
+    )
+    assert result["total_tracks"] == 5
+    assert result["requested_tracks"] == 20

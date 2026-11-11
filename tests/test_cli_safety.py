@@ -7,8 +7,8 @@ import pathlib
 
 import pytest
 
-from ytm_offline import cli, cli_compat
-from ytm_offline.manifest import Manifest
+from packrat import cli, cli_compat
+from packrat.manifest import Manifest
 
 
 def _args(argv):
@@ -42,7 +42,7 @@ def _manifest(tmp_path: pathlib.Path) -> Manifest:
 def test_discover_sections_no_tty_no_yes_exits_2(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
             "total": 1, "per_source": {"home": 1},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -51,7 +51,7 @@ def test_discover_sections_no_tty_no_yes_exits_2(tmp_path, monkeypatch, capsys):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.discover.download_pending",
+        "packrat.discover.download_pending",
         lambda **_kw: called.append(True),
     )
     rc = cli.cmd_discover(_args([
@@ -68,7 +68,7 @@ def test_discover_sections_dry_run_does_not_download_or_touch_archive(
 ):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
             "total": 1, "per_source": {"home": 1},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -77,7 +77,7 @@ def test_discover_sections_dry_run_does_not_download_or_touch_archive(
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.discover.download_pending",
+        "packrat.discover.download_pending",
         lambda **_kw: called.append(True),
     )
     archive = tmp_path / "archive"
@@ -94,7 +94,7 @@ def test_discover_sections_dry_run_does_not_download_or_touch_archive(
 def test_discover_sections_yes_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
             "total": 1, "per_source": {"home": 1},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -103,7 +103,7 @@ def test_discover_sections_yes_downloads(tmp_path, monkeypatch):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.discover.download_pending",
+        "packrat.discover.download_pending",
         lambda **_kw: called.append(True) or 0,
     )
     rc = cli.cmd_discover(_args([
@@ -118,7 +118,7 @@ def test_discover_sections_tty_prompt_enter_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt="": "")
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
             "total": 1, "per_source": {"home": 1},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -127,7 +127,7 @@ def test_discover_sections_tty_prompt_enter_downloads(tmp_path, monkeypatch):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.discover.download_pending",
+        "packrat.discover.download_pending",
         lambda **_kw: called.append(True) or 0,
     )
     rc = cli.cmd_discover(_args([
@@ -142,7 +142,7 @@ def test_discover_sections_tty_prompt_no_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt="": "n")
     monkeypatch.setattr(
-        "ytm_offline.discover.run_discover",
+        "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
             "total": 1, "per_source": {"home": 1},
             "estimated_size_human": "1 KB", "skipped_by_size": 0,
@@ -151,7 +151,7 @@ def test_discover_sections_tty_prompt_no_downloads(tmp_path, monkeypatch):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.discover.download_pending",
+        "packrat.discover.download_pending",
         lambda **_kw: called.append(True) or 0,
     )
     rc = cli.cmd_discover(_args([
@@ -196,16 +196,16 @@ def test_discover_plan_commands_no_tty_no_yes_exit_2(tmp_path, monkeypatch, sub)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     if sub == "queues":
         monkeypatch.setattr(
-            "ytm_offline.queues.discover_queues",
+            "packrat.queues.discover_queues",
             lambda **_kw: _queues_result(tmp_path),
         )
-        download = "ytm_offline.queues.download_queues"
+        download = "packrat.queues.download_queues"
     else:
         monkeypatch.setattr(
-            "ytm_offline.albums.discover_albums",
+            "packrat.albums.discover_albums",
             lambda **_kw: _albums_result(tmp_path),
         )
-        download = "ytm_offline.albums.download_albums"
+        download = "packrat.albums.download_albums"
     called = []
     monkeypatch.setattr(download, lambda **_kw: called.append(True))
     rc = cli.main([
@@ -219,12 +219,12 @@ def test_discover_plan_commands_no_tty_no_yes_exit_2(tmp_path, monkeypatch, sub)
 def test_discover_queues_dry_run_does_not_download(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(
-        "ytm_offline.queues.discover_queues",
+        "packrat.queues.discover_queues",
         lambda **_kw: _queues_result(tmp_path),
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.queues.download_queues",
+        "packrat.queues.download_queues",
         lambda **_kw: called.append(True),
     )
     archive = tmp_path / "arc"
@@ -240,7 +240,7 @@ def test_discover_queues_dry_run_does_not_download(tmp_path, monkeypatch):
 def test_discover_radio_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr(
-        "ytm_offline.queues.build_radio",
+        "packrat.queues.build_radio",
         lambda **_kw: _radio_result(),
     )
     rc = cli.main([
@@ -254,7 +254,7 @@ def test_discover_radio_dry_run_does_not_download(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     calls = []
     monkeypatch.setattr(
-        "ytm_offline.queues.build_radio",
+        "packrat.queues.build_radio",
         lambda **kw: calls.append(kw) or _radio_result(),
     )
     archive = tmp_path / "arc"
@@ -269,9 +269,9 @@ def test_discover_radio_dry_run_does_not_download(tmp_path, monkeypatch):
 
 def test_artist_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr("packrat.cli.YTMusic", lambda *_a, **_k: object())
     monkeypatch.setattr(
-        "ytm_offline.artists.search_artists",
+        "packrat.artists.search_artists",
         lambda *_a, **_k: [{"name": "A", "browseId": "b"}],
     )
     catalog = {
@@ -280,11 +280,11 @@ def test_artist_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
         "totals": {"measured_s_per_track": None, "excluded_counts": {}},
         "manifest_path": str(tmp_path / "artist.json"),
     }
-    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
-    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: [])
-    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr("packrat.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("packrat.artists.build_sections", lambda *_a, **_k: [])
+    monkeypatch.setattr("packrat.artists.save_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "ytm_offline.artists.summarize_entries",
+        "packrat.artists.summarize_entries",
         lambda *_a, **_k: {
             "new_tracks": 0, "est_human": "0 B", "est_time_seconds": 0,
             "est_source": "default", "measured_s_per_track": 0,
@@ -292,7 +292,7 @@ def test_artist_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
     )
     called = []
     monkeypatch.setattr(
-        "ytm_offline.artists.download_artist",
+        "packrat.artists.download_artist",
         lambda **_kw: called.append(True),
     )
     rc = cli.main([
@@ -308,33 +308,26 @@ def test_artist_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("argv", [
-    ["-h"], ["--version"], ["ui", "demo", "--help"], ["ui", "glyphs", "--help"],
+    ["-h"], ["--version"],
     ["retry", "--help"], ["discover-phase4", "--help"],
 ])
 def test_no_auth_needed_for_help_version_ui_and_hidden(argv, monkeypatch):
-    monkeypatch.setenv("YTM_HEADERS", "/definitely/missing.json")
+    monkeypatch.setenv("PACKRAT_HEADERS", "/definitely/missing.json")
     with pytest.raises(SystemExit) as exc:
         cli.main(argv)
     assert exc.value.code == 0
 
 
-def test_ui_demo_runs_without_auth(monkeypatch):
-    monkeypatch.setenv("YTM_HEADERS", "/definitely/missing.json")
-    monkeypatch.setattr("ytm_offline.tui.run_tui", lambda *_a, **_k: 0)
-    assert cli.main(["ui", "demo", "--seconds", "1"]) == 0
 
 
-def test_ui_glyphs_runs_without_auth(monkeypatch):
-    monkeypatch.setenv("YTM_HEADERS", "/definitely/missing.json")
-    assert cli.main(["ui", "glyphs"]) == 0
 
 
 def test_invalid_env_exits_2_naming_variable(monkeypatch, capsys):
-    monkeypatch.setenv("YTM_MANIFEST_FORMAT", "xml")
+    monkeypatch.setenv("PACKRAT_MANIFEST_FORMAT", "xml")
     with pytest.raises(SystemExit) as exc:
         cli.main(["sync", "--source", "liked", "--headers", "/tmp/x"])
     assert exc.value.code == 2
-    assert "YTM_MANIFEST_FORMAT" in capsys.readouterr().err
+    assert "PACKRAT_MANIFEST_FORMAT" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -347,8 +340,6 @@ def test_invalid_env_exits_2_naming_variable(monkeypatch, capsys):
     ("discover-queues", ["discover", "queues"]),
     ("discover-albums", ["discover", "albums"]),
     ("radio", ["discover", "radio"]),
-    ("tui-demo", ["ui", "demo"]),
-    ("tui-glyphs", ["ui", "glyphs"]),
 ])
 def test_legacy_command_rewrite_one_stderr_line(old, new_prefix, capsys):
     out = cli_compat.rewrite_legacy_argv([old, "--manifest", "m.json"])
@@ -366,17 +357,13 @@ def test_visible_help_has_no_legacy_commands(capsys):
     with pytest.raises(SystemExit):
         cli.main(["-h"])
     out = capsys.readouterr().out
-    for name in ("retry", "discover-phase4", "discover-queues", "discover-albums",
-                 "tui-demo", "tui-glyphs", "migrate-layout"):
-        assert name not in out
+    import re
+    for name in ("retry", "discover-phase4", "discover-queues",
+                 "discover-albums"):
+        assert not re.search(rf"^    {re.escape(name)}\b", out, re.M)
     assert "discover" in out
-    assert "ui" in out
 
 
-def test_hidden_commands_still_parse():
-    args = _args(["migrate-layout", "--dry-run"])
-    assert args.command == "migrate-layout"
-    assert args.dry_run is True
 
 
 def test_archive_warning_requires_confirmation_even_with_yes(tmp_path, monkeypatch):
@@ -419,13 +406,13 @@ def test_artist_also_adds_extra_targets():
 def test_print_paths_are_absolute(tmp_path, capsys):
     cli._print_paths(tmp_path, "arc")
     out = capsys.readouterr().out
-    assert f"output: {tmp_path.resolve()}" in out
-    assert "archive:" in out
+    assert f"output folder: {tmp_path.resolve()}" in out
+    assert "download history:" in out
 
 
 def test_auth_api_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
-        "ytm_offline.sync.resolve_tracks",
+        "packrat.sync.resolve_tracks",
         lambda *_a: (_ for _ in ()).throw(KeyError("twoColumnBrowseResultsRenderer")),
     )
     rc = cli.main([
@@ -434,7 +421,7 @@ def test_auth_api_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys
     ])
     assert rc == 1
     err = capsys.readouterr().err
-    assert "authentication may be expired" in err
+    assert "unexpected YouTube Music response" in err
     assert "Traceback" not in err
 
 
@@ -443,12 +430,12 @@ def test_sync_dry_run_prints_manifest_recap(tmp_path, monkeypatch, capsys):
         {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
          "duration": 100}
     ]
-    monkeypatch.setattr("ytm_offline.sync.resolve_tracks", lambda *_a: tracks)
-    monkeypatch.setattr("ytm_offline.sync.Archive", lambda *_a, **_k: type(
+    monkeypatch.setattr("packrat.sync.resolve_tracks", lambda *_a: tracks)
+    monkeypatch.setattr("packrat.sync.Archive", lambda *_a, **_k: type(
         "A", (), {"__contains__": lambda self, _item: False}
     )())
     monkeypatch.setattr(
-        "ytm_offline.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+        "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
     )
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
