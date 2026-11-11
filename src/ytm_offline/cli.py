@@ -52,6 +52,20 @@ def print_result_summary(result: Any) -> None:
     )
 
 
+def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
+    """Ask before a download; --yes skips. No TTY without --yes is an error."""
+    if getattr(args, "yes", False):
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "not downloading: no TTY and --yes was not given",
+            file=sys.stderr,
+        )
+        return False
+    answer = input(prompt).strip().lower()
+    return answer in ("", "y", "yes")
+
+
 def _redact(msg: object) -> str:
     """Mask sensitive token values from messages that may be logged."""
     text = str(msg)
@@ -97,7 +111,7 @@ def cmd_migrate_layout(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         yes=args.yes,
         undo=args.undo,
-        singles_dir=args.singles_dir,
+        singles_dir=getattr(args, "singles_dir", "Singles"),
     )
 
 
@@ -269,7 +283,7 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     if args.cookies_from_browser:
         ydl_opts["cookiesfrombrowser"] = (
             args.cookies_from_browser.lower(),
-            args.browser_profile,
+            getattr(args, "browser_profile", None),
             None,
             None,
         )
@@ -326,7 +340,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
 
     cookie_ctx = (
-        browser_cookie_file(args.cookies_from_browser, args.browser_profile)
+        browser_cookie_file(args.cookies_from_browser, getattr(args, "browser_profile", None))
         if args.cookies_from_browser and not args.cookies
         else contextlib.nullcontext(args.cookies)
     )
@@ -349,11 +363,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
             archive_path=args.archive,
             cookies=args.cookies,
             cookies_from_browser=args.cookies_from_browser,
-            browser_profile=args.browser_profile,
+            browser_profile=getattr(args, "browser_profile", None),
             max_size=args.max_size,
             dry_run=args.dry_run,
             output_root=str(output_root),
-            singles_dir=args.singles_dir,
+            singles_dir=getattr(args, "singles_dir", "Singles"),
         )
 
         manifest_path = output_root / "playlists" / "discover.manifest.json"
@@ -371,20 +385,22 @@ def cmd_discover(args: argparse.Namespace) -> int:
         for artist, count in summary["top_artists"]:
             print(f"  {artist}: {count}")
 
-        if not args.dry_run:
-            print("\ndownloading discovered tracks...")
-            return exit_code_from_result(
-                discover_module.download_pending(
-                    manifest=manifest,
-                    output_root=output_root,
-                    cookies=args.cookies,
-                    cookies_from_browser=args.cookies_from_browser,
-                    browser_profile=args.browser_profile,
-                    archive_path=args.archive,
-                    delay=args.delay,
-                )
+        if args.dry_run:
+            return 0
+        if not _confirm_download(args, "download discovered tracks? [Y/n] "):
+            return 2
+        print("\ndownloading discovered tracks...")
+        return exit_code_from_result(
+            discover_module.download_pending(
+                manifest=manifest,
+                output_root=output_root,
+                cookies=args.cookies,
+                cookies_from_browser=args.cookies_from_browser,
+                browser_profile=getattr(args, "browser_profile", None),
+                archive_path=args.archive,
+                delay=args.delay,
             )
-        return 0
+        )
 
 
 def cmd_discover_phase4(args: argparse.Namespace) -> int:
@@ -765,7 +781,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             max_per_album=args.max_per_album,
             max_size=args.max_size,
             delay=args.delay,
-            singles_dir=args.singles_dir,
+            singles_dir=getattr(args, "singles_dir", "Singles"),
         )
         catalogs.append(catalog)
 
@@ -806,7 +822,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                 output_root=output_root,
                 archive_path=args.archive,
                 duration_window=args.duration_window,
-                singles_dir=args.singles_dir,
+                singles_dir=getattr(args, "singles_dir", "Singles"),
                 delay=args.delay,
             )
             if catalog is None:
@@ -831,7 +847,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
                     output_root=output_root,
                     archive_path=args.archive,
                     duration_window=args.duration_window,
-                    singles_dir=args.singles_dir,
+                    singles_dir=getattr(args, "singles_dir", "Singles"),
                     delay=args.delay,
                 )
                 if new_catalog is None:
@@ -850,8 +866,11 @@ def cmd_artist(args: argparse.Namespace) -> int:
         return 0
 
     if not args.yes and not sys.stdin.isatty():
-        print("not downloading (use --yes to skip the prompt)")
-        return 0
+        print(
+            "not downloading: no TTY and --yes was not given",
+            file=sys.stderr,
+        )
+        return 2
 
     exit_code = 0
     for catalog in catalogs:
@@ -863,7 +882,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             "archive_path": args.archive,
             "cookies": args.cookies,
             "cookies_from_browser": args.cookies_from_browser,
-            "browser_profile": args.browser_profile,
+            "browser_profile": getattr(args, "browser_profile", None),
             "max_size": args.max_size,
             "delay": args.delay,
         }
@@ -899,72 +918,56 @@ def cmd_radio(args: argparse.Namespace) -> int:
         "per_artist_per_queue": args.per_artist,
         "min_duration": args.min_duration,
         "max_duration": args.max_duration,
-        "dry_run": args.dry_run,
         "cookies": args.cookies,
         "cookies_from_browser": args.cookies_from_browser,
-        "browser_profile": args.browser_profile,
+        "browser_profile": getattr(args, "browser_profile", None),
         "max_size": args.max_size,
         "delay": args.delay,
     }
+    plan_kwargs = dict(kwargs, dry_run=True)
     if args.tui:
-        result = tui_module.run_tui(
+        plan = tui_module.run_tui(
             queues_module.build_radio,
-            kwargs,
+            plan_kwargs,
             mode="radio",
             ascii_mode=args.ascii,
         )
     else:
-        result = queues_module.build_radio(**kwargs)
+        plan = queues_module.build_radio(**plan_kwargs)
+    if isinstance(plan, dict) and plan.get("error"):
+        print_result_summary(plan)
+        return 1
+    print(f"radio seed: {plan.get('seed')} ({plan.get('seed_video_id')})")
+    print(f"tracks: {plan.get('total_tracks')}  est size: {plan.get('total_est_size_human')}")
+    for t in plan.get("tracks", []):
+        print(f"  {t}")
+
+    if args.dry_run:
+        return 0
+    if not _confirm_download(args, "download radio? [Y/n] "):
+        return 2
+
+    if args.tui:
+        result = tui_module.run_tui(
+            queues_module.build_radio,
+            dict(kwargs, dry_run=False),
+            mode="radio",
+            ascii_mode=args.ascii,
+        )
+    else:
+        result = queues_module.build_radio(**dict(kwargs, dry_run=False))
     print_result_summary(result)
     if isinstance(result, dict) and result.get("error"):
         return 1
-    print(f"radio seed: {result.get('seed')} ({result.get('seed_video_id')})")
-    print(f"tracks: {result.get('total_tracks')}  est size: {result.get('total_est_size_human')}")
-    if "summary" in result:
-        print(f"manifest: {result.get('manifest_path')}")
-        print(f"playlist: {result.get('m3u8_path')}")
-        return exit_code_from_result(result)
-    for t in result.get("tracks", []):
-        print(f"  {t}")
-    return 0
+    print(f"manifest: {result.get('manifest_path')}")
+    print(f"playlist: {result.get('m3u8_path')}")
+    return exit_code_from_result(result)
 
 
 def cmd_discover_queues(args: argparse.Namespace) -> int:
     """Build playback-queue playlists from liked-track seeds."""
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
-
-    if args.download:
-        if args.tui:
-            dl_result: dict[str, Any] = tui_module.run_tui(
-                queues_module.download_queues,
-                {
-                    "output_root": output_root,
-                    "archive_path": args.archive,
-                    "cookies": args.cookies,
-                    "cookies_from_browser": args.cookies_from_browser,
-                    "browser_profile": args.browser_profile,
-                    "max_size": args.max_size,
-                    "delay": args.delay,
-                },
-                mode="queues",
-                ascii_mode=args.ascii,
-            )
-        else:
-            dl_result = queues_module.download_queues(
-                output_root=output_root,
-                archive_path=args.archive,
-                cookies=args.cookies,
-                cookies_from_browser=args.cookies_from_browser,
-                browser_profile=args.browser_profile,
-                max_size=args.max_size,
-                delay=args.delay,
-            )
-        print_result_summary(dl_result)
-        if isinstance(dl_result, dict) and dl_result.get("error"):
-            return exit_code_from_result(dl_result)
-        print(f"queues download complete: {dl_result['manifest_path']}")
-        return exit_code_from_result(dl_result)
 
     result = queues_module.discover_queues(
         headers_path=args.headers,
@@ -980,7 +983,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
         max_duration=args.max_duration,
         random_seed=args.random_seed,
         dry_run=True,
-        singles_dir=args.singles_dir,
+        singles_dir=getattr(args, "singles_dir", "Singles"),
     )
 
     print(f"queues manifest: {result['manifest_path']}")
@@ -993,45 +996,48 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
             f"  {q['seed']}: {q['tracks']} tracks, "
             f"{q['unique_artists']} artists, {format_size(q['est_size'])}"
         )
-    return 0
+
+    if args.dry_run:
+        return 0
+    if not _confirm_download(args, "download queues? [Y/n] "):
+        return 2
+
+    if args.tui:
+        dl_result: dict[str, Any] = tui_module.run_tui(
+            queues_module.download_queues,
+            {
+                "output_root": output_root,
+                "archive_path": args.archive,
+                "cookies": args.cookies,
+                "cookies_from_browser": args.cookies_from_browser,
+                "browser_profile": getattr(args, "browser_profile", None),
+                "max_size": args.max_size,
+                "delay": args.delay,
+            },
+            mode="queues",
+            ascii_mode=args.ascii,
+        )
+    else:
+        dl_result = queues_module.download_queues(
+            output_root=output_root,
+            archive_path=args.archive,
+            cookies=args.cookies,
+            cookies_from_browser=args.cookies_from_browser,
+            browser_profile=getattr(args, "browser_profile", None),
+            max_size=args.max_size,
+            delay=args.delay,
+        )
+    print_result_summary(dl_result)
+    if isinstance(dl_result, dict) and dl_result.get("error"):
+        return exit_code_from_result(dl_result)
+    print(f"queues download complete: {dl_result['manifest_path']}")
+    return exit_code_from_result(dl_result)
 
 
 def cmd_discover_albums(args: argparse.Namespace) -> int:
     """Discover whole albums from top liked artists."""
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
-
-    if args.download:
-        if args.tui:
-            dl_result: dict[str, Any] = tui_module.run_tui(
-                albums_module.download_albums,
-                {
-                    "output_root": output_root,
-                    "archive_path": args.archive,
-                    "cookies": args.cookies,
-                    "cookies_from_browser": args.cookies_from_browser,
-                    "browser_profile": args.browser_profile,
-                    "max_size": args.max_size,
-                    "delay": args.delay,
-                },
-                mode="albums",
-                ascii_mode=args.ascii,
-            )
-        else:
-            dl_result = albums_module.download_albums(
-                output_root=output_root,
-                archive_path=args.archive,
-                cookies=args.cookies,
-                cookies_from_browser=args.cookies_from_browser,
-                browser_profile=args.browser_profile,
-                max_size=args.max_size,
-                delay=args.delay,
-            )
-        print_result_summary(dl_result)
-        if isinstance(dl_result, dict) and dl_result.get("error"):
-            return exit_code_from_result(dl_result)
-        print(f"albums download complete: {dl_result['manifest_path']}")
-        return exit_code_from_result(dl_result)
 
     result = albums_module.discover_albums(
         headers_path=args.headers,
@@ -1059,7 +1065,42 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
             f"  {a['artist']} - {a['album']}: {a['tracks']} new, "
             f"{a['already_owned']} owned, {format_size(a['est_size'])}"
         )
-    return 0
+
+    if args.dry_run:
+        return 0
+    if not _confirm_download(args, "download albums? [Y/n] "):
+        return 2
+
+    if args.tui:
+        dl_result: dict[str, Any] = tui_module.run_tui(
+            albums_module.download_albums,
+            {
+                "output_root": output_root,
+                "archive_path": args.archive,
+                "cookies": args.cookies,
+                "cookies_from_browser": args.cookies_from_browser,
+                "browser_profile": getattr(args, "browser_profile", None),
+                "max_size": args.max_size,
+                "delay": args.delay,
+            },
+            mode="albums",
+            ascii_mode=args.ascii,
+        )
+    else:
+        dl_result = albums_module.download_albums(
+            output_root=output_root,
+            archive_path=args.archive,
+            cookies=args.cookies,
+            cookies_from_browser=args.cookies_from_browser,
+            browser_profile=getattr(args, "browser_profile", None),
+            max_size=args.max_size,
+            delay=args.delay,
+        )
+    print_result_summary(dl_result)
+    if isinstance(dl_result, dict) and dl_result.get("error"):
+        return exit_code_from_result(dl_result)
+    print(f"albums download complete: {dl_result['manifest_path']}")
+    return exit_code_from_result(dl_result)
 
 
 _rewrite_legacy_argv = cli_compat.rewrite_legacy_argv

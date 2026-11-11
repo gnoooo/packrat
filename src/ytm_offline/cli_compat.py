@@ -187,12 +187,13 @@ def adapt_artist(args: argparse.Namespace) -> int:
         top_limit=None,
         max_per_album=None,
         singles_dir=SINGLES_DIR_DEFAULT,
+        browser_profile=None,
     )
     return _handler("cmd_artist")(args)
 
 
 def adapt_discover_sections(args: argparse.Namespace) -> int:
-    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
+    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT, browser_profile=None)
     return _handler("cmd_discover")(args)
 
 
@@ -208,12 +209,13 @@ def adapt_discover_taste(args: argparse.Namespace) -> int:
 
 def adapt_discover_queues(args: argparse.Namespace) -> int:
     args.download = getattr(args, "download", False) or not args.dry_run
-    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
+    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT, browser_profile=None)
     return _handler("cmd_discover_queues")(args)
 
 
 def adapt_discover_albums(args: argparse.Namespace) -> int:
     args.download = getattr(args, "download", False) or not args.dry_run
+    setattrs_missing(args, browser_profile=None)
     return _handler("cmd_discover_albums")(args)
 
 
@@ -221,6 +223,7 @@ def adapt_discover_radio(args: argparse.Namespace) -> int:
     if args.limit is None:
         args.limit = 50
     args.download = getattr(args, "download", False) or not args.dry_run
+    setattrs_missing(args, browser_profile=None)
     return _handler("cmd_radio")(args)
 
 
