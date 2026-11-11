@@ -421,3 +421,18 @@ def test_print_paths_are_absolute(tmp_path, capsys):
     out = capsys.readouterr().out
     assert f"output: {tmp_path.resolve()}" in out
     assert "archive:" in out
+
+
+def test_auth_api_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ytm_offline.sync.resolve_tracks",
+        lambda *_a: (_ for _ in ()).throw(KeyError("twoColumnBrowseResultsRenderer")),
+    )
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--dry-run",
+    ])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "authentication may be expired" in err
+    assert "Traceback" not in err

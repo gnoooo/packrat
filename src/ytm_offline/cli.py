@@ -1264,7 +1264,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         getattr(args, "palette", "auto"),
     )
 
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        print(f"error: {_friendly_error(exc)}", file=sys.stderr)
+        return 1
+
+
+def _friendly_error(exc: Exception) -> str:
+    """Keep auth/API failures readable instead of dumping a raw API response."""
+    name = type(exc).__name__
+    if name.startswith("YTMusic") or isinstance(exc, KeyError):
+        return "authentication may be expired or missing; run 'ytm-offline auth'"
+    text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    return f"{name}: {text[:300]}" if text else name
 
 
 def cmd_tui_demo(args: argparse.Namespace) -> int:
