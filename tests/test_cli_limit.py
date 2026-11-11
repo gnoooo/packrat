@@ -285,3 +285,9 @@ def test_artist_select_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
     ])
     assert rc == 2
     assert not called
+
+
+def test_artist_scope_top_songs_removed_from_cli():
+    with pytest.raises(SystemExit) as exc:
+        _args(["artist", "BABYMETAL", "--scope", "top-songs"])
+    assert exc.value.code == 2

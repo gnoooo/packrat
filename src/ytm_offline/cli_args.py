@@ -472,48 +472,6 @@ def build_artist_selection_parent(
         help=argparse.SUPPRESS,
     )
 
-    g.add_argument(
-        "--scope",
-        dest="scope",
-        choices=["top-songs", "albums", "all"],
-        default=argparse.SUPPRESS if suppress_defaults else "all",
-        help=_help_text(
-            "which part of the catalog to resolve (default: all)",
-            suppress_help,
-        ),
-    )
-
-    # Deprecated alias for --scope top-songs.
-    g.add_argument(
-        "--top-songs",
-        dest="scope",
-        action="store_const",
-        const="top-songs",
-        default=argparse.SUPPRESS,
-        help=argparse.SUPPRESS,
-    )
-
-    g.add_argument(
-        "--top-limit",
-        dest="top_limit",
-        type=positive_int,
-        default=argparse.SUPPRESS if suppress_defaults else None,
-        help=_help_text(
-            "max top songs (only with --scope top-songs)",
-            suppress_help,
-        ),
-    )
-
-    g.add_argument(
-        "--max-per-album",
-        dest="max_per_album",
-        type=positive_int,
-        default=argparse.SUPPRESS if suppress_defaults else None,
-        help=_help_text(
-            "max kept versions per album (only with --scope top-songs)",
-            suppress_help,
-        ),
-    )
     return p
 
 
