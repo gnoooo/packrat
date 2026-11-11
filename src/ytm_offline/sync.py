@@ -331,6 +331,8 @@ def run_sync(
         pending_size = sum(
             e.get("est_size") or 0 for e in entries if e["status"] == "pending"
         )
+        print(f"pending tracks: {len(pending_entries)}")
+        print(f"estimated pending size: {format_size(pending_size)}")
         logger.info("pending tracks: %d", len(pending_entries))
         logger.info("estimated pending size: %s", format_size(pending_size))
 
@@ -353,6 +355,8 @@ def run_sync(
             )
 
         if args.dry_run:
+            print(f"manifest: {manifest_path}")
+            print("dry-run: manifest written, no downloads.")
             logger.info("dry-run manifest: %s", manifest_path)
             return 0
 
@@ -389,5 +393,6 @@ def run_sync(
         for status, count in manifest.counts().items():
             if count:
                 logger.info("  %s: %d", status, count)
+        print(f"manifest: {manifest_path}")
         logger.info("manifest: %s", manifest_path)
         return exit_code_from_result(summary)

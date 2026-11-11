@@ -436,3 +436,26 @@ def test_auth_api_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys
     err = capsys.readouterr().err
     assert "authentication may be expired" in err
     assert "Traceback" not in err
+
+
+def test_sync_dry_run_prints_manifest_recap(tmp_path, monkeypatch, capsys):
+    tracks = [
+        {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+         "duration": 100}
+    ]
+    monkeypatch.setattr("ytm_offline.sync.resolve_tracks", lambda *_a: tracks)
+    monkeypatch.setattr("ytm_offline.sync.Archive", lambda *_a, **_k: type(
+        "A", (), {"__contains__": lambda self, _item: False}
+    )())
+    monkeypatch.setattr(
+        "ytm_offline.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
+    )
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--dry-run",
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pending tracks: 1" in out
+    assert "manifest:" in out
+    assert "dry-run: manifest written" in out
