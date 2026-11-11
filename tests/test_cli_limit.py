@@ -198,3 +198,90 @@ def test_radio_limit_caps_after_request(tmp_path, monkeypatch):
     ])
     assert rc == 0
     assert captured["limit"] == 2
+
+
+def test_artist_select_skips_picker_and_requires_yes(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        "ytm_offline.artists.search_artists",
+        lambda *_a, **_k: [{"name": "BABYMETAL", "browseId": "b"}],
+    )
+    catalog = {
+        "artist": "BABYMETAL", "label": "BABYMETAL", "browseId": "b",
+        "payload": {"entries": [{"video_id": "v1", "status": "pending"}]},
+        "entries": [{"video_id": "v1", "status": "pending"}],
+        "totals": {"measured_s_per_track": None, "excluded_counts": {}},
+        "manifest_path": str(tmp_path / "artist.json"),
+    }
+    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
+    captured = {}
+    monkeypatch.setattr(
+        "ytm_offline.artists.parse_selection",
+        lambda expr: captured.setdefault("expr", expr) or [],
+    )
+    monkeypatch.setattr(
+        "ytm_offline.artists.apply_selection",
+        lambda catalog, *_a, **_k: catalog,
+    )
+    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "ytm_offline.artists.summarize_entries",
+        lambda *_a, **_k: {
+            "new_tracks": 1, "est_human": "1 KB", "est_time_seconds": 60,
+            "est_source": "default", "measured_s_per_track": 0,
+        },
+    )
+    called = []
+    monkeypatch.setattr(
+        "ytm_offline.artists.download_artist",
+        lambda **_kw: called.append(True) or {
+            "manifest_path": "m", "m3u8_dir": "d",
+            "summary": {"downloaded": 0, "failed": 0, "stopped": False},
+        },
+    )
+    rc = cli.main([
+        "artist", "BABYMETAL", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--select", "A[1]", "--yes",
+    ])
+    assert rc == 0
+    assert captured["expr"] == "A[1]"
+    assert called
+
+
+def test_artist_select_no_tty_no_yes_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("ytm_offline.cli.YTMusic", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        "ytm_offline.artists.search_artists",
+        lambda *_a, **_k: [{"name": "BABYMETAL", "browseId": "b"}],
+    )
+    catalog = {
+        "artist": "BABYMETAL", "label": "BABYMETAL", "browseId": "b",
+        "payload": {"entries": []}, "entries": [],
+        "totals": {"measured_s_per_track": None, "excluded_counts": {}},
+        "manifest_path": str(tmp_path / "artist.json"),
+    }
+    monkeypatch.setattr("ytm_offline.artists.build_catalog", lambda *_a, **_k: catalog)
+    monkeypatch.setattr("ytm_offline.artists.build_sections", lambda *_a, **_k: {"A": [], "S": []})
+    monkeypatch.setattr("ytm_offline.artists.parse_selection", lambda _expr: [])
+    monkeypatch.setattr("ytm_offline.artists.apply_selection", lambda catalog, *_a, **_k: catalog)
+    monkeypatch.setattr("ytm_offline.artists.save_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "ytm_offline.artists.summarize_entries",
+        lambda *_a, **_k: {
+            "new_tracks": 0, "est_human": "0 B", "est_time_seconds": 0,
+            "est_source": "default", "measured_s_per_track": 0,
+        },
+    )
+    called = []
+    monkeypatch.setattr("ytm_offline.artists.download_artist", lambda **_kw: called.append(True))
+    rc = cli.main([
+        "artist", "BABYMETAL", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--select", "A[1]",
+    ])
+    assert rc == 2
+    assert not called

@@ -797,7 +797,29 @@ def cmd_artist(args: argparse.Namespace) -> int:
         if subs:
             print(f"subscribers: {subs}")
         sections = artists_module.build_sections(catalog)
-        if sys.stdin.isatty():
+        select_expr = getattr(args, "select", None)
+        if select_expr:
+            try:
+                picked = artists_module.parse_selection(select_expr)
+            except ValueError as exc:
+                print(f"bad selection: {exc}; e.g. A[1-3],S[2],-S[4]", file=sys.stderr)
+                return 2
+            catalog = artists_module.apply_selection(
+                catalog,
+                sections,
+                picked,
+                headers_path=args.headers,
+                output_root=output_root,
+                archive_path=args.archive,
+                duration_window=args.duration_window,
+                singles_dir=getattr(args, "singles_dir", "Singles"),
+                delay=args.delay,
+            )
+            if catalog is None:
+                print("nothing selected; manifest untouched for this artist.", file=sys.stderr)
+                return 2
+            catalogs[-1] = catalog
+        elif sys.stdin.isatty():
             artists_module.print_sections(sections, ascii_mode=args.ascii)
             picked: list[dict[str, Any]] | None = None
             while True:
@@ -878,6 +900,9 @@ def cmd_artist(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if not args.yes and getattr(args, "select", None):
+        if not _confirm_download(args, "start download? [Y/n] "):
+            return 2
 
     exit_code = 0
     remaining = getattr(args, "limit", None)
