@@ -1121,10 +1121,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_queues.add_argument(
         "--total-cap",
-        dest="total_cap",
+        dest="limit",
         type=positive_int,
-        default=200,
-        help="max total tracks across all queues (default: 200)",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     p_queues.add_argument(
         "--random-seed",

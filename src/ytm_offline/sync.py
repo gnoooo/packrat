@@ -321,6 +321,13 @@ def run_sync(
             if est_size:
                 total_est_bytes += est_size
 
+        limit = getattr(args, "limit", None)
+        total_pending = len(pending_entries)
+        if limit and total_pending > limit:
+            pending_entries = pending_entries[:limit]
+            total_est_bytes = sum(e.get("est_size") or 0 for e in pending_entries)
+            logger.info("limit applied: %d of %d new tracks", limit, total_pending)
+
         pending_size = sum(
             e.get("est_size") or 0 for e in entries if e["status"] == "pending"
         )

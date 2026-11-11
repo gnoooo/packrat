@@ -330,6 +330,7 @@ def download_albums(
     delay: float = 7.0,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     control: Any = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Download pending tracks from albums.manifest.json."""
     manifest_path = output_root / "playlists" / "albums.manifest.json"
@@ -337,6 +338,8 @@ def download_albums(
         return {"error": f"manifest not found: {manifest_path}"}
     manifest = Manifest.load(manifest_path)
     entries = manifest.pending()
+    if limit and len(entries) > limit:
+        entries = entries[:limit]
     if not entries:
         return {"error": "no pending tracks in albums manifest"}
 

@@ -1035,6 +1035,7 @@ def download_artist(
     event_callback=None,
     control=None,
     payload: dict[str, Any] | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Download pending tracks from artist-<label>.manifest.json."""
     manifest_path = output_root / "playlists" / f"artist-{label}.manifest.json"
@@ -1044,6 +1045,8 @@ def download_artist(
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     pending = [e for e in entries if e.get("status") == "pending"]
+    if limit and len(pending) > limit:
+        pending = pending[:limit]
     if not pending:
         return {"error": "no pending tracks in manifest"}
 

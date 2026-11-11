@@ -631,6 +631,7 @@ def download_pending(
     delay: float,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     control: Any = None,
+    limit: int | None = None,
 ) -> int:
     """Download the pending tracks from a discovery manifest.
 
@@ -638,9 +639,14 @@ def download_pending(
     downloads (events, pause/resume, archive, retry rules).
     """
     pending = [e for e in manifest.entries if e.get("status") == "pending"]
+    total_pending = len(pending)
+    if limit and total_pending > limit:
+        pending = pending[:limit]
     if not pending:
         print("no pending tracks to download")
         return 0
+    if limit and total_pending > limit:
+        print(f"limit applied: {limit} of {total_pending} new tracks")
 
     manifest_path = output_root / "playlists" / "discover.manifest.json"
     m3u8_path = output_root / "playlists" / "discover.m3u8"

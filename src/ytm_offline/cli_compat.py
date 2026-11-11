@@ -141,11 +141,14 @@ def adapt_library(args: argparse.Namespace) -> int:
 
 
 def adapt_download_one(args: argparse.Namespace) -> int:
+    setattrs_missing(args, browser_profile=None)
     return _handler("cmd_download_one")(args)
 
 
 def adapt_sync(args: argparse.Namespace) -> int:
-    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
+    setattrs_missing(
+        args, singles_dir=SINGLES_DIR_DEFAULT, browser_profile=None
+    )
     return _handler("cmd_sync")(args)
 
 
@@ -209,7 +212,12 @@ def adapt_discover_taste(args: argparse.Namespace) -> int:
 
 def adapt_discover_queues(args: argparse.Namespace) -> int:
     args.download = getattr(args, "download", False) or not args.dry_run
-    setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT, browser_profile=None)
+    setattrs_missing(
+        args,
+        singles_dir=SINGLES_DIR_DEFAULT,
+        browser_profile=None,
+        total_cap=200,
+    )
     return _handler("cmd_discover_queues")(args)
 
 

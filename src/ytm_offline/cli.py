@@ -399,6 +399,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 browser_profile=getattr(args, "browser_profile", None),
                 archive_path=args.archive,
                 delay=args.delay,
+                limit=getattr(args, "limit", None),
             )
         )
 
@@ -516,6 +517,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             "max_size": args.max_size,
             "delay": args.delay,
             "payload": payload,
+            "limit": getattr(args, "limit", None),
         }
         if args.tui:
             result = tui_module.run_tui(
@@ -541,6 +543,11 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     if not entries:
         print("no pending tracks in manifest")
         return 0
+    total_pending = len(entries)
+    limit = getattr(args, "limit", None)
+    if limit and total_pending > limit:
+        entries = entries[:limit]
+        print(f"limit applied: {limit} of {total_pending} new tracks")
 
     total_size = sum((e.get("est_size") or 0) for e in entries)
     print(f"pending tracks: {len(entries)}")
@@ -873,9 +880,21 @@ def cmd_artist(args: argparse.Namespace) -> int:
         return 2
 
     exit_code = 0
+    remaining = getattr(args, "limit", None)
     for catalog in catalogs:
         label = catalog["label"]
         print(f"downloading catalog: {catalog['artist']}")
+        pending_count = sum(
+            1 for e in catalog.get("entries", []) if e.get("status") == "pending"
+        )
+        catalog_limit = remaining
+        if remaining is not None:
+            catalog_limit = min(remaining, pending_count)
+            remaining = max(0, remaining - catalog_limit)
+            if pending_count > catalog_limit:
+                print(
+                    f"limit applied: {catalog_limit} of {pending_count} new tracks"
+                )
         kwargs = {
             "label": label,
             "output_root": output_root,
@@ -885,6 +904,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
             "browser_profile": getattr(args, "browser_profile", None),
             "max_size": args.max_size,
             "delay": args.delay,
+            "limit": catalog_limit,
         }
         if args.tui:
             result = tui_module.run_tui(
@@ -939,6 +959,9 @@ def cmd_radio(args: argparse.Namespace) -> int:
         return 1
     print(f"radio seed: {plan.get('seed')} ({plan.get('seed_video_id')})")
     print(f"tracks: {plan.get('total_tracks')}  est size: {plan.get('total_est_size_human')}")
+    requested = plan.get("requested_tracks")
+    if requested and requested > plan.get("total_tracks", 0):
+        print(f"limit applied: {plan.get('total_tracks')} of {requested} new tracks")
     for t in plan.get("tracks", []):
         print(f"  {t}")
 
@@ -969,6 +992,10 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
+    limit = getattr(args, "limit", None)
+    total_cap = args.total_cap
+    if limit:
+        total_cap = max(total_cap, limit * 2, 100)
     result = queues_module.discover_queues(
         headers_path=args.headers,
         output_root=output_root,
@@ -978,7 +1005,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
         hop_width=args.hop_width,
         per_artist_per_queue=args.per_artist_per_queue,
         per_queue_limit=args.per_queue_limit,
-        total_cap=args.total_cap,
+        total_cap=total_cap,
         min_duration=args.min_duration,
         max_duration=args.max_duration,
         random_seed=args.random_seed,
@@ -996,6 +1023,8 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
             f"  {q['seed']}: {q['tracks']} tracks, "
             f"{q['unique_artists']} artists, {format_size(q['est_size'])}"
         )
+    if limit and result["total_tracks"] > limit:
+        print(f"limit applied: {limit} of {result['total_tracks']} new tracks")
 
     if args.dry_run:
         return 0
@@ -1013,6 +1042,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
                 "browser_profile": getattr(args, "browser_profile", None),
                 "max_size": args.max_size,
                 "delay": args.delay,
+                "limit": limit,
             },
             mode="queues",
             ascii_mode=args.ascii,
@@ -1026,6 +1056,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
             browser_profile=getattr(args, "browser_profile", None),
             max_size=args.max_size,
             delay=args.delay,
+            limit=limit,
         )
     print_result_summary(dl_result)
     if isinstance(dl_result, dict) and dl_result.get("error"):
@@ -1065,6 +1096,9 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
             f"  {a['artist']} - {a['album']}: {a['tracks']} new, "
             f"{a['already_owned']} owned, {format_size(a['est_size'])}"
         )
+    limit = getattr(args, "limit", None)
+    if limit and result["total_new_tracks"] > limit:
+        print(f"limit applied: {limit} of {result['total_new_tracks']} new tracks")
 
     if args.dry_run:
         return 0
@@ -1082,6 +1116,7 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
                 "browser_profile": getattr(args, "browser_profile", None),
                 "max_size": args.max_size,
                 "delay": args.delay,
+                "limit": limit,
             },
             mode="albums",
             ascii_mode=args.ascii,
@@ -1095,6 +1130,7 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
             browser_profile=getattr(args, "browser_profile", None),
             max_size=args.max_size,
             delay=args.delay,
+            limit=limit,
         )
     print_result_summary(dl_result)
     if isinstance(dl_result, dict) and dl_result.get("error"):

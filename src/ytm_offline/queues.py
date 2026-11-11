@@ -330,6 +330,7 @@ def download_queues(
     delay: float = 7.0,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     control: Any = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Download pending tracks from queues.manifest.json."""
     manifest_path = output_root / "playlists" / "queues.manifest.json"
@@ -337,6 +338,8 @@ def download_queues(
         return {"error": f"manifest not found: {manifest_path}"}
     manifest = Manifest.load(manifest_path)
     entries = manifest.pending()
+    if limit and len(entries) > limit:
+        entries = entries[:limit]
     if not entries:
         return {"error": "no pending tracks in queues manifest"}
 
@@ -430,6 +433,8 @@ def build_radio(
     except Exception:
         pass
 
+    # Request more than the final limit, then apply the limit after dedupe.
+    request_limit = max(limit * 2, 100) if limit else None
     # Build the radio from the seed, numbers first track like track 1.
     accepted, _ = _build_queue(
         yt,
@@ -440,9 +445,12 @@ def build_radio(
         per_artist_per_queue,
         output_root,
         set(),
-        max_tracks=limit - 1,
+        max_tracks=(request_limit - 1) if request_limit else None,
         hop=1,
     )
+    requested_tracks = len(accepted) + 1  # include the seed
+    if limit:
+        accepted = accepted[: limit - 1]
     entries = []
     for t in accepted:
         entries.append(
@@ -465,6 +473,7 @@ def build_radio(
         "seed": seed["title"],
         "seed_video_id": video_id,
         "total_tracks": len(entries),
+        "requested_tracks": requested_tracks,
         "total_est_size_human": format_size(total_est),
         "tracks": [
             f"{e['artist']} - {e['title']} ({e['duration']}s)"
