@@ -217,3 +217,8 @@ def test_theme_validation():
 # 18. cookies-from-browser help has syntax
 def test_cookies_help_has_syntax():
     assert "firefox[:profile]" in _help(("sync",))
+
+
+def test_exclude_singles_shared_flag():
+    assert "--exclude-singles" in _help(("artist",))
+    assert "--exclude-singles" in _help(("discover", "albums"))

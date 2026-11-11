@@ -8,8 +8,8 @@ usage: ytm-offline artist [-h] [--headers HEADERS] [--cookies COOKIES]
                           [--palette {auto,custom,fixed,basic}]
                           [--min-duration MIN_DURATION]
                           [--max-duration MAX_DURATION] [--select SELECT]
-                          [--candidate CANDIDATE] [--from-file FROM_FILE]
-                          [--also ALSO]
+                          [--candidate CANDIDATE] [--exclude-singles]
+                          [--from-file FROM_FILE] [--also ALSO]
                           [target]
 
 positional arguments:
@@ -62,3 +62,4 @@ Selection:
   --candidate, -c CANDIDATE
                         pick the Nth search candidate when the name is
                         ambiguous
+  --exclude-singles     exclude singles but keep EPs

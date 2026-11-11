@@ -494,6 +494,14 @@ def build_artist_selection_parent(
         )
 
     g.add_argument(
+        "--exclude-singles",
+        dest="no_singles",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=_help_text("exclude singles but keep EPs", suppress_help),
+    )
+
+    g.add_argument(
         "--duration-window",
         dest="duration_window_alias",
         action="store_true",
@@ -1247,6 +1255,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="include singles/EPs",
+    )
+    p_albums.add_argument(
+        "--exclude-singles",
+        dest="include_singles",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="exclude singles/EPs (default)",
     )
     p_albums.add_argument(
         "--download",
