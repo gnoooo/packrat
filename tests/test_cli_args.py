@@ -84,7 +84,7 @@ def test_cli_overrides_env_of_other_auth_kind(monkeypatch, capsys):
     args = _parse(argv)
     cli_args.resolve_auth(args, argv=argv)
     assert args.cookies == "cookies.txt"
-    assert args.cookies_from_browser == "firefox"  # env default kept
+    assert args.cookies_from_browser is None  # CLI kind overrides the env kind
 
 
 def test_env_falls_back_to_default(monkeypatch):
@@ -209,6 +209,56 @@ def test_browser_profile_alias_combines_and_warns(capsys):
     assert args.cookies_from_browser == "firefox:dev"
     err = capsys.readouterr().err
     assert "deprecated" in err
+
+
+@pytest.mark.parametrize("spec,expected", [
+    ("firefox", ("firefox", None, None, None)),
+    ("firefox:default-release", ("firefox", "default-release", None, None)),
+    ("firefox:/abs/path/to/profile", ("firefox", "/abs/path/to/profile", None, None)),
+    ("firefox+gnomekeyring:p", ("firefox", "p", "GNOMEKEYRING", None)),
+    ("firefox:p::container", ("firefox", "p", None, "container")),
+])
+def test_parse_cookies_from_browser(spec, expected):
+    assert cli_args.parse_cookies_from_browser(spec) == expected
+
+
+@pytest.mark.parametrize("spec", ["", "netscape", "firefox+bogus", "firefox::"])
+def test_parse_cookies_from_browser_invalid_exits_2(spec, capsys):
+    argv = ["sync", "--source", "liked", "--cookies-from-browser", spec]
+    args = _parse(argv)
+    with pytest.raises(SystemExit) as exc:
+        cli_args.resolve_auth(args, argv=argv)
+    assert exc.value.code == 2
+    assert "cookies-from-browser" in capsys.readouterr().err
+
+
+def test_cli_cookies_from_browser_overrides_env_cookies(monkeypatch):
+    monkeypatch.setenv("YTM_COOKIES", "env-cookies.txt")
+    argv = ["sync", "--source", "liked", "--cookies-from-browser", "firefox"]
+    args = _parse(argv)
+    cli_args.resolve_auth(args, argv=argv)
+    assert args.cookies_from_browser == "firefox"
+    assert args.cookies is None
+
+
+def test_both_env_kinds_allowed(monkeypatch):
+    monkeypatch.setenv("YTM_COOKIES", "env-cookies.txt")
+    monkeypatch.setenv("YTM_COOKIES_FROM_BROWSER", "firefox")
+    argv = ["sync", "--source", "liked"]
+    args = _parse(argv)
+    cli_args.resolve_auth(args, argv=argv)
+    assert args.cookies == "env-cookies.txt"
+    assert args.cookies_from_browser == "firefox"
+
+
+def test_both_cli_kinds_exit_2(capsys):
+    argv = ["sync", "--source", "liked", "--cookies", "c.txt",
+            "--cookies-from-browser", "firefox"]
+    args = _parse(argv)
+    with pytest.raises(SystemExit) as exc:
+        cli_args.resolve_auth(args, argv=argv)
+    assert exc.value.code == 2
+    assert "mutually exclusive" in capsys.readouterr().err
 
 
 def test_browser_profile_without_cookies_from_browser_exits():

@@ -44,13 +44,6 @@ def _normalize_track(raw: dict[str, Any], index: int) -> dict[str, Any]:
     }
 
 
-def _parse_browser_name(browser_spec: str) -> str:
-    match = re.match(r"[A-Za-z0-9]+", browser_spec)
-    if not match:
-        raise ValueError(f"invalid --cookies-from-browser value: {browser_spec}")
-    return match.group(0).lower()
-
-
 _COOKIE_TEMP_FILES: set[str] = set()
 
 
@@ -95,8 +88,16 @@ def _install_cookie_signal_handlers() -> None:
 @contextlib.contextmanager
 def browser_cookie_file(browser_spec: str, profile: str | None = None) -> Iterator[str]:
     """Extract cookies to a 0600 temp file and guarantee cleanup on exit/crash."""
-    browser_name = _parse_browser_name(browser_spec)
-    jar = extract_cookies_from_browser(browser_name, profile=profile)
+    from ytm_offline.cli_args import parse_cookies_from_browser
+
+    spec = f"{browser_spec}:{profile}" if profile else browser_spec
+    browser_name, parsed_profile, keyring, container = parse_cookies_from_browser(spec)
+    jar = extract_cookies_from_browser(
+        browser_name,
+        profile=parsed_profile,
+        keyring=keyring,
+        container=container,
+    )
     fd, path = tempfile.mkstemp(
         suffix=".txt", prefix="ytm_cookies_", dir="/tmp/opencode"
     )

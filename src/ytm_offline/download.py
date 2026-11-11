@@ -74,7 +74,10 @@ def _browser_tuple(
 ) -> tuple[str, str | None, str | None, str | None] | None:
     if not browser_spec:
         return None
-    return (browser_spec.lower(), profile, None, None)
+    from ytm_offline.cli_args import parse_cookies_from_browser
+
+    spec = f"{browser_spec}:{profile}" if profile else browser_spec
+    return parse_cookies_from_browser(spec)
 
 
 def _build_ydl_opts(

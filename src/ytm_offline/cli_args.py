@@ -650,6 +650,48 @@ def _cli_set(args: argparse.Namespace, dest: str) -> bool:
     return hasattr(args, dest)
 
 
+def parse_cookies_from_browser(
+    spec: str,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Parse yt-dlp's BROWSER[+KEYRING][:PROFILE][::CONTAINER] syntax."""
+    import re
+
+    from yt_dlp.cookies import SUPPORTED_BROWSERS, SUPPORTED_KEYRINGS
+
+    match = re.fullmatch(
+        r"""(?x)
+        (?P<name>[^+:]+)
+        (?:\s*\+\s*(?P<keyring>[^:]+))?
+        (?:\s*:\s*(?!:)(?P<profile>.+?))?
+        (?:\s*::\s*(?P<container>.+))?
+        """,
+        spec,
+    )
+    if match is None:
+        raise ValueError(f"invalid cookies-from-browser value: {spec!r}")
+    browser = match.group("name").strip().lower()
+    keyring = match.group("keyring")
+    profile = match.group("profile")
+    container = match.group("container")
+    if browser not in SUPPORTED_BROWSERS:
+        raise ValueError(
+            f"unsupported browser {browser!r}; supported: "
+            + ", ".join(sorted(SUPPORTED_BROWSERS))
+        )
+    if keyring is not None:
+        keyring = keyring.strip().upper()
+        if keyring not in SUPPORTED_KEYRINGS:
+            raise ValueError(
+                f"unsupported keyring {keyring!r}; supported: "
+                + ", ".join(sorted(SUPPORTED_KEYRINGS))
+            )
+    return browser, profile, keyring, container
+
+
+def _has_option(argv: list[str], name: str) -> bool:
+    return any(arg == name or arg.startswith(f"{name}=") for arg in argv)
+
+
 def resolve_auth(args: argparse.Namespace, argv: list[str] | None = None) -> None:
     """Enforce cookie auth rules and fold deprecated aliases.
 
@@ -665,8 +707,8 @@ def resolve_auth(args: argparse.Namespace, argv: list[str] | None = None) -> Non
     if argv is None:
         argv = sys.argv[1:]
 
-    cookies_cli = "--cookies" in argv
-    cfb_cli = "--cookies-from-browser" in argv
+    cookies_cli = _has_option(argv, "--cookies")
+    cfb_cli = _has_option(argv, "--cookies-from-browser")
 
     if cookies_cli and cfb_cli:
         print(
@@ -675,8 +717,14 @@ def resolve_auth(args: argparse.Namespace, argv: list[str] | None = None) -> Non
         )
         raise SystemExit(2)
 
+    # A CLI value of one kind overrides an env value of the other kind.
+    if cookies_cli:
+        args.cookies_from_browser = None
+    elif cfb_cli:
+        args.cookies = None
+
     # Fold deprecated --browser-profile alias.
-    if "--browser-profile" in argv:
+    if _has_option(argv, "--browser-profile"):
         alias = args.browser_profile_alias
         if not cfb_cli:
             print(
@@ -690,6 +738,16 @@ def resolve_auth(args: argparse.Namespace, argv: list[str] | None = None) -> Non
             file=sys.stderr,
         )
         delattr(args, "browser_profile_alias")
+
+    if cfb_cli and not args.cookies_from_browser:
+        print("error: --cookies-from-browser must not be empty", file=sys.stderr)
+        raise SystemExit(2)
+    if args.cookies_from_browser:
+        try:
+            parse_cookies_from_browser(args.cookies_from_browser)
+        except ValueError as exc:
+            print(f"error: --cookies-from-browser: {exc}", file=sys.stderr)
+            raise SystemExit(2) from None
 
 
 def resolve_run_control_aliases(args: argparse.Namespace) -> None:
