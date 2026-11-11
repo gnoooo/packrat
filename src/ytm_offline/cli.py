@@ -17,6 +17,7 @@ from ytmusicapi import YTMusic
 
 from ytm_offline import albums as albums_module
 from ytm_offline import artists as artists_module
+from ytm_offline import cli_compat
 from ytm_offline import discover as discover_module
 from ytm_offline import discover_phase4 as discover_phase4_module
 from ytm_offline import queues as queues_module
@@ -1061,230 +1062,13 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
     return 0
 
 
-def _rewrite_legacy_argv(argv: list[str]) -> list[str]:
-    """Map deprecated top-level command names to the new command hierarchy."""
-    if not argv:
-        return argv
-    mapping = {
-        "retry": ["download-manifest", "--failed-only"],
-        "discover-phase4": ["discover", "taste"],
-        "discover-queues": ["discover", "queues"],
-        "discover-albums": ["discover", "albums"],
-        "radio": ["discover", "radio"],
-        "tui-demo": ["ui", "demo"],
-        "tui-glyphs": ["ui", "glyphs"],
-    }
-    if argv[0] in mapping:
-        return mapping[argv[0]] + argv[1:]
-    return argv
-
-
-def _move_global_options_after_subcommand(
-    parser: argparse.ArgumentParser, argv: list[str]
-) -> list[str]:
-    """Move top-level options placed before the subcommand to after it.
-
-    argparse applies subparser defaults after top-level actions, so a value
-    given before the subcommand can be overwritten by a subparser default.
-    Re-ordering makes the subparser action process the value last.
-    """
-    # Collect global option strings and whether each takes a value.
-    option_info: dict[str, bool] = {}
-    for action in parser._actions:
-        if not action.option_strings:
-            continue
-        takes_value = not isinstance(
-            action,
-            (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction),
-        )
-        for opt in action.option_strings:
-            option_info[opt] = takes_value
-
-    # Locate the subcommand (first non-option token).
-    cmd_idx = None
-    for i, arg in enumerate(argv):
-        if not arg.startswith("-"):
-            cmd_idx = i
-            break
-    if cmd_idx is None or cmd_idx == 0:
-        return argv
-
-    head, tail = argv[:cmd_idx], argv[cmd_idx:]
-    moved: list[str] = []
-    kept: list[str] = []
-    i = 0
-    while i < len(head):
-        arg = head[i]
-        base = arg.split("=", 1)[0]
-        if base in option_info:
-            moved.append(arg)
-            if "=" not in arg and option_info[base] and i + 1 < len(head):
-                moved.append(head[i + 1])
-                i += 2
-                continue
-            i += 1
-        else:
-            kept.append(arg)
-            i += 1
-    return kept + tail + moved
-
-
-def _split_cookies_from_browser(args: argparse.Namespace) -> None:
-    """Convert --cookies-from-browser BROWSER[:PROFILE] into separate attrs."""
-    cfb = getattr(args, "cookies_from_browser", None)
-    if cfb:
-        browser, _, profile = cfb.partition(":")
-        args.cookies_from_browser = browser
-        args.browser_profile = profile or None
-    else:
-        args.browser_profile = None
-
-
-def _setattrs_missing(args: argparse.Namespace, **kwargs: Any) -> None:
-    """Set attributes only when absent; used to keep old handlers happy."""
-    for name, value in kwargs.items():
-        if not hasattr(args, name):
-            setattr(args, name, value)
-
-
-def _adapt_library(args: argparse.Namespace) -> int:
-    args.limit = args.top
-    return cmd_library(args)
-
-
-def _adapt_download_one(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    return cmd_download_one(args)
-
-
-def _adapt_sync(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    _setattrs_missing(
-        args,
-        singles_dir=SINGLES_DIR_DEFAULT,
-    )
-    return cmd_sync(args)
-
-
-def _adapt_download_manifest(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    return cmd_download_manifest(args)
-
-
-def _adapt_migrate_layout(args: argparse.Namespace) -> int:
-    _setattrs_missing(
-        args,
-        singles_dir=SINGLES_DIR_DEFAULT,
-        yes=False,
-        dry_run=False,
-        undo=False,
-    )
-    return cmd_migrate_layout(args)
-
-
-def _adapt_artist(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    targets = list(getattr(args, "target", []))
-    targets.extend(getattr(args, "also", []))
-    args.artists = targets
-    args.pick = getattr(args, "candidate", None)
-    args.limit = getattr(args, "top", None)
-
-    # Deprecated include/exclude flags map to booleans the old handler expects.
-    for flag in (
-        "include_live",
-        "include_compilations",
-        "include_remixes",
-        "albums_only",
-        "no_singles",
-    ):
-        _setattrs_missing(args, **{flag: False})
-
-    _setattrs_missing(
-        args,
-        duration_window=getattr(args, "duration_window_alias", False),
-        scope="all",
-        top_limit=None,
-        max_per_album=None,
-        singles_dir=SINGLES_DIR_DEFAULT,
-    )
-    return cmd_artist(args)
-
-
-def _adapt_discover_sections(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    _setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
-    return cmd_discover(args)
-
-
-def _adapt_discover_taste(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    args.quota_deep = args.deep
-    args.quota_adjacent = args.adjacent
-    args.quota_radio = args.radio
-    args.quota_external = args.external
-    args.quota_tag = args.tag
-    args.include_phase3 = not args.no_phase3
-    return cmd_discover_phase4(args)
-
-
-def _adapt_discover_queues(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    args.download = getattr(args, "download", False) or not args.dry_run
-    _setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
-    return cmd_discover_queues(args)
-
-
-def _adapt_discover_albums(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    args.download = getattr(args, "download", False) or not args.dry_run
-    return cmd_discover_albums(args)
-
-
-def _adapt_discover_radio(args: argparse.Namespace) -> int:
-    _split_cookies_from_browser(args)
-    if args.limit is None:
-        args.limit = 50
-    args.download = getattr(args, "download", False) or not args.dry_run
-    return cmd_radio(args)
-
-
-def _get_subparsers(parser: argparse.ArgumentParser) -> argparse._SubParsersAction | None:
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return action
-    return None
+_rewrite_legacy_argv = cli_compat.rewrite_legacy_argv
+_move_global_options_after_subcommand = cli_compat.move_global_options_after_subcommand
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = cli_args.build_parser()
-    sub = _get_subparsers(parser)
-    if sub is None:
-        raise RuntimeError("parser has no subparsers")
-
-    sub.choices["auth"].set_defaults(func=cmd_auth)
-    sub.choices["library"].set_defaults(func=_adapt_library)
-    sub.choices["download-one"].set_defaults(func=_adapt_download_one)
-    sub.choices["sync"].set_defaults(func=_adapt_sync)
-    sub.choices["download-manifest"].set_defaults(func=_adapt_download_manifest)
-    sub.choices["artist"].set_defaults(func=_adapt_artist)
-    sub.choices["migrate-layout"].set_defaults(func=_adapt_migrate_layout)
-
-    discover = sub.choices["discover"]
-    discover_sub = _get_subparsers(discover)
-    if discover_sub is not None:
-        discover_sub.choices["sections"].set_defaults(func=_adapt_discover_sections)
-        discover_sub.choices["taste"].set_defaults(func=_adapt_discover_taste)
-        discover_sub.choices["queues"].set_defaults(func=_adapt_discover_queues)
-        discover_sub.choices["albums"].set_defaults(func=_adapt_discover_albums)
-        discover_sub.choices["radio"].set_defaults(func=_adapt_discover_radio)
-
-    ui = sub.choices["ui"]
-    ui_sub = _get_subparsers(ui)
-    if ui_sub is not None:
-        ui_sub.choices["demo"].set_defaults(func=cmd_tui_demo)
-        ui_sub.choices["glyphs"].set_defaults(func=cmd_tui_glyphs)
-
+    cli_compat.register_handlers(parser)
     return parser
 
 
@@ -1293,12 +1077,15 @@ _NEEDS_HEADERS = {"auth", "library", "sync", "discover", "artist"}
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    raw = _rewrite_legacy_argv(list(argv if argv is not None else sys.argv[1:]))
-    raw = _move_global_options_after_subcommand(parser, raw)
+    raw = cli_compat.rewrite_legacy_argv(
+        list(argv if argv is not None else sys.argv[1:])
+    )
+    raw = cli_compat.move_global_options_after_subcommand(parser, raw)
     args = parser.parse_args(raw)
 
     cli_args.resolve_auth(args, raw)
     cli_args.resolve_run_control_aliases(args)
+    cli_compat.warn_deprecated_options(raw)
 
     if args.command in _NEEDS_HEADERS and not args.headers:
         print("--headers or YTM_HEADERS is required for this command", file=sys.stderr)
