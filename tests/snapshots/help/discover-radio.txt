@@ -21,7 +21,8 @@ options:
 
 Authentication:
   --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
-                        YTM_HEADERS)
+                        YTM_HEADERS; default: ~/.config/ytmusic-
+                        composer/browser.json)
   --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
                         YTM_COOKIES)
   --cookies-from-browser COOKIES_FROM_BROWSER

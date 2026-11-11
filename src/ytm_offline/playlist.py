@@ -7,6 +7,16 @@ import pathlib
 from typing import Iterable
 
 
+def m3u8_entry(entry: dict) -> dict:
+    """The four fields write_m3u8 needs, from a manifest entry."""
+    return {
+        "path": entry["path"],
+        "duration": entry.get("duration", 0),
+        "title": entry.get("title", "Unknown"),
+        "artist": entry.get("artist", "Unknown"),
+    }
+
+
 def write_m3u8(
     path: pathlib.Path,
     entries: Iterable[dict],

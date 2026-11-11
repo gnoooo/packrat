@@ -13,16 +13,18 @@ from ytmusicapi import YTMusic
 from ytm_offline.archive import Archive
 from ytm_offline.discover import (
     ALLOWED_VIDEO_TYPES,
-    _album_name,
-    _artist_name,
     _collect_tracks,
-    _duration_seconds,
     _is_music_track,
-    _normalize,
     _resolve_album_tracks,
     _resolve_playlist_tracks,
     _to_track,
-    _track_key,
+)
+from ytm_offline.normalize import (
+    album_name as _album_name,
+    artist_name as _artist_name,
+    duration_seconds as _duration_seconds,
+    normalize as _normalize,
+    track_key as _track_key,
 )
 from ytm_offline.lastfm import LastFMClient
 from ytm_offline.manifest import Manifest

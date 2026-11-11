@@ -127,3 +127,18 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 - Deprecated option aliases are hidden from help.
 - Invalid `YTM_HEADERS` exits 2 and names the variable.
 - `--theme` has explicit choices.
+
+### Clarity pass
+
+- `normalize.py` now owns artist/album names, duration parsing, dedupe keys
+  and edition stripping. `discover.py` no longer acts as a utility module.
+- `artist_playlists.py` owns artist playlist writing, manifest saving and the
+  artist batch download.
+- `sizes.estimate_size()` is the single size estimator.
+- `playlist.m3u8_entry()` is the single m3u8 entry shape.
+- Removed the dead `cmd_retry`.
+- README was shortened; deep TUI rendering details moved to `docs/TUI.md`.
+- Old audit documents moved to `docs/history/`.
+- `mutagen` is pinned.
+- Added focused tests for `download.py`, `batch.py`, `sizes.py` and
+  `discover_phase4.py`.

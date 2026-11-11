@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, is_single, singles_path, track_path
-from ytm_offline.playlist import write_m3u8
+from ytm_offline.playlist import m3u8_entry, write_m3u8
 
 LOG_NAME = "migrate-layout.log.json"
 
@@ -65,15 +65,7 @@ def _regenerate_playlists(
             wp = root / "playlists" / f"{stem}.m3u8"
             write_m3u8(
                 wp,
-                [
-                    {
-                        "path": e["path"],
-                        "duration": e.get("duration", 0),
-                        "title": e.get("title", ""),
-                        "artist": e.get("artist", ""),
-                    }
-                    for e in downloaded
-                ],
+                [m3u8_entry(e) for e in downloaded],
             )
             written.append(str(wp))
     return written

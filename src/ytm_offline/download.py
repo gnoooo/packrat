@@ -12,6 +12,7 @@ from typing import Any, Callable
 import yt_dlp
 
 from ytm_offline.logging_config import redact
+from ytm_offline.sizes import estimate_size
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, track_path
 
 logger = logging.getLogger(__name__)
@@ -146,17 +147,6 @@ def estimate_track(
             return ydl.extract_info(url, download=False)
     except Exception:
         return None
-
-
-def _estimate_size(info: dict[str, Any] | None) -> int | None:
-    if not info:
-        return None
-    if info.get("filesize_approx"):
-        return int(info["filesize_approx"])
-    requested = info.get("requested_formats") or []
-    if requested:
-        return int(sum(f.get("filesize_approx") or 0 for f in requested))
-    return None
 
 
 _AUDIO_EXTS = {".m4a", ".mp3", ".webm", ".ogg", ".flac", ".wav", ".opus"}
@@ -296,7 +286,7 @@ def download_track(
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                est_size = _estimate_size(info)
+                est_size = estimate_size(info)
                 if control and control.should_skip():
                     return emit_done(
                         status="skipped",

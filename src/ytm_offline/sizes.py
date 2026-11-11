@@ -42,3 +42,15 @@ def format_size(bytes_count: int) -> str:
 def heuristic_size(duration: int, bytes_per_second: int = 16000) -> int:
     """Rough file-size estimate from duration in seconds."""
     return int(duration * bytes_per_second)
+
+
+def estimate_size(info: dict | None) -> int | None:
+    """Best-effort size from a yt-dlp info dict."""
+    if not info:
+        return None
+    if info.get("filesize_approx"):
+        return int(info["filesize_approx"])
+    requested = info.get("requested_formats") or []
+    if requested:
+        return int(sum(f.get("filesize_approx") or 0 for f in requested))
+    return None

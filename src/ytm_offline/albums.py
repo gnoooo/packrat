@@ -10,33 +10,21 @@ from typing import Any
 from ytmusicapi import YTMusic
 
 from ytm_offline.archive import Archive
-from ytm_offline.discover import (
-    ALLOWED_VIDEO_TYPES,
-    _album_name,
-    _artist_name,
-    _duration_seconds,
-    _normalize,
-    _video_type,
+from ytm_offline.discover import ALLOWED_VIDEO_TYPES, _video_type
+from ytm_offline.normalize import (
+    EDITION_WORDS,
+    album_name as _album_name,
+    artist_name as _artist_name,
+    duration_seconds as _duration_seconds,
+    normalize as _normalize,
+    strip_edition,
 )
 from ytm_offline.manifest import Manifest
 from ytm_offline.batch import run_batch_download
 from ytm_offline.naming import clean, track_path
-from ytm_offline.playlist import write_m3u8
+from ytm_offline.playlist import m3u8_entry, write_m3u8
 from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
-
-_EDITION_WORDS = (
-    "deluxe",
-    "explicit",
-    "clean",
-    "remastered",
-    "expanded",
-    "anniversary",
-    "edition",
-    "version",
-    "reissue",
-    "remix",
-)
 
 _UNWANTED_ALBUM_WORDS = (
     "live",
@@ -51,13 +39,7 @@ _UNWANTED_ALBUM_WORDS = (
 
 def _album_base_title(title: str) -> str:
     """Strip edition tags and parentheses to group variants."""
-    base = str(title)
-    # Remove parenthetical/bracket suffixes.
-    base = re.sub(r"[\(\[].*?[\)\]]", "", base)
-    # Drop edition words.
-    for word in _EDITION_WORDS:
-        base = re.sub(rf"\b{word}\b", "", base, flags=re.IGNORECASE)
-    return _normalize(base)
+    return strip_edition(title)
 
 
 def _is_wanted_album(title: str) -> bool:
@@ -82,7 +64,7 @@ def _pick_album_variants(
         # Prefer the variant whose title has the fewest edition words.
         def edition_score(a: dict[str, Any]) -> int:
             t = a.get("title", "").lower()
-            return sum(1 for w in _EDITION_WORDS if w in t)
+            return sum(1 for w in EDITION_WORDS if w in t)
         variants.sort(key=lambda a: (edition_score(a), a.get("year") or "9999"))
         picked.append(variants[0])
 
@@ -264,15 +246,7 @@ def discover_albums(
             pl_name = f"{clean(artist_name)} - {clean(album_title)}.m3u8"
             m3u8_path = playlists_dir / pl_name
 
-            m3u8_entries = [
-                {
-                    "path": t["path"],
-                    "duration": t["duration"],
-                    "title": t["title"],
-                    "artist": t["artist"],
-                }
-                for t in pending_tracks
-            ]
+            m3u8_entries = [m3u8_entry(t) for t in pending_tracks]
             if m3u8_entries:
                 write_m3u8(m3u8_path, m3u8_entries)
 

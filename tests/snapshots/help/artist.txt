@@ -7,14 +7,13 @@ usage: ytm-offline artist [-h] [--headers HEADERS] [--cookies COOKIES]
                           [--no-color] [--ascii]
                           [--palette {auto,custom,fixed,basic}]
                           [--min-duration MIN_DURATION]
-                          [--max-duration MAX_DURATION] [--select SELECT]
+                          [--max-duration MAX_DURATION]
                           [--candidate CANDIDATE] [--exclude-singles]
-                          [--from-file FROM_FILE] [--also ALSO]
+                          [--select SELECT] [--from-file FROM_FILE]
+                          [--also ALSO]
                           [target]
 
 positional arguments:
-  --select SELECT       non-interactive selection expression (e.g.
-                        A[1-3],S[*])
   target                artist name, channelId, or channel URL
 
 options:
@@ -25,7 +24,8 @@ options:
 
 Authentication:
   --headers HEADERS     path to ytmusicapi browser-headers JSON file (env:
-                        YTM_HEADERS)
+                        YTM_HEADERS; default: ~/.config/ytmusic-
+                        composer/browser.json)
   --cookies COOKIES     path to Netscape cookies.txt for yt-dlp (env:
                         YTM_COOKIES)
   --cookies-from-browser COOKIES_FROM_BROWSER
@@ -63,3 +63,5 @@ Selection:
                         pick the Nth search candidate when the name is
                         ambiguous
   --exclude-singles     exclude singles but keep EPs
+  --select SELECT       non-interactive selection expression (e.g.
+                        A[1-3],S[*])

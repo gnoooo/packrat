@@ -197,7 +197,8 @@ def build_auth_parent(
             "--headers",
             default=default,
             help=_help_text(
-                "path to ytmusicapi browser-headers JSON file (env: YTM_HEADERS)",
+                "path to ytmusicapi browser-headers JSON file "
+                "(env: YTM_HEADERS; default: ~/.config/ytmusic-composer/browser.json)",
                 suppress_help,
             ),
         )
@@ -434,7 +435,7 @@ def build_selection_parent(
     suppress_defaults: bool = False, suppress_help: bool = False
 ) -> argparse.ArgumentParser:
     p = build_duration_parent(suppress_defaults, suppress_help)
-    g = p._action_groups[0]
+    g = p._action_groups[1]
 
     g.add_argument(
         "--select",
@@ -811,7 +812,12 @@ def build_parser() -> argparse.ArgumentParser:
     verbose_silent = build_verbose_parent(suppress_defaults=True, suppress_help=True)
     parser = argparse.ArgumentParser(
         prog="ytm-offline",
-        description="Download music from your YouTube Music account for offline use.",
+        description=(
+            "Download music from your YouTube Music account for offline use. "
+            "Run-control options (--output, --archive, --delay, --max-size, "
+            "--limit, --dry-run, --yes) work before or after the subcommand; "
+            "see '<command> -h' for the ones a command uses."
+        ),
         formatter_class=_HelpFormatter,
         parents=[
             build_auth_parent(),
@@ -947,9 +953,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="download one or more artists' full catalogs",
         parents=dl_parents
         + [
-            build_selection_parent(suppress_defaults=True),
+            build_duration_parent(suppress_defaults=True),
             build_artist_selection_parent(suppress_defaults=True),
         ],
+    )
+    selection_group = next(
+        g for g in p_artist._action_groups if g.title == "Selection"
+    )
+    selection_group.add_argument(
+        "--select",
+        dest="select",
+        default=argparse.SUPPRESS,
+        help="non-interactive selection expression (e.g. A[1-3],S[*])",
     )
     p_artist.add_argument(
         "target",
@@ -1031,7 +1046,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_taste = discover_sub.add_parser(
         "taste",
-        help="taste-adjacent tracks beyond YT Music sections",
+        help="plan taste-adjacent tracks beyond YT Music sections (no download)",
         parents=[
             build_auth_parent(suppress_defaults=True, cookies=False),
             build_run_control_parent(
@@ -1129,6 +1144,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="per_container",
         type=positive_int,
         default=2,
+        metavar="N",
         help="max tracks per album/container (default: 2)",
     )
     p_taste.add_argument(

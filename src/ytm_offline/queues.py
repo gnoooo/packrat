@@ -12,17 +12,16 @@ from ytmusicapi import YTMusic
 
 from ytm_offline.archive import Archive
 from ytm_offline.batch import run_batch_download
-from ytm_offline.discover import (
-    ALLOWED_VIDEO_TYPES,
-    _album_name,
-    _artist_name,
-    _duration_seconds,
-    _normalize,
-    _video_type,
+from ytm_offline.discover import ALLOWED_VIDEO_TYPES, _video_type
+from ytm_offline.normalize import (
+    album_name as _album_name,
+    artist_name as _artist_name,
+    duration_seconds as _duration_seconds,
+    normalize as _normalize,
 )
 from ytm_offline.manifest import Manifest
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, clean, track_path
-from ytm_offline.playlist import write_m3u8
+from ytm_offline.playlist import m3u8_entry, write_m3u8
 from ytm_offline.sizes import format_size, heuristic_size, parse_size
 
 
@@ -265,15 +264,7 @@ def discover_queues(
         queue_dir = playlists_dir / safe_seed
         queue_dir.mkdir(parents=True, exist_ok=True)
         m3u8_path = queue_dir / f"queue-{safe_seed}.m3u8"
-        m3u8_entries = [
-            {
-                "path": t["path"],
-                "duration": t["duration"],
-                "title": t["title"],
-                "artist": t["artist"],
-            }
-            for t in accepted
-        ]
+        m3u8_entries = [m3u8_entry(t) for t in accepted]
         write_m3u8(m3u8_path, m3u8_entries)
 
         queue_summaries.append(
@@ -513,12 +504,7 @@ def build_radio(
         write_m3u8(
             m3u8_path,
             [
-                {
-                    "path": e["path"],
-                    "duration": e["duration"],
-                    "title": e["title"],
-                    "artist": e["artist"],
-                }
+                m3u8_entry(e)
                 for e in manifest.entries
                 if e.get("status") == "downloaded" and e.get("path")
             ],

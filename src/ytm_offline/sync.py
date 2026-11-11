@@ -23,8 +23,8 @@ from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.download import estimate_track
 from ytm_offline.manifest import Manifest, atomic_write_text
 from ytm_offline.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
-from ytm_offline.playlist import write_m3u8
-from ytm_offline.sizes import format_size, parse_size
+from ytm_offline.playlist import m3u8_entry, write_m3u8
+from ytm_offline.sizes import estimate_size, format_size, parse_size
 
 logger = logging.getLogger(__name__)
 
@@ -136,17 +136,6 @@ def _source_name(source: str) -> str:
     return re.sub(r"[^\w.-]+", "_", source)
 
 
-def _estimate_size(info: dict[str, Any] | None) -> int | None:
-    if not info:
-        return None
-    if info.get("filesize_approx"):
-        return int(info["filesize_approx"])
-    requested = info.get("requested_formats") or []
-    if requested:
-        return int(sum(f.get("filesize_approx") or 0 for f in requested))
-    return None
-
-
 def _write_failures(path: pathlib.Path, video_ids: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -156,12 +145,7 @@ def _write_failures(path: pathlib.Path, video_ids: list[str]) -> None:
 
 def _m3u8_from_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {
-            "path": e["path"],
-            "duration": e.get("duration", 0),
-            "title": e["title"],
-            "artist": e["artist"],
-        }
+        m3u8_entry(e)
         for e in entries
         if e.get("status") == "downloaded" and e.get("path")
     ]
@@ -302,7 +286,7 @@ def run_sync(
                 cookies_from_browser=args.cookies_from_browser,
                 browser_profile=args.browser_profile,
             )
-            est_size = _estimate_size(info)
+            est_size = estimate_size(info)
             entry = {
                 "video_id": track["video_id"],
                 "title": track["title"],

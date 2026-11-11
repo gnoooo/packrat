@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import re
 import sys
@@ -14,8 +15,17 @@ from ytm_offline.batch import run_batch_download
 from ytm_offline.download import estimate_track
 from ytm_offline.manifest import Manifest, atomic_write_text
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
-from ytm_offline.playlist import write_m3u8
+from ytm_offline.normalize import (
+    album_name as _album_name,
+    artist_name as _artist_name,
+    duration_seconds as _duration_seconds,
+    normalize as _normalize,
+    track_key as _track_key,
+)
+from ytm_offline.playlist import m3u8_entry, write_m3u8
 from ytm_offline.sizes import format_size, parse_size
+
+logger = logging.getLogger(__name__)
 
 
 # Values observed in real ytmusicapi responses.
@@ -23,60 +33,6 @@ ALLOWED_VIDEO_TYPES = {
     "MUSIC_VIDEO_TYPE_ATV",
     "MUSIC_VIDEO_TYPE_OMV",
 }
-
-
-def _artist_name(raw: dict[str, Any]) -> str:
-    artists = raw.get("artists") or []
-    if artists:
-        return artists[0].get("name", "Unknown Artist")
-    # Some items carry the artist as the channel/uploader.
-    return raw.get("author") or raw.get("channel", {}).get("name") or "Unknown Artist"
-
-
-def _album_name(raw: dict[str, Any]) -> str:
-    album = raw.get("album")
-    if isinstance(album, dict):
-        return album.get("name") or "Unknown Album"
-    if isinstance(album, str):
-        return album or "Unknown Album"
-    return "Unknown Album"
-
-
-def _parse_duration_string(value: str | None) -> int | None:
-    if not value:
-        return None
-    parts = value.split(":")
-    try:
-        seconds = [int(p) for p in parts]
-    except ValueError:
-        return None
-    if len(seconds) == 2:
-        return seconds[0] * 60 + seconds[1]
-    if len(seconds) == 3:
-        return seconds[0] * 3600 + seconds[1] * 60 + seconds[2]
-    return None
-
-
-def _duration_seconds(raw: dict[str, Any], yt: YTMusic | None = None) -> int | None:
-    """Best-effort track duration in seconds."""
-    if "duration_seconds" in raw and raw["duration_seconds"]:
-        return int(raw["duration_seconds"])
-    for key in ("lengthSeconds", "length_seconds"):
-        if key in raw and raw[key]:
-            return int(raw[key])
-    for key in ("duration", "length"):
-        if raw.get(key):
-            parsed = _parse_duration_string(str(raw[key]))
-            if parsed is not None:
-                return parsed
-    # Expensive fallback: ask the song endpoint for the length.
-    if yt is not None and raw.get("videoId"):
-        try:
-            song = yt.get_song(raw["videoId"])
-            return int(song["videoDetails"]["lengthSeconds"])
-        except Exception:
-            pass
-    return None
 
 
 def _video_type(raw: dict[str, Any], yt: YTMusic | None = None) -> str | None:
@@ -87,18 +43,9 @@ def _video_type(raw: dict[str, Any], yt: YTMusic | None = None) -> str | None:
         try:
             song = yt.get_song(raw["videoId"])
             return song["videoDetails"].get("musicVideoType")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("optional API lookup failed: %s", exc)
     return None
-
-
-def _normalize(text: str) -> str:
-    """Lowercase and strip punctuation for deduplication."""
-    return re.sub(r"[^a-z0-9]+", "", str(text).lower())
-
-
-def _track_key(raw: dict[str, Any]) -> tuple[str, str]:
-    return (_normalize(_artist_name(raw)), _normalize(raw.get("title", "")))
 
 
 def _is_music_track(
@@ -128,8 +75,8 @@ def _is_music_track(
             song = yt.get_song(raw["videoId"])
             if song["videoDetails"].get("isLiveContent"):
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("optional API lookup failed: %s", exc)
     return True
 
 
@@ -243,7 +190,8 @@ def _resolve_playlist_tracks(
 ) -> list[dict[str, Any]]:
     try:
         data = yt.get_playlist(playlistId=playlist_id, limit=limit)
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     tracks = []
     for t in data.get("tracks", []):
@@ -262,7 +210,8 @@ def _resolve_album_tracks(
 ) -> list[dict[str, Any]]:
     try:
         data = yt.get_album(browseId=browse_id)
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     tracks = []
     for t in data.get("tracks", [])[:limit]:
@@ -286,7 +235,8 @@ def discover_charts(
 ) -> list[dict[str, Any]]:
     try:
         charts = yt.get_charts(country=country)
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     videos = charts.get("videos")
     if not videos or not videos[0].get("playlistId"):
@@ -328,7 +278,8 @@ def discover_new_releases(
 ) -> list[dict[str, Any]]:
     try:
         explore = yt.get_explore()
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     candidates: list[dict[str, Any]] = []
     for release in explore.get("new_releases", []):
@@ -375,7 +326,8 @@ def discover_moods(
 ) -> list[dict[str, Any]]:
     try:
         categories = yt.get_mood_categories()
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     candidates: list[dict[str, Any]] = []
     moods_iterated = 0
@@ -383,7 +335,8 @@ def discover_moods(
         for mood in moods[:3]:  # a few moods per group is enough
             try:
                 playlists = yt.get_mood_playlists(mood["params"])
-            except Exception:
+            except Exception as exc:
+                logger.debug("optional playlist lookup failed: %s", exc)
                 continue
             for pl in playlists[:3]:
                 playlist_id = pl.get("playlistId")
@@ -431,7 +384,8 @@ def discover_home(
 ) -> list[dict[str, Any]]:
     try:
         sections = yt.get_home(limit=10)
-    except Exception:
+    except Exception as exc:
+        logger.warning("discovery source failed: %s", exc)
         return []
     candidates: list[dict[str, Any]] = []
     for section in sections:
@@ -656,12 +610,7 @@ def download_pending(
         # in place, so manifest.entries already reflects the updates.
         manifest.write(manifest_path, "json")
         downloaded = [
-            {
-                "path": e["path"],
-                "duration": e.get("duration", 0),
-                "title": e["title"],
-                "artist": e["artist"],
-            }
+            m3u8_entry(e)
             for e in current_entries
             if e.get("status") == "downloaded" and e.get("path")
         ]

@@ -28,7 +28,7 @@ from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.download import _final_filepath
 from ytm_offline.manifest import Manifest
 from ytm_offline.naming import SINGLES_DIR_DEFAULT
-from ytm_offline.playlist import write_m3u8
+from ytm_offline.playlist import m3u8_entry, write_m3u8
 from ytm_offline.sizes import format_size, parse_size
 from ytm_offline.sync import browser_cookie_file
 
@@ -512,20 +512,6 @@ def cmd_sync(args: argparse.Namespace) -> int:
     return exit_code_from_result(sync_module.run_sync(args))
 
 
-def cmd_retry(args: argparse.Namespace) -> int:
-    """Retry failed tracks from a manifest."""
-    if args.tui:
-        return exit_code_from_result(
-            tui_module.run_tui(
-                sync_module.run_retry,
-                {"args": args},
-                mode="retry",
-                ascii_mode=args.ascii,
-            )
-        )
-    return exit_code_from_result(sync_module.run_retry(args))
-
-
 def cmd_download_manifest(args: argparse.Namespace) -> int:
     """Resume downloads from any existing manifest file."""
     manifest_path = pathlib.Path(args.manifest)
@@ -624,15 +610,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
         if downloaded:
             write_m3u8(
                 m3u8_path,
-                [
-                    {
-                        "path": e["path"],
-                        "duration": e.get("duration", 0),
-                        "title": e["title"],
-                        "artist": e["artist"],
-                    }
-                    for e in downloaded
-                ],
+                [m3u8_entry(e) for e in downloaded],
             )
 
     if args.tui:
