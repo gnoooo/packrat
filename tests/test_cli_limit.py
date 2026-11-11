@@ -291,3 +291,41 @@ def test_artist_scope_top_songs_removed_from_cli():
     with pytest.raises(SystemExit) as exc:
         _args(["artist", "BABYMETAL", "--scope", "top-songs"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("sub,plan,download", [
+    ("queues", "ytm_offline.queues.discover_queues", "ytm_offline.queues.download_queues"),
+    ("albums", "ytm_offline.albums.discover_albums", "ytm_offline.albums.download_albums"),
+])
+def test_discover_plan_download_limit(tmp_path, monkeypatch, sub, plan, download):
+    captured = {}
+    if sub == "queues":
+        result = {
+            "manifest_path": "m", "seeds_used": 1, "total_tracks": 3,
+            "total_est_size_human": "1 KB",
+            "queues": [{"seed": "S", "tracks": 3, "unique_artists": 1,
+                        "est_size": 1000}],
+        }
+    else:
+        result = {
+            "manifest_path": "m", "artists_considered": 1,
+            "total_new_tracks": 3, "total_already_owned": 0,
+            "total_skipped_size": 0, "total_est_size_human": "1 KB",
+            "albums": [{"artist": "A", "album": "Al", "tracks": 3,
+                        "already_owned": 0, "est_size": 1000}],
+        }
+    monkeypatch.setattr(plan, lambda **_kw: result)
+
+    def _download(**kw):
+        captured["limit"] = kw.get("limit")
+        return {"manifest_path": "m", "summary": {"downloaded": 0, "failed": 0,
+                "stopped": False}}
+
+    monkeypatch.setattr(download, _download)
+    rc = cli.main([
+        "discover", sub, "--headers", "/tmp/x", "--yes",
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--limit", "2",
+    ])
+    assert rc == 0
+    assert captured["limit"] == 2
