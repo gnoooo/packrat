@@ -1,4 +1,11 @@
-# Packrat — Phase 0 technology watch
+<p align="center">
+  <a href="../README.md">README</a> · <a href="INSTALL.md">Install</a> · <a href="QUICKSTART.md">Quickstart</a> · <a href="COMMANDS.md">Commands</a> · <a href="AUTH.md">Auth</a> · <a href="CONFIGURATION.md">Configuration</a>
+</p>
+<p align="center">
+  <a href="TUI.md">TUI</a> · <a href="DISCOVERY.md">Discovery</a> · <a href="ARTISTS.md">Artists</a> · <a href="TROUBLESHOOTING.md">Troubleshooting</a> · <a href="DEVELOPMENT.md">Development</a> · <strong>History</strong>
+</p>
+
+# Packrat: Phase 0 technology watch
 
 Date: 2026-11-06  
 Scope: choose and pin the stack for a YouTube Music offline downloader CLI.

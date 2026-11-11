@@ -1,0 +1,73 @@
+# Development
+
+<p align="center">
+  <a href="../README.md">README</a> · <a href="INSTALL.md">Install</a> · <a href="QUICKSTART.md">Quickstart</a> · <a href="COMMANDS.md">Commands</a> · <a href="AUTH.md">Auth</a> · <a href="CONFIGURATION.md">Configuration</a>
+</p>
+<p align="center">
+  <a href="TUI.md">TUI</a> · <a href="DISCOVERY.md">Discovery</a> · <a href="ARTISTS.md">Artists</a> · <a href="TROUBLESHOOTING.md">Troubleshooting</a> · <strong>Development</strong> · <a href="HISTORY.md">History</a>
+</p>
+
+## Architecture
+
+![Packrat data flow](images/architecture.png)
+
+```text
+src/packrat/
+  cli.py, cli_args.py         # CLI parsing and command dispatch
+  sync.py, batch.py           # track lists, manifests, download loop
+  download.py                 # one-track yt-dlp wrapper
+  artists.py                  # artist catalog + picker
+  discover*.py, queues.py     # discovery planners
+  tui.py, tui_theme.py        # curses renderer and palette
+  archive.py, manifest.py     # state on disk
+tests/                        # pytest suite, network blocked
+docs/                         # user documentation and images
+dev/hooks/                    # shared git hooks
+```
+
+## Tests
+
+```bash
+source .venv/bin/activate
+python -m pytest
+```
+
+The suite blocks real network connections (`tests/conftest.py`). Use mocks or
+local fixtures for anything that would hit YouTube Music.
+
+## Local bare mirror
+
+In my configuration, I have a local cloud with Nextcloud, and it can be messy syncing a `.git` folder. 
+That's why the `local` remote points at `~/Nextcloud/Documents/git/packrat.git`. 
+Shared hooks mirror commits, amended history and merges in the background:
+
+```bash
+./dev/hooks/install.sh
+```
+
+`core.hooksPath` becomes `dev/hooks`. A failed push is silent; the next commit
+retries all branches. Tags are not mirrored.
+
+## Documentation
+
+- [README.md](../README.md): landing page and navbar
+- `docs/*.md`: focused guides
+- `docs/images/`: TUI screenshots and architecture diagram
+
+## Performance notes
+
+- Sync/discovery use duration-based size estimates; they do not run yt-dlp
+  once per track before downloading.
+- Artist catalogs resolve kept releases with a small worker pool and skip
+  excluded releases for non-interactive downloads.
+- Downloads are still sequential; the default 7 s delay is deliberate pacing.
+
+## Release checklist
+
+```bash
+python -m pytest
+packrat --version
+git status
+```
+
+Keep credentials, `.music/`, `.packrat_archive` and logs out of commits.

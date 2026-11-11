@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Install the shared git hooks for this repository (one-time per clone).
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+HOOKS_DIR="$REPO_ROOT/dev/hooks"
+
+for hook in post-commit post-rewrite post-merge; do
+  [ -x "$HOOKS_DIR/$hook" ] || chmod +x "$HOOKS_DIR/$hook"
+done
+
+git -C "$REPO_ROOT" config core.hooksPath dev/hooks
+echo "git hooks installed: $(git -C "$REPO_ROOT" config core.hooksPath) (in $REPO_ROOT)"

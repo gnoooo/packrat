@@ -1,76 +1,99 @@
-# TUI details
+# TUI
 
-The curses UI is optional. Use `--tui` on `sync`, `download-manifest`,
-`artist`, `discover queues`, `discover albums`, or `discover radio`.
+<p align="center">
+  <a href="../README.md">README</a> · <a href="INSTALL.md">Install</a> · <a href="QUICKSTART.md">Quickstart</a> · <a href="COMMANDS.md">Commands</a> · <a href="AUTH.md">Auth</a> · <a href="CONFIGURATION.md">Configuration</a>
+</p>
+<p align="center">
+  <strong>TUI</strong> · <a href="DISCOVERY.md">Discovery</a> · <a href="ARTISTS.md">Artists</a> · <a href="TROUBLESHOOTING.md">Troubleshooting</a> · <a href="DEVELOPMENT.md">Development</a> · <a href="HISTORY.md">History</a>
+</p>
 
-Keys: `p` pause/resume, `s` skip current track, `q` quit after the current
-track, `l` toggle the log panel (height ≥ 30 rows), `a` toggle animations,
-`t` cycle theme, `?` show help, Up/Down and PgUp/PgDn scroll the log.
+The full-screen curses UI is optional. Add `--tui` to `sync`,
+`download-manifest`, `artist`, `discover queues`, `discover albums`, or
+`discover radio`.
+
+```bash
+packrat --tui sync --source liked
+```
+
+![Packrat TUI overview](images/tui-overview.png)
+
+## Keys
+
+| Key | Action |
+|---|---|
+| `p` / space | pause or resume |
+| `s` | skip current track |
+| `q` | quit after the current track |
+| `l` | toggle the log panel |
+| `a` | toggle animations |
+| `t` | cycle theme |
+| `?` | help |
+| Up/Down, PgUp/PgDn | scroll the log |
 
 ## Layout
 
-A rounded outer frame surrounds the whole TUI. Inside it, a foreground-only header
-(`♪ packrat › <mode>` + status + elapsed), a centered stack of rounded
-cards (OVERALL, NOW PLAYING, STATUS, RECENT FAILURES, LOG), and a
-foreground-only key footer. Header and footer use no background colour.
-Content is capped at 200 columns inside the frame.
+A rounded outer frame surrounds the whole TUI. Inside it:
 
-The overall bar is a full-width HSL gradient: each tile advances hue by one
-degree, saturation fades toward the theme highlight, and lightness rises on a
-square-root curve so the head is visible early. With `init_color` support the
-palette uses 100 exact HSL steps (kept under tmux's 256-pair limit);
-otherwise it falls back to 64 xterm-256
-steps. Filled tiles are full blocks using the gradient as foreground; the block
-covers the cell, so the active head is a solid gradient tile. The unfilled
-track is a quarter-height (`▂`) foreground gradient. Fill and track share the
-same full-width gradient mapping, so colours line up at the boundary and the
-head is never forced to white. OVERALL and NOW PLAYING use exactly the same
-renderer. The log card is shown by default on terminals
-at least 30 rows tall and is sized to its content; `l` hides it. On shorter
-terminals the cards are centered vertically.
+- foreground-only header (`♪ packrat › mode`, status, elapsed)
+- centered card stack: OVERALL, NOW PLAYING, STATUS, RECENT FAILURES, LOG
+- foreground-only key footer
 
-The current track is shown as `artist@ARTIST#ALBUM` (the album suffix is
-omitted when there is no album). Internal source ids such as `artist:X` or
-`sync:liked` are displayed with the same `@` form; a source equal to the
-current artist is not repeated.
+Content is capped at 200 columns. Cards are vertically centered when the
+terminal is tall enough; the log appears by default on terminals at least 30
+rows tall.
 
-All panels are complete rounded frames. Strings are sanitized before curses:
-control characters become spaces, runs of spaces collapse, and leading/trailing
-spaces are stripped. The drawn area is recomputed every render and on resize.
+## Progress bars
 
-## Themes and palettes
+Both bars share one renderer. The gradient runs across the full bar width:
 
-Four themes: `ocean` (default), `sunset`, `matrix`, `mono`.
+- filled tiles: full `█` blocks with the gradient as foreground
+- track tiles: quarter-height `▂` with the same gradient
+- the active/head tile is a solid gradient block, not a forced white tip
 
-`--palette`:
-- `auto` — exact-RGB smooth palette when supported; inside tmux this uses
-  OSC 4 palette slots (tmux 3.7+), else nearest xterm-256.
-- `fixed` — force nearest xterm-256 (disable exact palette changes).
-- `basic` — plain attributes.
+At low progress the track still shows the gradient:
 
-For tmux use `tmux-256color` and `set -g default-terminal "tmux-256color"` in
-`~/.tmux.conf`.
+![Low-progress Packrat TUI](images/tui-low-progress.png)
 
-`--no-anim` disables the remaining status animations (`PACKRAT_TUI_ANIM=0`). `--no-color` is
-monochrome (`NO_COLOR`). `--ascii` uses ASCII-only glyphs.
+## Themes
 
+```bash
+packrat --tui --theme ocean sync     # default
+packrat --tui --theme sunset sync
+packrat --tui --theme matrix sync
+packrat --tui --theme mono sync
+```
 
+## Palettes
 
-## Artist picker layout
+- `--palette auto`: exact palette when supported; inside tmux uses OSC 4 (tmux 3.7+), otherwise nearest xterm-256.
+- `--palette fixed`: nearest xterm-256; useful for limited terminals.
+- `--palette basic`: plain attributes.
 
-When stdout is a TTY, `artist` lists releases in two sections that mirror the
-YouTube Music artist page.
+For tmux, use `tmux-256color`:
 
-- 3 columns at width ≥ 100, 2 at 66–99, 1 below.
-- Cell: `■/□ <index> <title…> <year> <owned/total>`.
-- Only the title is truncated with `…`.
-- Fully owned multi-track releases show `14/14 ✓` and are dimmed.
-- Single-track releases show `✓` when owned and nothing when new.
-- Green `■` selected, dim `□` otherwise; only on a TTY with `NO_COLOR` unset.
-- `--ascii` renders `[x]`/`[ ]` and `ok`/`|`.
-- Tagged releases stay numbered, unselected by default; `all` includes them.
-- The prompt is truncated with `…` only when the terminal is narrower than the
-  text.
+```tmux
+set -g default-terminal "tmux-256color"
+```
 
-The listing is display only. Classification, counts and default selection stay
-in `artists.py`.
+The TUI logs the selected palette at startup:
+
+```text
+TUI palette tier=custom method=osc4 ...
+```
+
+If the log says `tier=fixed`, the exact palette is unavailable.
+
+## Display options
+
+```bash
+packrat --tui --no-anim sync       # disable animation
+packrat --tui --no-color sync      # monochrome
+packrat --tui --ascii sync         # ASCII glyphs
+```
+
+`PACKRAT_TUI_ANIM=0` also disables animation.
+
+## Logs
+
+The log card shows recent log lines. `l` hides or shows it. Logs are also
+written to `logs/packrat-*.log`; use `-v` for more detail.

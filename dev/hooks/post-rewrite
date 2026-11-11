@@ -1,0 +1,4 @@
+#!/bin/sh
+# Mirror amended/rebuilt history to the local bare remote in the background.
+git remote get-url local >/dev/null 2>&1 || exit 0
+( git push -q local --all >/dev/null 2>&1 & ) 2>/dev/null

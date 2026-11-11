@@ -1,0 +1,4 @@
+#!/bin/sh
+# A merge may create a commit without running post-commit; mirror it too.
+git remote get-url local >/dev/null 2>&1 || exit 0
+( git push -q local --all >/dev/null 2>&1 & ) 2>/dev/null
