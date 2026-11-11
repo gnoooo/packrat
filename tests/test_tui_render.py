@@ -555,7 +555,7 @@ def test_tui_glyphs_command_smoke(monkeypatch, capsys, tmp_path):
 
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    args = cli.build_parser().parse_args(["tui-glyphs"])
+    args = cli.build_parser().parse_args(["ui", "glyphs"])
     assert cli.cmd_tui_glyphs(args) == 0
     out = capsys.readouterr().out
     for group in ("block", "box", "braille", "shapes", "marks"):

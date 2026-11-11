@@ -133,10 +133,15 @@ def valid_singles_dir(value: str) -> str:
 
 
 def valid_manifest_format(value: str) -> str:
+    """Accept json, csv (deprecated alias), or json+csv; return canonical value."""
     v = value.lower()
-    if v not in {"json", "csv"}:
-        raise ArgumentTypeError(f"manifest-format must be 'json' or 'csv', got {value!r}")
-    return v
+    if v == "json":
+        return "json"
+    if v in {"csv", "json+csv"}:
+        return "json+csv"
+    raise ArgumentTypeError(
+        f"manifest-format must be 'json' or 'json+csv', got {value!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -221,22 +226,31 @@ def build_auth_parent(suppress_defaults: bool = False, suppress_help: bool = Fal
     return p
 
 
+_UNSET = object()
+
+
 def build_run_control_parent(
-    suppress_defaults: bool = False, suppress_help: bool = False
+    suppress_defaults: bool = False,
+    suppress_help: bool = False,
+    limit_default: int | None = None,
+    limit_help: str | None = None,
+    output_default: str | None | object = _UNSET,
+    output_help: str | None = None,
 ) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     g = p.add_argument_group("Run control")
 
-    default = argparse.SUPPRESS if suppress_defaults else _output_default()
+    if output_default is _UNSET:
+        default = argparse.SUPPRESS if suppress_defaults else _output_default()
+    else:
+        default = output_default
+    help_text = output_help or f"output root directory (env: YTM_OUTPUT; default: {DEFAULT_OUTPUT})"
     g.add_argument(
         "--output",
         "-o",
         dest="output",
         default=default,
-        help=_help_text(
-            f"output root directory (env: YTM_OUTPUT; default: {DEFAULT_OUTPUT})",
-            suppress_help,
-        ),
+        help=_help_text(help_text, suppress_help),
     )
 
     default = argparse.SUPPRESS if suppress_defaults else _archive_default()
@@ -274,15 +288,22 @@ def build_run_control_parent(
         ),
     )
 
+    limit_action_default = (
+        argparse.SUPPRESS
+        if (suppress_defaults and limit_default is None)
+        else limit_default
+    )
+    limit_help_text = (
+        limit_help
+        if limit_help is not None
+        else "max new tracks to download this run (after dedupe and selection)"
+    )
     g.add_argument(
         "--limit",
         dest="limit",
         type=positive_int,
-        default=argparse.SUPPRESS if suppress_defaults else None,
-        help=_help_text(
-            "max new tracks to download this run (after dedupe and selection)",
-            suppress_help,
-        ),
+        default=limit_action_default,
+        help=_help_text(limit_help_text, suppress_help),
     )
 
     dry_default = argparse.SUPPRESS if suppress_defaults else False
@@ -347,21 +368,12 @@ def build_run_control_parent(
     return p
 
 
-def build_selection_parent(
+def build_duration_parent(
     suppress_defaults: bool = False, suppress_help: bool = False
 ) -> argparse.ArgumentParser:
+    """Duration filter only (used by commands without a picker)."""
     p = argparse.ArgumentParser(add_help=False)
     g = p.add_argument_group("Selection")
-
-    g.add_argument(
-        "--select",
-        dest="select",
-        default=argparse.SUPPRESS if suppress_defaults else None,
-        help=_help_text(
-            "non-interactive selection expression (e.g. A[1-3],S[*])",
-            suppress_help,
-        ),
-    )
 
     default_min = argparse.SUPPRESS if suppress_defaults else 90
     g.add_argument(
@@ -389,6 +401,24 @@ def build_selection_parent(
     return p
 
 
+def build_selection_parent(
+    suppress_defaults: bool = False, suppress_help: bool = False
+) -> argparse.ArgumentParser:
+    p = build_duration_parent(suppress_defaults, suppress_help)
+    g = p._action_groups[0]
+
+    g.add_argument(
+        "--select",
+        dest="select",
+        default=argparse.SUPPRESS if suppress_defaults else None,
+        help=_help_text(
+            "non-interactive selection expression (e.g. A[1-3],S[*])",
+            suppress_help,
+        ),
+    )
+    return p
+
+
 def build_artist_selection_parent(
     suppress_defaults: bool = False, suppress_help: bool = False
 ) -> argparse.ArgumentParser:
@@ -406,6 +436,15 @@ def build_artist_selection_parent(
             "pick the Nth search candidate when the name is ambiguous",
             suppress_help,
         ),
+    )
+
+    # Deprecated alias for --candidate.
+    g.add_argument(
+        "--pick",
+        dest="candidate",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
 
     # Deprecated artist include/exclude flags.
@@ -442,6 +481,16 @@ def build_artist_selection_parent(
             "which part of the catalog to resolve (default: all)",
             suppress_help,
         ),
+    )
+
+    # Deprecated alias for --scope top-songs.
+    g.add_argument(
+        "--top-songs",
+        dest="scope",
+        action="store_const",
+        const="top-songs",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
 
     g.add_argument(
@@ -655,17 +704,33 @@ def resolve_run_control_aliases(args: argparse.Namespace) -> None:
         )
         delattr(args, "singles_dir_alias")
     elif not hasattr(args, "singles_dir"):
-        args.singles_dir = _singles_dir_default()
+        try:
+            args.singles_dir = valid_singles_dir(_singles_dir_default())
+        except ArgumentTypeError as exc:
+            print(f"error: YTM_SINGLES_DIR: {exc}", file=sys.stderr)
+            raise SystemExit(2) from None
 
     if _cli_set(args, "manifest_format_alias"):
-        args.manifest_format = args.manifest_format_alias
+        fmt = args.manifest_format_alias
         print(
-            "--manifest-format is deprecated; set YTM_MANIFEST_FORMAT instead",
+            "--manifest-format is deprecated; it now writes JSON + CSV sidecar (set YTM_MANIFEST_FORMAT instead)",
             file=sys.stderr,
         )
+        args.manifest_format = fmt
         delattr(args, "manifest_format_alias")
     elif not hasattr(args, "manifest_format"):
-        args.manifest_format = _manifest_format_default()
+        fmt = _manifest_format_default()
+        if fmt == "csv":
+            print(
+                "YTM_MANIFEST_FORMAT=csv is deprecated; it now writes JSON + CSV sidecar",
+                file=sys.stderr,
+            )
+            fmt = "json+csv"
+        try:
+            args.manifest_format = valid_manifest_format(fmt)
+        except ArgumentTypeError as exc:
+            print(f"error: YTM_MANIFEST_FORMAT: {exc}", file=sys.stderr)
+            raise SystemExit(2) from None
 
 
 def resolve_verbose(args: argparse.Namespace) -> int:
@@ -739,8 +804,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--top",
         dest="top",
         type=positive_int,
-        default=None,
-        help="max playlists to show",
+        default=25,
+        help="max playlists to show (default: 25)",
     )
     # Deprecated library alias.
     p_library.add_argument(
@@ -780,10 +845,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sync.set_defaults(func=_noop)
 
+    manifest_parents = [
+        build_auth_parent(suppress_defaults=True),
+        build_run_control_parent(
+            suppress_defaults=True,
+            output_default=None,
+            output_help="output root directory (default: parent of playlists/)",
+        ),
+        build_display_parent(suppress_defaults=True),
+        verbose_silent,
+    ]
     p_manifest = sub.add_parser(
         "download-manifest",
         help="resume/failed downloads from an existing manifest",
-        parents=dl_parents,
+        parents=manifest_parents,
     )
     p_manifest.add_argument("--manifest", required=True, help="path to a manifest JSON file")
     p_manifest.add_argument(
@@ -806,7 +881,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_artist.add_argument(
         "target",
-        nargs="?",
+        nargs="*",
+        default=[],
         help="artist name, channelId, or channel URL",
     )
     p_artist.add_argument(
@@ -830,18 +906,53 @@ def build_parser() -> argparse.ArgumentParser:
     )
     discover_sub = p_discover.add_subparsers(dest="discover_command", required=True)
 
-    discover_sub.add_parser(
+    p_sections = discover_sub.add_parser(
         "sections",
         help="Home/Charts/Moods/New Releases",
-        parents=dl_parents,
+        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
     )
+    p_sections.add_argument(
+        "--source",
+        dest="source",
+        default="home,charts,moods,new_releases",
+        help="comma-separated discovery sources (default: home,charts,moods,new_releases)",
+    )
+    p_sections.add_argument(
+        "--country",
+        dest="country",
+        default="FR",
+        help="country for charts (default: FR)",
+    )
+    p_sections.add_argument(
+        "--quota",
+        dest="quota",
+        type=positive_int,
+        default=10,
+        help="max tracks per source (default: 10)",
+    )
+    p_sections.add_argument(
+        "--per-container",
+        dest="per_container",
+        type=positive_int,
+        default=5,
+        help="max tracks per container (default: 5)",
+    )
+    p_sections.add_argument(
+        "--per-artist",
+        dest="per_artist",
+        type=positive_int,
+        default=3,
+        help="max tracks per artist per source (default: 3)",
+    )
+
     p_taste = discover_sub.add_parser(
         "taste",
         help="taste-adjacent tracks beyond YT Music sections",
-        parents=dl_parents,
+        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
     )
     p_taste.add_argument(
         "--deep",
+        "--quota-deep",
         dest="deep",
         type=positive_int,
         default=12,
@@ -849,6 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_taste.add_argument(
         "--adjacent",
+        "--quota-adjacent",
         dest="adjacent",
         type=positive_int,
         default=10,
@@ -856,6 +968,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_taste.add_argument(
         "--radio",
+        "--quota-radio",
         dest="radio",
         type=positive_int,
         default=10,
@@ -863,6 +976,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_taste.add_argument(
         "--external",
+        "--quota-external",
         dest="external",
         type=positive_int,
         default=5,
@@ -870,10 +984,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_taste.add_argument(
         "--tag",
+        "--quota-tag",
         dest="tag",
         type=positive_int,
         default=5,
         help="max tag-search tracks (default: 5)",
+    )
+    p_taste.add_argument(
+        "--per-container",
+        dest="per_container",
+        type=positive_int,
+        default=2,
+        help="max tracks per album/container (default: 2)",
+    )
+    p_taste.add_argument(
+        "--per-artist",
+        dest="per_artist",
+        type=positive_int,
+        default=3,
+        help="max tracks per artist (default: 3)",
     )
     p_taste.add_argument(
         "--no-phase3",
@@ -882,11 +1011,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="do not dedupe against the phase 3 discover manifest",
     )
+    # Deprecated alias with inverted semantics.
+    p_taste.add_argument(
+        "--include-phase3",
+        dest="no_phase3",
+        action="store_false",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
 
     p_queues = discover_sub.add_parser(
         "queues",
         help="playback-queue playlists from liked-track seeds",
-        parents=dl_parents,
+        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
     )
     p_queues.add_argument(
         "--seed-count",
@@ -910,7 +1047,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="tracks to seed second-hop queues (default: 3)",
     )
     p_queues.add_argument(
-        "--per-artist",
+        "--per-artist-per-queue",
         dest="per_artist_per_queue",
         type=positive_int,
         default=3,
@@ -918,6 +1055,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_queues.add_argument(
         "--per-queue",
+        "--per-queue-limit",
         dest="per_queue_limit",
         type=positive_int,
         default=25,
@@ -925,10 +1063,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_queues.add_argument(
         "--total-cap",
-        dest="limit",
+        dest="total_cap",
         type=positive_int,
-        default=argparse.SUPPRESS,
-        help=argparse.SUPPRESS,
+        default=200,
+        help="max total tracks across all queues (default: 200)",
     )
     p_queues.add_argument(
         "--random-seed",
@@ -937,11 +1075,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="seed for reproducible seed selection",
     )
+    p_queues.add_argument(
+        "--download",
+        dest="download",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
 
     p_albums = discover_sub.add_parser(
         "albums",
         help="whole albums from top liked artists",
-        parents=dl_parents,
+        parents=dl_parents + [build_duration_parent(suppress_defaults=True)],
     )
     p_albums.add_argument(
         "--artist-top-k",
@@ -964,13 +1109,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="include singles/EPs",
     )
+    p_albums.add_argument(
+        "--download",
+        dest="download",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
 
     p_radio = discover_sub.add_parser(
         "radio",
         help="auto radio built from one track URL/id",
-        parents=dl_parents,
+        parents=[
+            build_auth_parent(suppress_defaults=True),
+            build_run_control_parent(
+                suppress_defaults=True,
+                limit_default=None,
+                limit_help="max tracks in the radio (default: 50)",
+            ),
+            build_display_parent(suppress_defaults=True),
+            verbose_silent,
+            build_duration_parent(suppress_defaults=True),
+        ],
     )
     p_radio.add_argument("seed", help="video id or URL")
+    p_radio.add_argument(
+        "--per-artist",
+        dest="per_artist",
+        type=positive_int,
+        default=3,
+        help="max tracks per artist in the radio (default: 3)",
+    )
+    p_radio.add_argument(
+        "--download",
+        dest="download",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
 
     # UI helpers
     p_ui = sub.add_parser(
@@ -1013,20 +1189,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_migrate._hidden = True
     p_migrate.set_defaults(func=_noop)
-
-    # Legacy top-level aliases (hidden)
-    for alias in (
-        "retry",
-        "discover-phase4",
-        "discover-queues",
-        "discover-albums",
-        "radio",
-        "tui-demo",
-        "tui-glyphs",
-    ):
-        p_alias = sub.add_parser(alias, help=None, parents=dl_parents)
-        p_alias._hidden = True
-        p_alias.set_defaults(func=_noop)
 
     return parser
 

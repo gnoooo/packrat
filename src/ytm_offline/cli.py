@@ -22,6 +22,7 @@ from ytm_offline import discover_phase4 as discover_phase4_module
 from ytm_offline import queues as queues_module
 from ytm_offline import sync as sync_module
 from ytm_offline import tui as tui_module
+from ytm_offline import cli_args
 from ytm_offline.batch import exit_code_from_result, run_batch_download
 from ytm_offline.download import _final_filepath
 from ytm_offline.manifest import Manifest
@@ -494,7 +495,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             "archive_path": args.archive,
             "cookies": args.cookies,
             "cookies_from_browser": args.cookies_from_browser,
-            "browser_profile": args.browser_profile,
+            "browser_profile": getattr(args, "browser_profile", None),
             "max_size": args.max_size,
             "delay": args.delay,
             "payload": payload,
@@ -518,6 +519,8 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     # Generic manifest (sync, discover, albums, queues, phase4, radio, ...).
     manifest = Manifest.load(manifest_path)
     entries = manifest.pending()
+    if getattr(args, "failed_only", False):
+        entries = [e for e in entries if e.get("status") not in ("downloaded", "archived")]
     if not entries:
         print("no pending tracks in manifest")
         return 0
@@ -572,7 +575,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
                 "save_callback": save_callback,
                 "cookies": args.cookies,
                 "cookies_from_browser": args.cookies_from_browser,
-                "browser_profile": args.browser_profile,
+                "browser_profile": getattr(args, "browser_profile", None),
                 "max_size": parse_size(args.max_size) if args.max_size else None,
                 "delay": args.delay,
                 "archive_path": args.archive,
@@ -588,7 +591,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             save_callback=save_callback,
             cookies=args.cookies,
             cookies_from_browser=args.cookies_from_browser,
-            browser_profile=args.browser_profile,
+            browser_profile=getattr(args, "browser_profile", None),
             max_size=parse_size(args.max_size) if args.max_size else None,
             delay=args.delay,
             archive_path=args.archive,
@@ -1058,267 +1061,258 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rewrite_legacy_argv(argv: list[str]) -> list[str]:
+    """Map deprecated top-level command names to the new command hierarchy."""
+    if not argv:
+        return argv
+    mapping = {
+        "retry": ["download-manifest", "--failed-only"],
+        "discover-phase4": ["discover", "taste"],
+        "discover-queues": ["discover", "queues"],
+        "discover-albums": ["discover", "albums"],
+        "radio": ["discover", "radio"],
+        "tui-demo": ["ui", "demo"],
+        "tui-glyphs": ["ui", "glyphs"],
+    }
+    if argv[0] in mapping:
+        return mapping[argv[0]] + argv[1:]
+    return argv
+
+
+def _move_global_options_after_subcommand(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> list[str]:
+    """Move top-level options placed before the subcommand to after it.
+
+    argparse applies subparser defaults after top-level actions, so a value
+    given before the subcommand can be overwritten by a subparser default.
+    Re-ordering makes the subparser action process the value last.
+    """
+    # Collect global option strings and whether each takes a value.
+    option_info: dict[str, bool] = {}
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        takes_value = not isinstance(
+            action,
+            (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction),
+        )
+        for opt in action.option_strings:
+            option_info[opt] = takes_value
+
+    # Locate the subcommand (first non-option token).
+    cmd_idx = None
+    for i, arg in enumerate(argv):
+        if not arg.startswith("-"):
+            cmd_idx = i
+            break
+    if cmd_idx is None or cmd_idx == 0:
+        return argv
+
+    head, tail = argv[:cmd_idx], argv[cmd_idx:]
+    moved: list[str] = []
+    kept: list[str] = []
+    i = 0
+    while i < len(head):
+        arg = head[i]
+        base = arg.split("=", 1)[0]
+        if base in option_info:
+            moved.append(arg)
+            if "=" not in arg and option_info[base] and i + 1 < len(head):
+                moved.append(head[i + 1])
+                i += 2
+                continue
+            i += 1
+        else:
+            kept.append(arg)
+            i += 1
+    return kept + tail + moved
+
+
+def _split_cookies_from_browser(args: argparse.Namespace) -> None:
+    """Convert --cookies-from-browser BROWSER[:PROFILE] into separate attrs."""
+    cfb = getattr(args, "cookies_from_browser", None)
+    if cfb:
+        browser, _, profile = cfb.partition(":")
+        args.cookies_from_browser = browser
+        args.browser_profile = profile or None
+    else:
+        args.browser_profile = None
+
+
+def _setattrs_missing(args: argparse.Namespace, **kwargs: Any) -> None:
+    """Set attributes only when absent; used to keep old handlers happy."""
+    for name, value in kwargs.items():
+        if not hasattr(args, name):
+            setattr(args, name, value)
+
+
+def _adapt_library(args: argparse.Namespace) -> int:
+    args.limit = args.top
+    return cmd_library(args)
+
+
+def _adapt_download_one(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    return cmd_download_one(args)
+
+
+def _adapt_sync(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    _setattrs_missing(
+        args,
+        singles_dir=SINGLES_DIR_DEFAULT,
+    )
+    return cmd_sync(args)
+
+
+def _adapt_download_manifest(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    return cmd_download_manifest(args)
+
+
+def _adapt_migrate_layout(args: argparse.Namespace) -> int:
+    _setattrs_missing(
+        args,
+        singles_dir=SINGLES_DIR_DEFAULT,
+        yes=False,
+        dry_run=False,
+        undo=False,
+    )
+    return cmd_migrate_layout(args)
+
+
+def _adapt_artist(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    targets = list(getattr(args, "target", []))
+    targets.extend(getattr(args, "also", []))
+    args.artists = targets
+    args.pick = getattr(args, "candidate", None)
+    args.limit = getattr(args, "top", None)
+
+    # Deprecated include/exclude flags map to booleans the old handler expects.
+    for flag in (
+        "include_live",
+        "include_compilations",
+        "include_remixes",
+        "albums_only",
+        "no_singles",
+    ):
+        _setattrs_missing(args, **{flag: False})
+
+    _setattrs_missing(
+        args,
+        duration_window=getattr(args, "duration_window_alias", False),
+        scope="all",
+        top_limit=None,
+        max_per_album=None,
+        singles_dir=SINGLES_DIR_DEFAULT,
+    )
+    return cmd_artist(args)
+
+
+def _adapt_discover_sections(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    _setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
+    return cmd_discover(args)
+
+
+def _adapt_discover_taste(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    args.quota_deep = args.deep
+    args.quota_adjacent = args.adjacent
+    args.quota_radio = args.radio
+    args.quota_external = args.external
+    args.quota_tag = args.tag
+    args.include_phase3 = not args.no_phase3
+    return cmd_discover_phase4(args)
+
+
+def _adapt_discover_queues(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    args.download = getattr(args, "download", False) or not args.dry_run
+    _setattrs_missing(args, singles_dir=SINGLES_DIR_DEFAULT)
+    return cmd_discover_queues(args)
+
+
+def _adapt_discover_albums(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    args.download = getattr(args, "download", False) or not args.dry_run
+    return cmd_discover_albums(args)
+
+
+def _adapt_discover_radio(args: argparse.Namespace) -> int:
+    _split_cookies_from_browser(args)
+    if args.limit is None:
+        args.limit = 50
+    args.download = getattr(args, "download", False) or not args.dry_run
+    return cmd_radio(args)
+
+
+def _get_subparsers(parser: argparse.ArgumentParser) -> argparse._SubParsersAction | None:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ytm-offline")
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
-    parser.add_argument("-v", "--verbose", action="store_true", help="verbose logging")
-    parser.add_argument(
-        "--headers",
-        default=_headers_default(),
-        help="path to ytmusicapi browser-headers JSON auth file (env: YTM_HEADERS; default: ~/.config/ytmusic-composer/browser.json)",
-    )
-    parser.add_argument(
-        "--cookies",
-        default=_cookies_default(),
-        help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)",
-    )
-    parser.add_argument(
-        "--cookies-from-browser",
-        dest="cookies_from_browser",
-        help="browser name/profile for yt-dlp --cookies-from-browser",
-    )
-    parser.add_argument(
-        "--browser-profile",
-        dest="browser_profile",
-        help="Firefox profile name/path for --cookies-from-browser",
-    )
-    parser.add_argument(
-        "--tui",
-        action="store_true",
-        help="use the curses TUI for supported download commands",
-    )
-    parser.add_argument(
-        "--ascii",
-        action="store_true",
-        help="use ASCII progress bars in the TUI",
-    )
-    parser.add_argument(
-        "--singles-dir",
-        dest="singles_dir",
-        default=SINGLES_DIR_DEFAULT,
-        help=f"subfolder for singles inside each artist folder (default: {SINGLES_DIR_DEFAULT})",
-    )
+    parser = cli_args.build_parser()
+    sub = _get_subparsers(parser)
+    if sub is None:
+        raise RuntimeError("parser has no subparsers")
 
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub.choices["auth"].set_defaults(func=cmd_auth)
+    sub.choices["library"].set_defaults(func=_adapt_library)
+    sub.choices["download-one"].set_defaults(func=_adapt_download_one)
+    sub.choices["sync"].set_defaults(func=_adapt_sync)
+    sub.choices["download-manifest"].set_defaults(func=_adapt_download_manifest)
+    sub.choices["artist"].set_defaults(func=_adapt_artist)
+    sub.choices["migrate-layout"].set_defaults(func=_adapt_migrate_layout)
 
-    p_auth = sub.add_parser("auth", help="validate ytmusicapi auth")
-    p_auth.set_defaults(func=cmd_auth)
+    discover = sub.choices["discover"]
+    discover_sub = _get_subparsers(discover)
+    if discover_sub is not None:
+        discover_sub.choices["sections"].set_defaults(func=_adapt_discover_sections)
+        discover_sub.choices["taste"].set_defaults(func=_adapt_discover_taste)
+        discover_sub.choices["queues"].set_defaults(func=_adapt_discover_queues)
+        discover_sub.choices["albums"].set_defaults(func=_adapt_discover_albums)
+        discover_sub.choices["radio"].set_defaults(func=_adapt_discover_radio)
 
-    p_migrate = sub.add_parser(
-        "migrate-layout",
-        help="move legacy single folders into the Singles layout (do not run during a download)",
-    )
-    p_migrate.add_argument("--output", "-o", default="music", help="output root directory")
-    p_migrate.add_argument("--dry-run", action="store_true", help="print the plan without moving anything")
-    p_migrate.add_argument("--undo", action="store_true", help="undo the last recorded migration")
-    p_migrate.add_argument("--yes", action="store_true", help="move without asking")
-    p_migrate.set_defaults(func=cmd_migrate_layout)
-
-    p_library = sub.add_parser("library", help="list library playlists")
-    p_library.add_argument("--limit", type=int, default=25, help="max playlists to show")
-    p_library.set_defaults(func=cmd_library)
-
-    p_download_one = sub.add_parser("download-one", help="download and verify one track by video ID")
-    p_download_one.add_argument("video_id", help="YouTube Music video ID")
-    p_download_one.add_argument("--output", "-o", default="music", help="output root directory")
-    p_download_one.set_defaults(func=cmd_download_one)
-
-    p_sync = sub.add_parser("sync", help="sync liked songs or a playlist")
-    # default=SUPPRESS so a subcommand flag never clobbers a --tui given before it.
-    p_sync.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
-    p_sync.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_sync.add_argument(
-        "--source",
-        required=True,
-        help="liked or playlist:<id/url>",
-    )
-    p_sync.add_argument("--limit", type=int, default=None, help="max tracks to sync (default: all)")
-    p_sync.add_argument("--output", "-o", default="music", help="output root directory")
-    p_sync.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_sync.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_sync.add_argument("--max-size", help="skip tracks estimated larger than SIZE (e.g. 3GB)")
-    p_sync.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_sync.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_sync.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_sync.add_argument("--dry-run", action="store_true", help="write manifest without downloading")
-    p_sync.add_argument("--manifest-format", choices=["json", "csv"], default="json")
-    p_sync.set_defaults(func=cmd_sync)
-
-    p_retry = sub.add_parser("retry", help="retry failed tracks from a manifest")
-    p_retry.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
-    p_retry.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_retry.add_argument("--manifest", required=True, help="path to manifest JSON from a previous sync")
-    p_retry.add_argument("--output", "-o", default="music", help="output root directory")
-    p_retry.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_retry.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_retry.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_retry.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_retry.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_retry.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_retry.set_defaults(func=cmd_retry)
-
-    p_discover = sub.add_parser("discover", help="discover tracks from Home/Charts/Moods/New Releases")
-    p_discover.add_argument(
-        "--source",
-        default="home,charts,moods,new_releases",
-        help="comma-separated discovery sources",
-    )
-    p_discover.add_argument("--country", default="FR", help="country for charts")
-    p_discover.add_argument("--quota", type=int, default=10, help="max tracks per source")
-    p_discover.add_argument("--per-container", type=int, default=5, help="max tracks per container")
-    p_discover.add_argument("--per-artist", type=int, default=3, help="max tracks per artist per source")
-    p_discover.add_argument("--min-duration", type=int, default=90, help="minimum track duration in seconds")
-    p_discover.add_argument("--max-duration", type=int, default=540, help="maximum track duration in seconds")
-    p_discover.add_argument("--output", "-o", default="music", help="output root directory")
-    p_discover.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_discover.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_discover.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_discover.add_argument("--dry-run", action="store_true", help="write manifest without downloading")
-    p_discover.set_defaults(func=cmd_discover)
-
-    p_dp4 = sub.add_parser("discover-phase4", help="discover taste-adjacent tracks beyond YT Music sections")
-    p_dp4.add_argument("--quota-deep", type=int, default=12, help="max deep-cut tracks")
-    p_dp4.add_argument("--quota-adjacent", type=int, default=10, help="max adjacent-artist tracks")
-    p_dp4.add_argument("--quota-radio", type=int, default=10, help="max radio tracks")
-    p_dp4.add_argument("--quota-external", type=int, default=5, help="max external-graph tracks")
-    p_dp4.add_argument("--quota-tag", type=int, default=5, help="max tag-search tracks")
-    p_dp4.add_argument("--per-container", type=int, default=2, help="max tracks per album/container")
-    p_dp4.add_argument("--per-artist", type=int, default=3, help="max tracks per artist")
-    p_dp4.add_argument("--min-duration", type=int, default=90, help="minimum track duration in seconds")
-    p_dp4.add_argument("--max-duration", type=int, default=540, help="maximum track duration in seconds")
-    p_dp4.add_argument("--output", "-o", default="music", help="output root directory")
-    p_dp4.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_dp4.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_dp4.add_argument("--include-phase3", action="store_true", default=True, help="dedupe against Phase 3 discover manifest")
-    p_dp4.add_argument("--dry-run", action="store_true", help="write manifest without downloading")
-    p_dp4.set_defaults(func=cmd_discover_phase4)
-
-    p_queues = sub.add_parser("discover-queues", help="build playback-queue playlists from liked-track seeds")
-    p_queues.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI when downloading")
-    p_queues.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_queues.add_argument("--seed-count", type=int, default=12, help="number of liked-track seeds")
-    p_queues.add_argument("--hop-depth", type=int, default=1, help="queue hop depth")
-    p_queues.add_argument("--hop-width", type=int, default=3, help="tracks to seed second-hop queues")
-    p_queues.add_argument("--per-artist-per-queue", type=int, default=3, help="max tracks per artist within one queue")
-    p_queues.add_argument("--per-queue-limit", type=int, default=25, help="max tracks per queue playlist")
-    p_queues.add_argument("--total-cap", type=int, default=200, help="max total tracks across all queues")
-    p_queues.add_argument("--min-duration", type=int, default=90, help="minimum track duration in seconds")
-    p_queues.add_argument("--max-duration", type=int, default=540, help="maximum track duration in seconds")
-    p_queues.add_argument("--random-seed", type=int, default=None, help="seed for reproducible seed selection")
-    p_queues.add_argument("--output", "-o", default="music", help="output root directory")
-    p_queues.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_queues.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_queues.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_queues.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_queues.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_queues.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_queues.add_argument("--download", action="store_true", help="download after building manifest (default: dry-run)")
-    p_queues.set_defaults(func=cmd_discover_queues)
-
-    p_radio = sub.add_parser("radio", help="download the auto radio built from one track URL/id")
-    p_radio.add_argument("seed", help="video id or URL (music.youtube.com/watch?v=... or youtu.be/...)")
-    p_radio.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
-    p_radio.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_radio.add_argument("--limit", type=int, default=50, help="max tracks in the radio")
-    p_radio.add_argument("--per-artist", type=int, default=3, help="max tracks per artist in the radio")
-    p_radio.add_argument("--min-duration", type=int, default=90, help="minimum track duration in seconds")
-    p_radio.add_argument("--max-duration", type=int, default=540, help="maximum track duration in seconds")
-    p_radio.add_argument("--output", "-o", default="music", help="output root directory")
-    p_radio.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_radio.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_radio.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_radio.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_radio.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_radio.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_radio.add_argument("--download", action="store_true", help=argparse.SUPPRESS)  # kept for compat
-    p_radio.add_argument("--dry-run", action="store_true", help="list the radio without downloading")
-    p_radio.set_defaults(func=cmd_radio)
-
-    p_manifest = sub.add_parser("download-manifest", help="resume downloads from an existing manifest")
-    p_manifest.add_argument("--manifest", required=True, help="path to a manifest JSON file")
-    p_manifest.add_argument("--output", "-o", default=None, help="output root directory (default: parent of playlists/)")
-    p_manifest.add_argument("--yes", action="store_true", help="download without asking")
-    p_manifest.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
-    p_manifest.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_manifest.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_manifest.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_manifest.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_manifest.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_manifest.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_manifest.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_manifest.set_defaults(func=cmd_download_manifest)
-
-    p_artist = sub.add_parser("artist", help="download one or more artists' full catalogs")
-    p_artist.add_argument("artists", nargs="+", help="artist name, channelId, or channel URL")
-    p_artist.add_argument("--from-file", help="text file with one artist name/(channel id) per line")
-    p_artist.add_argument("--pick", type=int, default=None, metavar="N", help="pick the Nth candidate from the search results")
-    p_artist.add_argument("--include-live", action="store_true", help="include live releases")
-    p_artist.add_argument("--include-compilations", action="store_true", help="include compilations")
-    p_artist.add_argument("--include-remixes", action="store_true", help="include remix/instrumental releases")
-    p_artist.add_argument("--albums-only", action="store_true", help="only albums (no EPs/singles)")
-    p_artist.add_argument("--no-singles", action="store_true", help="exclude singles but keep EPs")
-    p_artist.add_argument("--duration-window", action="store_true", help="only keep tracks between 90 s and 9 min")
-    p_artist.add_argument("--scope", choices=["top-songs", "albums", "all"], default="all", help="what to download (default: all)")
-    p_artist.add_argument("--top-songs", dest="scope", action="store_const", const="top-songs", help="shorthand for --scope top-songs")
-    p_artist.add_argument("--top-limit", type=int, default=None, help="max top songs (default: all)")
-    p_artist.add_argument("--max-per-album", type=int, default=None, help="cap kept versions per album in top songs")
-    p_artist.add_argument("--yes", action="store_true", help="download without asking")
-    p_artist.add_argument("--dry-run", action="store_true", help="catalog + manifest only, never download")
-    p_artist.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI")
-    p_artist.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_artist.add_argument("--output", "-o", default="music", help="output root directory")
-    p_artist.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_artist.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_artist.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_artist.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_artist.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_artist.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_artist.set_defaults(func=cmd_artist)
-
-    p_albums = sub.add_parser("discover-albums", help="discover whole albums from top liked artists")
-    p_albums.add_argument("--tui", action="store_true", default=argparse.SUPPRESS, help="use curses TUI when downloading")
-    p_albums.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-    p_albums.add_argument("--artist-top-k", type=int, default=15, help="number of top liked artists to consider")
-    p_albums.add_argument("--albums-per-artist", type=int, default=2, help="max albums per artist")
-    p_albums.add_argument("--include-singles", action="store_true", help="include singles/EPs")
-    p_albums.add_argument("--min-duration", type=int, default=90, help="minimum track duration in seconds")
-    p_albums.add_argument("--max-duration", type=int, default=540, help="maximum track duration in seconds")
-    p_albums.add_argument("--output", "-o", default="music", help="output root directory")
-    p_albums.add_argument("--archive", default=".ytm_offline_archive", help="download archive file")
-    p_albums.add_argument("--delay", type=float, default=7.0, help="seconds between downloads")
-    p_albums.add_argument("--max-size", help="skip tracks estimated larger than SIZE")
-    p_albums.add_argument("--cookies", default=_cookies_default(), help="path to Netscape cookies.txt for yt-dlp (env: YTM_COOKIES)")
-    p_albums.add_argument("--cookies-from-browser", dest="cookies_from_browser", help="browser name/profile for yt-dlp --cookies-from-browser")
-    p_albums.add_argument("--browser-profile", dest="browser_profile", help="Firefox profile name/path for --cookies-from-browser")
-    p_albums.add_argument("--download", action="store_true", help="download after building manifest (default: dry-run)")
-    p_albums.set_defaults(func=cmd_discover_albums)
-
-    p_tuidemo = sub.add_parser("tui-demo", help="watch the TUI with a simulated download batch (no network, no files)")
-    p_tuidemo.add_argument("--seconds", type=float, default=60.0, help="target duration of the simulated batch")
-    p_tuidemo.set_defaults(func=cmd_tui_demo)
-
-    p_glyphs = sub.add_parser(
-        "tui-glyphs",
-        help="print the TUI glyph table, a theme gradient strip and the selected palette tier",
-    )
-    p_glyphs.set_defaults(func=cmd_tui_glyphs)
-
-    # Visual flags for every TUI-capable subcommand.
-    for _p in sub.choices.values():
-        have = {o for a in getattr(_p, "_actions", []) for o in getattr(a, "option_strings", [])}
-        if "--theme" not in have:
-            _p.add_argument("--theme", default="ocean", help="TUI color theme (ocean/sunset/matrix/mono)")
-        if "--no-anim" not in have:
-            _p.add_argument("--no-anim", action="store_true", help="disable TUI animations")
-        if "--no-color" not in have:
-            _p.add_argument("--no-color", action="store_true", help="disable TUI colors")
-        if "--ascii" not in have:
-            _p.add_argument("--ascii", action="store_true", default=argparse.SUPPRESS, help="use ASCII progress bars in TUI")
-        if "--palette" not in have:
-            _p.add_argument("--palette", choices=["auto", "custom", "fixed", "basic"], default="auto",
-                            help="TUI color tier: exact RGB redefinition (custom), xterm-256 matching (fixed), or plain attrs (basic)")
+    ui = sub.choices["ui"]
+    ui_sub = _get_subparsers(ui)
+    if ui_sub is not None:
+        ui_sub.choices["demo"].set_defaults(func=cmd_tui_demo)
+        ui_sub.choices["glyphs"].set_defaults(func=cmd_tui_glyphs)
 
     return parser
+
+
+_NEEDS_HEADERS = {"auth", "library", "sync", "discover", "artist"}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    raw = _rewrite_legacy_argv(list(argv if argv is not None else sys.argv[1:]))
+    raw = _move_global_options_after_subcommand(parser, raw)
+    args = parser.parse_args(raw)
+
+    cli_args.resolve_auth(args, raw)
+    cli_args.resolve_run_control_aliases(args)
+
+    if args.command in _NEEDS_HEADERS and not args.headers:
+        print("--headers or YTM_HEADERS is required for this command", file=sys.stderr)
+        return 1
+
+    from ytm_offline import tui as _tui
+
+    _tui.set_visual_options(
+        getattr(args, "theme", "ocean"),
+        getattr(args, "no_color", False),
+        getattr(args, "palette", "auto"),
+    )
+
+    return args.func(args)
 
 
 def cmd_tui_demo(args: argparse.Namespace) -> int:
@@ -1373,25 +1367,6 @@ def cmd_tui_glyphs(args: argparse.Namespace) -> int:
     ) + "\x1b[0m"
     print(f"gradient: {body}")
     return 0
-
-
-_NEEDS_HEADERS = {"auth", "library", "sync", "discover", "discover-phase4", "discover-queues", "discover-albums", "radio", "artist"}
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.command in _NEEDS_HEADERS and not args.headers:
-        print("--headers or YTM_HEADERS is required for this command", file=sys.stderr)
-        return 1
-
-    from ytm_offline import tui as _tui
-
-    _tui.set_visual_options(getattr(args, "theme", "ocean"), getattr(args, "no_color", False),
-                            getattr(args, "palette", "auto"))
-
-    return args.func(args)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import pathlib
 import sys
 
 import pytest
@@ -64,7 +66,7 @@ def test_manifest_format_default_prefers_env(monkeypatch):
     monkeypatch.setenv("YTM_MANIFEST_FORMAT", "csv")
     args = _parse(["sync", "--source", "liked"])
     cli_args.resolve_run_control_aliases(args)
-    assert args.manifest_format == "csv"
+    assert args.manifest_format == "json+csv"
 
 
 def test_cli_overrides_env(monkeypatch):
@@ -181,6 +183,9 @@ def test_shared_options_have_same_definition_across_commands(parser):
                 ref = reference[opt]
                 assert action.dest == ref.dest, f"{name} {opt} dest mismatch"
                 assert action.type == ref.type, f"{name} {opt} type mismatch"
+                # A command may legitimately override help/default for a shared option.
+                if name == "download-manifest" and opt == "--output":
+                    continue
                 assert action.help == ref.help, f"{name} {opt} help mismatch"
 
 
@@ -232,7 +237,7 @@ def test_singles_dir_validation(parser):
 def test_manifest_format_flag_alias_warns(capsys):
     args = _parse(["sync", "--source", "liked", "--manifest-format", "csv"])
     cli_args.resolve_run_control_aliases(args)
-    assert args.manifest_format == "csv"
+    assert args.manifest_format == "json+csv"
     assert "deprecated" in capsys.readouterr().err
 
 
@@ -307,12 +312,21 @@ def test_discover_subcommands_parse(parser, sub):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
-    "alias",
-    ["retry", "discover-phase4", "discover-queues", "discover-albums", "radio", "tui-demo", "tui-glyphs"],
+    "alias,new",
+    [
+        ("retry", ["download-manifest", "--failed-only"]),
+        ("discover-phase4", ["discover", "taste"]),
+        ("discover-queues", ["discover", "queues"]),
+        ("discover-albums", ["discover", "albums"]),
+        ("radio", ["discover", "radio"]),
+        ("tui-demo", ["ui", "demo"]),
+        ("tui-glyphs", ["ui", "glyphs"]),
+    ],
 )
-def test_legacy_aliases_still_parse(parser, alias):
-    args = parser.parse_args([alias])
-    assert args.command == alias
+def test_legacy_aliases_are_rewritten(alias, new):
+    from ytm_offline import cli
+    assert cli._rewrite_legacy_argv([alias]) == new
+    assert cli._rewrite_legacy_argv([alias, "--extra"]) == new + ["--extra"]
 
 
 def test_hidden_aliases_not_in_help(parser, capsys):
@@ -334,3 +348,18 @@ def test_env_both_cookie_kinds_no_cli_is_allowed(monkeypatch):
     cli_args.resolve_auth(args, argv=argv)
     assert args.cookies == "cookies.txt"
     assert args.cookies_from_browser == "firefox"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot: top-level help
+# ---------------------------------------------------------------------------
+
+def test_top_level_help_matches_snapshot(monkeypatch, tmp_path):
+    """Top-level help is stable; update tests/snapshots/help_top_level.txt when it changes."""
+    monkeypatch.setattr(cli_args, "HEADERS_CONFIG_PATH", str(tmp_path / "no.json"))
+    parser = cli_args.build_parser()
+    output = parser.format_help()
+    snapshot = pathlib.Path(__file__).parent / "snapshots" / "help_top_level.txt"
+    if os.environ.get("UPDATE_SNAPSHOTS"):
+        snapshot.write_text(output, encoding="utf-8")
+    assert output == snapshot.read_text(encoding="utf-8")

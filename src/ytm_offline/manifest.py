@@ -140,13 +140,29 @@ class Manifest:
                     indent=2,
                 ),
             )
-        elif fmt == "csv":
-            import io
+            return
 
-            buf = io.StringIO(newline="")
-            writer = csv.DictWriter(buf, fieldnames=self.entries[0].keys())
-            writer.writeheader()
-            writer.writerows(self.entries)
-            atomic_write_text(path, buf.getvalue(), newline="")
+        # JSON is always the source of truth. `csv` and `json+csv` also write
+        # a CSV sidecar next to the JSON file.
+        if fmt in ("csv", "json+csv"):
+            self.write(path, "json")
+            self._write_csv_sidecar(path)
+            return
+
+        raise ValueError(f"unsupported manifest format: {fmt}")
+
+    def _write_csv_sidecar(self, json_path: pathlib.Path) -> None:
+        """Write a CSV sidecar next to the JSON manifest."""
+        import io
+
+        if json_path.suffix == ".json":
+            csv_path = json_path.with_suffix(".csv")
         else:
-            raise ValueError(f"unsupported manifest format: {fmt}")
+            csv_path = json_path.with_suffix(json_path.suffix + ".csv")
+
+        fieldnames = list(self.entries[0].keys()) if self.entries else []
+        buf = io.StringIO(newline="")
+        writer = csv.DictWriter(buf, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(self.entries)
+        atomic_write_text(csv_path, buf.getvalue(), newline="")
