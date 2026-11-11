@@ -26,8 +26,15 @@ Project skeleton and auth validation are in place. The next gate is downloading 
 
 - `YTM_HEADERS` — path to the ytmusicapi browser-headers JSON file (defaults to `~/.config/ytmusic-composer/browser.json` when it exists).
 - `YTM_COOKIES` — path to the Netscape cookies.txt file for yt-dlp.
+- `YTM_COOKIES_FROM_BROWSER` — browser/profile spec for yt-dlp, e.g. `firefox` or `firefox:default-release`.
+- `YTM_OUTPUT` — default output root (default: `music`).
+- `YTM_ARCHIVE` — default download archive (default: `.ytm_offline_archive`).
+- `YTM_SINGLES_DIR` — singles subfolder inside each artist folder (default: `Singles`).
+- `YTM_MANIFEST_FORMAT` — `json` (default) or `json+csv` (JSON source of truth plus a CSV sidecar).
+- `YTM_TUI_ANIM=0` — disable TUI animations.
+- `NO_COLOR` — disable colors.
 
-These can be overridden with `--headers` and `--cookies`.
+CLI values override environment values. `--cookies` and `--cookies-from-browser` are mutually exclusive on the CLI; a CLI value of one kind overrides an environment value of the other kind. API keys (Last.fm) are read only from the environment, never from the command line.
 
 ## Quick start
 
@@ -51,7 +58,7 @@ ytm-offline \
 
 ## TUI
 
-Add `--tui` to `sync`, `retry`, `discover-albums --download`, or `discover-queues --download` for a curses interface:
+Add `--tui` to `sync`, `download-manifest`, `discover albums`, or `discover queues` for a curses interface:
 ```bash
 ytm-offline --headers ~/.config/ytmusic-composer/browser.json --tui sync --source liked
 ```
@@ -80,7 +87,7 @@ Four color themes (default `ocean`): `ocean` (deep blue → cyan → white), `su
 - `--no-color` — monochrome, characters only (env: `NO_COLOR`).
 - `--ascii` — ASCII-only glyphs (bars, box borders, spinner).
 
-`ytm-offline tui-glyphs` prints the glyph groups (block/box/braille/shapes/marks), a theme gradient strip and which palette tier was selected.
+`ytm-offline ui glyphs` prints the glyph groups (block/box/braille/shapes/marks), a theme gradient strip and which palette tier was selected.
 
 ## Artist picker
 
@@ -166,18 +173,101 @@ The recap, manifest and download totals always come from one counting
 function (`summarize_entries`/`owned_key`). The `--include-live`,
 `--include-remixes`, `--include-compilations`, `--albums-only` and
 `--no-singles` flags no longer remove releases from the picker; the
-differing release still gets its own number and the choice is yours.
+differing release still gets its own number and the choice is yours. They are
+now hidden compatibility aliases; use `--select` for non-interactive selection.
 
 
 ### Try it without downloading
 
 ```bash
-ytm-offline tui-demo --seconds 60
+ytm-offline ui demo --seconds 60
 ```
 
 Simulates a ~40-track batch (with a pause/resume window, failures and a final DONE) through the same state/event path. No network, no files, no yt-dlp. Quit with `q`.
 
 If stdout is not a TTY or the terminal is too small, the tool falls back to plain logging.
+
+## CLI reference
+
+```text
+ytm-offline [global options] <command> [command options]
+
+Commands:
+  auth                  validate ytmusicapi auth
+  library               list library playlists (--top N)
+  download-one VIDEO    download and verify one track
+  sync --source SOURCE  sync liked songs or a playlist
+  download-manifest     resume a manifest; --failed-only retries failures
+  artist                one artist (or --from-file / --also)
+  discover sections     Home/Charts/Moods/New Releases
+  discover taste        taste-adjacent discovery
+  discover queues       playback-queue playlists
+  discover albums       whole albums from top liked artists
+  discover radio SEED   auto radio from one track
+  ui demo               TUI simulator
+  ui glyphs             print glyphs/theme/palette
+```
+
+Global options work before or after the subcommand. Run-control options are
+`--output/-o`, `--archive`, `--delay`, `--max-size`, `--limit`, `--dry-run/-n`,
+`--yes/-y`, `--tui`, and `--ascii`.
+
+`--limit N` is the maximum number of **new** tracks downloaded in one run. It is
+applied after archive dedupe and selection, uniformly across `sync`, `artist`,
+`download-manifest`, and `discover {sections,queues,albums,radio}`. `library`
+uses `--top N` for its display cap.
+
+`--cookies-from-browser` follows yt-dlp's syntax:
+`BROWSER[+KEYRING][:PROFILE][::CONTAINER]`, e.g.
+`firefox:default-release` or `firefox:/abs/path/to/profile`.
+
+Every download command prints the resolved absolute `output:` and `archive:`
+paths. If the archive does not exist but the output folder already contains
+audio, the command warns and asks for confirmation even with `--yes`; the
+hidden `--force-new-archive` skips that check.
+
+### Examples
+
+```bash
+ytm-offline auth
+ytm-offline library --top 10
+ytm-offline sync --source liked --limit 5 --dry-run
+ytm-offline sync --source liked --limit 20 --yes
+ytm-offline download-manifest --manifest music/playlists/liked.manifest.json --failed-only
+ytm-offline artist "BABYMETAL" --select "A[1-3],S[*]" --yes
+ytm-offline artist --from-file artists.txt --also "Another Artist"
+ytm-offline discover sections --dry-run
+ytm-offline discover radio <video-id> --dry-run
+ytm-offline ui glyphs
+```
+
+### Deprecated aliases and removal target
+
+These keep working with one stderr deprecation line. Removal target: **v0.2.0**.
+
+| Alias | Replacement |
+|-------|-------------|
+| `retry` | `download-manifest --failed-only` |
+| `discover-phase4` | `discover taste` |
+| `discover-queues` | `discover queues` |
+| `discover-albums` | `discover albums` |
+| `radio` | `discover radio` |
+| `tui-demo` | `ui demo` |
+| `tui-glyphs` | `ui glyphs` |
+| `--pick` | `--candidate` |
+| `--top-songs` | (removed; top-songs mode is not reachable through the picker) |
+| `--quota-deep` etc. | `discover taste --deep` etc. |
+| `--per-queue-limit` | `--per-queue` |
+| `--include-phase3` | `--no-phase3` |
+| `--browser-profile P` | `--cookies-from-browser BROWSER:P` |
+| `--singles-dir` | `YTM_SINGLES_DIR` |
+| `--manifest-format` | `YTM_MANIFEST_FORMAT` |
+| `--download` | default behaviour; use `--dry-run` to plan only |
+| `--total-cap` | `--limit` on `discover queues` |
+| `--include-live`, `--include-compilations`, `--include-remixes`, `--albums-only`, `--no-singles`, `--duration-window` | hidden compatibility aliases; prefer `--select` / `--min-duration` / `--max-duration` |
+
+Removed without alias: `--scope`, `--top-limit`, `--max-per-album` (the
+top-songs path is unreachable through the A/S picker).
 
 ## Auth note
 

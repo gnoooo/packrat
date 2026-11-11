@@ -1,0 +1,9 @@
+usage: ytm-offline ui [-h] {demo,glyphs} ...
+
+positional arguments:
+  {demo,glyphs}
+    demo         watch the TUI with a simulated download batch
+    glyphs       print the TUI glyph table and theme gradient
+
+options:
+  -h, --help     show this help message and exit

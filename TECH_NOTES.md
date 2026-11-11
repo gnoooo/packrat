@@ -87,3 +87,25 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 5. Layout: `music/<Artist>/<Album>/<title>.m4a` plus `.m3u8` playlists.
 6. PO token provider: optional documented fallback.
 7. Explore/Home discovery: deferred to later phases.
+
+## CLI refactor decisions (2026-11-11)
+
+- Shared option groups live in `src/ytm_offline/cli_args.py`; deprecated names and
+  old `argparse.Namespace` mappings live only in `src/ytm_offline/cli_compat.py`.
+- Global options work before or after the subcommand. Subparser copies use
+  `default=argparse.SUPPRESS` so a value given before the subcommand is not
+  overwritten.
+- JSON is the manifest source of truth. `YTM_MANIFEST_FORMAT=json+csv` (and the
+  deprecated `csv` value) writes JSON plus a CSV sidecar; JSON loading is
+  unchanged.
+- `--cookies-from-browser` uses yt-dlp's documented
+  `BROWSER[+KEYRING][:PROFILE][::CONTAINER]` syntax. `--browser-profile` is a
+  deprecated fold-in alias.
+- `--cookies` and `--cookies-from-browser` are mutually exclusive on the CLI.
+  A CLI value overrides an environment value of the other kind.
+- `--limit` means max new tracks per run after dedupe/selection. `discover
+  radio` and `discover queues` request at least 2x the limit (minimum 100) from
+  the API before applying it.
+- Artist top-songs mode is not reachable through the A/S picker, so `--scope`,
+  `--top-limit` and `--max-per-album` were removed from the CLI.
+- Deprecated aliases have a documented removal target of v0.2.0 in README.

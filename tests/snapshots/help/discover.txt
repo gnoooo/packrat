@@ -1,0 +1,12 @@
+usage: ytm-offline discover [-h] {sections,taste,queues,albums,radio} ...
+
+positional arguments:
+  {sections,taste,queues,albums,radio}
+    sections            Home/Charts/Moods/New Releases
+    taste               taste-adjacent tracks beyond YT Music sections
+    queues              playback-queue playlists from liked-track seeds
+    albums              whole albums from top liked artists
+    radio               auto radio built from one track URL/id
+
+options:
+  -h, --help            show this help message and exit
