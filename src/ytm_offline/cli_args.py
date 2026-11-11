@@ -897,8 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_artist.add_argument(
         "target",
-        nargs="*",
-        default=[],
+        nargs="?",
+        default=None,
         help="artist name, channelId, or channel URL",
     )
     p_artist.add_argument(

@@ -66,6 +66,40 @@ def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
     return answer in ("", "y", "yes")
 
 
+_AUDIO_EXTENSIONS = {".m4a", ".mp3", ".opus", ".flac", ".webm", ".aac", ".ogg"}
+
+
+def _print_paths(output_root: pathlib.Path, archive: str) -> None:
+    print(f"output: {output_root.expanduser().resolve()}")
+    print(f"archive: {pathlib.Path(archive).expanduser().resolve()}")
+
+
+def _check_archive_safety(args: argparse.Namespace, output_root: pathlib.Path) -> bool:
+    """Warn when a new archive would be created over an existing audio library."""
+    if getattr(args, "force_new_archive", False):
+        return True
+    archive = pathlib.Path(args.archive).expanduser()
+    if archive.exists() or not output_root.exists():
+        return True
+    has_audio = any(
+        p.is_file() and p.suffix.lower() in _AUDIO_EXTENSIONS
+        for p in output_root.rglob("*")
+    )
+    if not has_audio:
+        return True
+    print(
+        f"warning: archive {archive.resolve()} does not exist but "
+        f"{output_root.resolve()} already contains audio",
+        file=sys.stderr,
+    )
+    print("use --force-new-archive to skip this check", file=sys.stderr)
+    if not sys.stdin.isatty():
+        print("not downloading: confirmation required", file=sys.stderr)
+        return False
+    answer = input("continue with a new archive? [y/N] ").strip().lower()
+    return answer in ("y", "yes")
+
+
 def _redact(msg: object) -> str:
     """Mask sensitive token values from messages that may be logged."""
     text = str(msg)
@@ -338,6 +372,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
     """Discover new tracks from YouTube Music recommendations."""
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
 
     cookie_ctx = (
         browser_cookie_file(args.cookies_from_browser, getattr(args, "browser_profile", None))
@@ -463,6 +500,10 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Sync liked songs or a playlist to disk."""
+    output_root = pathlib.Path(args.output)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
     if args.tui and not args.dry_run:
         return exit_code_from_result(
             tui_module.run_tui(
@@ -503,6 +544,9 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
 
     output_root = pathlib.Path(args.output) if args.output else manifest_path.parent.parent
     output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
 
     # Artist manifests carry their own label and playlist layout.
     if payload.get("command") == "artist":
@@ -693,6 +737,10 @@ def cmd_artist(args: argparse.Namespace) -> int:
     if not specs:
         print("no artist specified", file=sys.stderr)
         return 2
+    print("Will process: " + ", ".join(specs))
+    if len(specs) > 1 and not args.yes and not args.dry_run and sys.stdin.isatty():
+        if not _confirm_download(args, "continue? [Y/n] "):
+            return 2
 
     yt = YTMusic(args.headers)
     resolved: list[dict[str, Any]] = []
@@ -765,6 +813,10 @@ def cmd_artist(args: argparse.Namespace) -> int:
 
     catalogs: list[dict[str, Any]] = []
     output_root = pathlib.Path(args.output)
+    output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
     for chosen in resolved:
         print(f"resolving catalog for {chosen['browseId']} ...")
         # With the interactive picker the download set is the picked rows
@@ -954,6 +1006,11 @@ def cmd_artist(args: argparse.Namespace) -> int:
 
 def cmd_radio(args: argparse.Namespace) -> int:
     """Download the radio from one track URL or id. --dry-run only lists it."""
+    output_root = pathlib.Path(args.output)
+    output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
     kwargs = {
         "seed_spec": args.seed,
         "headers_path": args.headers,
@@ -1016,6 +1073,9 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
     """Build playback-queue playlists from liked-track seeds."""
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
 
     limit = getattr(args, "limit", None)
     total_cap = args.total_cap
@@ -1094,6 +1154,9 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
     """Discover whole albums from top liked artists."""
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
+    _print_paths(output_root, args.archive)
+    if not _check_archive_safety(args, output_root):
+        return 2
 
     result = albums_module.discover_albums(
         headers_path=args.headers,

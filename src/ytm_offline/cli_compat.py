@@ -168,7 +168,8 @@ def adapt_migrate_layout(args: argparse.Namespace) -> int:
 
 
 def adapt_artist(args: argparse.Namespace) -> int:
-    targets = list(getattr(args, "target", []))
+    target = getattr(args, "target", None)
+    targets = [target] if target else []
     targets.extend(getattr(args, "also", []))
     args.artists = targets
     args.pick = getattr(args, "candidate", None)

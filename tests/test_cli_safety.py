@@ -377,3 +377,47 @@ def test_hidden_commands_still_parse():
     args = _args(["migrate-layout", "--dry-run"])
     assert args.command == "migrate-layout"
     assert args.dry_run is True
+
+
+def test_archive_warning_requires_confirmation_even_with_yes(tmp_path, monkeypatch):
+    output = tmp_path / "music"
+    output.mkdir()
+    (output / "song.m4a").write_bytes(b"x")
+    archive = tmp_path / "new_archive"
+    args = _args([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(output), "--archive", str(archive), "--yes",
+    ])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert cli._check_archive_safety(args, output) is False
+
+
+def test_force_new_archive_bypasses_warning(tmp_path):
+    output = tmp_path / "music"
+    output.mkdir()
+    (output / "song.m4a").write_bytes(b"x")
+    args = _args([
+        "sync", "--source", "liked", "--headers", "/tmp/x",
+        "--output", str(output), "--archive", str(tmp_path / "arc"),
+        "--force-new-archive",
+    ])
+    assert cli._check_archive_safety(args, output) is True
+
+
+def test_artist_accepts_one_positional_only():
+    with pytest.raises(SystemExit) as exc:
+        _args(["artist", "A", "B"])
+    assert exc.value.code == 2
+
+
+def test_artist_also_adds_extra_targets():
+    args = _args(["artist", "A", "--also", "B", "--also", "C"])
+    assert args.target == "A"
+    assert args.also == ["B", "C"]
+
+
+def test_print_paths_are_absolute(tmp_path, capsys):
+    cli._print_paths(tmp_path, "arc")
+    out = capsys.readouterr().out
+    assert f"output: {tmp_path.resolve()}" in out
+    assert "archive:" in out
