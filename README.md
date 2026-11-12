@@ -24,18 +24,15 @@ archive, so it is safe to stop, resume, and retry.
 
 ## Why Packrat?
 
-- **Liked Songs and playlists**: sync once, keep the archive, never re-download
-  finished tracks.
-- **Artist catalogs**: albums, singles and top songs, with an interactive
-  release picker and a non-interactive `--select` grammar.
-- **Discovery plans**: sections, taste-adjacent, radio queues, albums and radio,
-  always written to a manifest before downloading.
-- **A real TUI**: rounded frame, smooth HSL progress bars, log panel,
-  pause/skip, themes, and tmux-aware palettes.
-- **Local-first layout**: `~/Music/PackratMidden/`, JSON manifests, `.m3u8` playlists and a
-  simple archive; no database.
-- **Recoverable by design**: failed tracks are recorded, `download-manifest`
-  resumes, and `--failed-only` retries only failures.
+> A **pack rat** or **packrat**, also called a **woodrat** or **trade rat**, are any species in the North and Central American rodent genus ***Neotoma***. Pack rats have a rat-like appearance, with long tails, large ears, and large, black eyes. Pack rats are noticeably larger than deer mice, harvest mice, and grasshopper mice, and are usually somewhat larger than cotton rats.
+<p align="right">• <a href="https://en.wikipedia.org/wiki/Pack_rat">Pack Rat</a>, <i>Wikipedia</i> </p>
+
+- **Liked Songs and playlists**: sync once, keep the archive, never re-download finished tracks.
+- **Artist catalogs**: albums, singles and top songs, with an interactive release picker and a non-interactive `--select` grammar.
+- **Discovery plans**: sections, taste-adjacent, radio queues, albums and radio, always written to a manifest before downloading.
+- **A real TUI**: rounded frame, smooth HSL progress bars, log panel, pause/skip, themes, and tmux-aware palettes.
+- **Local-first layout**: `~/Music/PackratMidden/`, JSON manifests, `.m3u8` playlists and a simple archive; no database.
+- **Recoverable by design**: failed tracks are recorded, `download-manifest` resumes, and `--failed-only` retries only failures.
 
 ## Quick start
 
