@@ -11,6 +11,7 @@ dependencies = [
     "ytmusicapi==1.12.3",
     "yt-dlp[default]==2026.10.26",
     "mutagen==1.48.1",
+    "packaging==26.3",
 ]
 
 [project.optional-dependencies]

@@ -423,6 +423,7 @@ version = "0.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "mutagen" },
+    { name = "packaging" },
     { name = "yt-dlp", extra = ["default"] },
     { name = "ytmusicapi" },
 ]
@@ -435,6 +436,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mutagen", specifier = "==1.48.1" },
+    { name = "packaging", specifier = "==26.3" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "yt-dlp", extras = ["default"], specifier = "==2026.10.26" },
     { name = "ytmusicapi", specifier = "==1.12.3" },

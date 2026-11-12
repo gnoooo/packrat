@@ -10,16 +10,25 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import re
 import tempfile
 import urllib.request
 from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 from packrat import __version__
 
 REPO = "gnoooo/packrat"
 API = "https://api.github.com"
-INSTALL_ROOT = pathlib.Path.home() / ".local" / "share" / "packrat"
-BIN_DIR = pathlib.Path.home() / ".local" / "bin"
+DATA_HOME = pathlib.Path(
+    os.environ.get("XDG_DATA_HOME", pathlib.Path.home() / ".local" / "share")
+).expanduser()
+BIN_HOME = pathlib.Path(
+    os.environ.get("XDG_BIN_HOME", pathlib.Path.home() / ".local" / "bin")
+).expanduser()
+INSTALL_ROOT = DATA_HOME / "packrat"
+BIN_DIR = BIN_HOME
 
 
 class UpgradeError(RuntimeError):
@@ -36,28 +45,21 @@ class Release:
     prerelease: bool = False
 
 
-def _version_tuple(value: str) -> tuple[int, int, int, int, str]:
-    core = value.split("+", 1)[0]
-    pre = ""
-    for sep in ("-", "rc", "a", "b", "dev"):
-        if sep in core:
-            core, pre = core.split(sep, 1)
-            pre = sep + pre
-            break
-    nums = []
-    for part in core.split(".")[:3]:
-        try:
-            nums.append(int(part))
-        except ValueError:
-            nums.append(0)
-    while len(nums) < 3:
-        nums.append(0)
-    return (*nums, 0 if pre else 1, pre)  # stable sorts after prerelease
+def _parse_version(value: str) -> Version:
+    try:
+        return Version(value.removeprefix("v"))
+    except InvalidVersion as exc:
+        raise UpgradeError(f"invalid release version: {value!r}") from exc
 
 
 def compare_versions(a: str, b: str) -> int:
-    aa, bb = _version_tuple(a), _version_tuple(b)
+    aa, bb = _parse_version(a), _parse_version(b)
     return (aa > bb) - (aa < bb)
+
+
+def _wheel_version(name: str) -> str:
+    match = re.match(r"^packrat-(.+?)-py3-", name)
+    return match.group(1) if match else ""
 
 
 def _get_json(url: str) -> Any:
@@ -85,7 +87,21 @@ def latest_release(include_prerelease: bool = False) -> Release:
         wheels = [name for name in assets if name and name.endswith(".whl")]
         if not wheels or "SHA256SUMS" not in assets:
             continue
-        wheel_name = sorted(wheels)[-1]
+        target = _parse_version(tag.removeprefix("v"))
+        parsed = []
+        for name in wheels:
+            version = _wheel_version(name)
+            try:
+                parsed.append((Version(version), name))
+            except InvalidVersion:
+                continue
+        exact = [name for version, name in parsed if version == target]
+        if exact:
+            wheel_name = exact[0]
+        elif parsed:
+            wheel_name = max(parsed, key=lambda item: item[0])[1]
+        else:
+            raise UpgradeError(f"release {tag} has no PEP 440 wheel")
         return Release(
             version=tag.removeprefix("v"),
             tag=tag,
@@ -130,7 +146,7 @@ def _sha256(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
-def _attest(wheel: pathlib.Path) -> None:
+def _attest(wheel: pathlib.Path, tag: str) -> None:
     gh = shutil.which("gh")
     if not gh:
         raise UpgradeError(
@@ -138,7 +154,11 @@ def _attest(wheel: pathlib.Path) -> None:
             "install gh or use the install script"
         )
     result = subprocess.run(
-        [gh, "attestation", "verify", str(wheel), "--repo", REPO],
+        [
+            gh, "attestation", "verify", str(wheel), "--repo", REPO,
+            "--signer-workflow", f"{REPO}/.github/workflows/release.yml",
+            "--source-ref", f"refs/tags/{tag}",
+        ],
         text=True,
         capture_output=True,
     )
@@ -166,16 +186,34 @@ def _install_wheel(wheel: pathlib.Path, venv: pathlib.Path) -> None:
         )
 
 
-def _replace_install(wheel: pathlib.Path, root: pathlib.Path, bin_dir: pathlib.Path) -> None:
+def _replace_install(
+    wheel: pathlib.Path,
+    root: pathlib.Path,
+    bin_dir: pathlib.Path,
+    target_version: str,
+) -> None:
     venv = root / "venv"
     backup = root / "venv.upgrade-backup"
     if backup.exists():
-        raise UpgradeError(f"stale upgrade backup exists: {backup}")
+        if not venv.exists():
+            backup.rename(venv)
+        else:
+            raise UpgradeError(
+                f"stale upgrade backup exists: {backup}; inspect it before retrying"
+            )
     if venv.exists():
         venv.rename(backup)
     try:
         _install_wheel(wheel, venv)
-        subprocess.run([str(venv / "bin" / "packrat"), "--version"], check=True)
+        out = subprocess.run(
+            [str(venv / "bin" / "packrat"), "--version"],
+            check=True, text=True, capture_output=True,
+        ).stdout.strip()
+        got = out.split()[-1] if out else ""
+        if _parse_version(got) != _parse_version(target_version):
+            raise UpgradeError(
+                f"new install reports {got or 'no version'}, expected {target_version}"
+            )
         link = bin_dir / "packrat"
         link.parent.mkdir(parents=True, exist_ok=True)
         tmp_link = bin_dir / ".packrat.upgrade-link"
@@ -183,7 +221,7 @@ def _replace_install(wheel: pathlib.Path, root: pathlib.Path, bin_dir: pathlib.P
             tmp_link.unlink()
         tmp_link.symlink_to(venv / "bin" / "packrat")
         os.replace(tmp_link, link)
-    except Exception:
+    except BaseException:
         shutil.rmtree(venv, ignore_errors=True)
         if backup.exists():
             backup.rename(venv)
@@ -221,6 +259,12 @@ def run_upgrade(
         print(f"update available: {release.version}")
         return 0
 
+    if dry_run:
+        print(
+            f"dry-run: would download {release.wheel_name} and replace "
+            f"{INSTALL_ROOT / 'venv'}"
+        )
+        return 0
     root, bin_dir = standard_install()
     if not yes:
         if not sys.stdin.isatty():
@@ -229,9 +273,6 @@ def run_upgrade(
         if answer not in ("y", "yes"):
             print("Not upgrading.")
             return 2
-    if dry_run:
-        print(f"dry-run: would download {release.wheel_name} and replace {root / 'venv'}")
-        return 0
 
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="packrat-upgrade-") as tmp:
@@ -245,12 +286,12 @@ def run_upgrade(
         if actual != expected:
             raise UpgradeError(f"wheel checksum mismatch: {actual} != {expected}")
         print(f"checksum: {actual}")
-        _attest(wheel)
+        _attest(wheel, release.tag)
         print("attestation: verified")
 
-        lock = _locked(root / ".upgrade.lock")
+        lock = _locked(root / ".install.lock")
         try:
-            _replace_install(wheel, root, bin_dir)
+            _replace_install(wheel, root, bin_dir, release.version)
         finally:
             lock.close()
     print(f"upgraded: {__version__} -> {release.version}")

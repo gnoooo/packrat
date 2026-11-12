@@ -79,3 +79,25 @@ def test_piped_install_dry_run_with_git():
     )
     assert result.returncode == 0
     assert "dry-run complete" in result.stderr
+
+
+def test_installer_rejects_old_python(tmp_path):
+    fake = tmp_path / "python3"
+    fake.write_text("#!/bin/sh\ncat >/dev/null\nexit 1\n")
+    fake.chmod(0o755)
+    result = subprocess.run(
+        [str(SCRIPT), "--python", str(fake), "--prefix", str(tmp_path / "p"),
+         "--bin-dir", str(tmp_path / "b")],
+        text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "Python >= 3.11" in result.stderr
+
+
+def test_installer_ref_requires_git(tmp_path):
+    result = subprocess.run(
+        [str(SCRIPT), "--ref", "main", "--dry-run"],
+        text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "--ref requires --git" in result.stderr

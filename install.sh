@@ -92,7 +92,7 @@ require_cmd() {
 check_python() {
     "$PYTHON" - <<'PY' || die "Python >= 3.11 is required"
 import sys
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 11):
     raise SystemExit(1)
 PY
 }
@@ -179,6 +179,9 @@ install_packrat() {
 
     mkdir -p "$PREFIX" "$BIN_DIR"
     chmod 700 "$PREFIX" 2>/dev/null || true
+    require_cmd flock
+    exec 9>"$PREFIX/.install.lock"
+    flock -n 9 || die "another Packrat install/upgrade is running"
     rm -rf "$TMP_VENV" "$OLD_VENV"
     trap cleanup EXIT
 
@@ -195,10 +198,11 @@ install_packrat() {
     # Console scripts created inside the temporary venv still point at its
     # old absolute path; rewrite their shebangs after the move.
     if [ -d "$PREFIX/venv/bin" ]; then
-        local escaped_tmp
-        escaped_tmp="$(printf '%s' "$old_tmp" | sed 's/[&|]/\\&/g')"
+        local escaped_tmp escaped_prefix
+        escaped_tmp="$(printf '%s' "$old_tmp" | sed 's/[&|\\]/\\&/g')"
+        escaped_prefix="$(printf '%s' "$PREFIX/venv" | sed 's/[&|\\]/\\&/g')"
         while IFS= read -r script; do
-            sed -i "s|$escaped_tmp|$PREFIX/venv|g" "$script"
+            sed -i "s|$escaped_tmp|$escaped_prefix|g" "$script"
         done < <(grep -IlF "$old_tmp" "$PREFIX/venv/bin"/* 2>/dev/null || true)
     fi
 
@@ -206,6 +210,7 @@ install_packrat() {
     ln -s "$PREFIX/venv/bin/packrat" "$TMP_LINK"
     mv -f "$TMP_LINK" "$BIN_DIR/packrat"
     TMP_LINK=""
+    ln -sfn "$PREFIX/venv/bin/ytm-offline" "$BIN_DIR/ytm-offline"
 
     if [ -e "$OLD_VENV" ]; then
         rm -rf "$OLD_VENV"
@@ -253,6 +258,9 @@ main() {
         note "piped install: using default repository $GIT_URL"
     fi
 
+    if [ -n "$GIT_REF" ] && [ -z "$GIT_URL" ]; then
+        die "--ref requires --git"
+    fi
     if [ -n "$GIT_URL" ]; then
         if [[ "$GIT_URL" == git+* ]]; then
             PIP_SOURCE="$GIT_URL"

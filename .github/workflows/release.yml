@@ -59,8 +59,14 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
             VERSION="${TAG#v}"
             case "$VERSION" in
-              *.dev*|*-*) PRERELEASE="--prerelease" ;;
-              *) PRERELEASE="" ;;
+              *.dev*|*-*|*rc[0-9]*|*a[0-9]*|*b[0-9]*) PRERELEASE="--prerelease" ;;
+              *)
+                if [ "$VERSION" != "$BASE" ]; then
+                  echo "tag version $VERSION does not match pyproject $BASE" >&2
+                  exit 1
+                fi
+                PRERELEASE=""
+                ;;
             esac
           else
             TAG="v${BASE}"
