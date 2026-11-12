@@ -22,6 +22,8 @@ class SongMetadata:
     year: int | None = None
     duration: int | None = None
     track_total: int | None = None
+    disc_num: int | None = None
+    album_artist: str = ""
 
 
 def _artist(raw: dict[str, Any]) -> str:
@@ -59,12 +61,16 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
     album, whose track list gives the track number.
     """
     yt = YTMusic(headers_path)
-    watch = yt.get_watch_playlist(videoId=video_id)
-    tracks = watch.get("tracks") or []
-    current = next((t for t in tracks if t.get("videoId") == video_id), tracks[0] if tracks else {})
-    title = str(current.get("title") or "")
-    artist = _artist(current)
-    duration = _duration(current)
+    try:
+        watch = yt.get_watch_playlist(videoId=video_id)
+        tracks = watch.get("tracks") or []
+        current = next((t for t in tracks if t.get("videoId") == video_id), tracks[0] if tracks else {})
+        title = str(current.get("title") or "")
+        artist = _artist(current)
+        duration = _duration(current)
+    except Exception:
+        title = artist = ""
+        duration = None
 
     if not title:
         song = yt.get_song(video_id)
@@ -75,7 +81,13 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
     album_name = ""
     album_id = ""
     track_total: int | None = None
-    for result in yt.search(f"{title} {artist}", filter="songs", limit=10):
+    disc_num: int | None = None
+    album_artist: str = ""
+    try:
+        search_results = yt.search(f"{title} {artist}", filter="songs", limit=10)
+    except Exception:
+        search_results = []
+    for result in search_results:
         result_artist = _artist(result)
         if normalize(result_artist) != normalize(artist):
             continue
@@ -90,8 +102,18 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
             break
 
     if album_id:
-        album = yt.get_album(album_id)
+        try:
+            album = yt.get_album(album_id)
+        except Exception:
+            return SongMetadata(
+                video_id=video_id,
+                title=title,
+                artist=artist,
+                album=album_name,
+                duration=duration,
+            )
         album_title = str(album.get("title") or album_name or "")
+        album_artist = _artist(album) if album.get("artists") else ""
         if isinstance(album.get("trackCount"), int):
             track_total = album["trackCount"]
         track = _pick_album_track(album, video_id, title)
@@ -100,6 +122,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
             artist = _artist(track) or artist
             duration = _duration(track) or duration
             track_num = track.get("trackNumber")
+            disc_num = track.get("discNumber")
             return SongMetadata(
                 video_id=video_id,
                 title=title,
@@ -110,6 +133,8 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
                 year=album.get("year") if isinstance(album.get("year"), int) else None,
                 duration=duration,
                 track_total=track_total,
+                disc_num=disc_num if isinstance(disc_num, int) else None,
+                album_artist=album_artist,
             )
         return SongMetadata(
             video_id=video_id,
@@ -120,6 +145,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
             year=album.get("year") if isinstance(album.get("year"), int) else None,
             duration=duration,
             track_total=track_total,
+            album_artist=album_artist,
         )
 
     return SongMetadata(
@@ -143,6 +169,8 @@ def metadata_from_track(track: dict[str, Any]) -> SongMetadata:
         year=track.get("release_year") if isinstance(track.get("release_year"), int) else None,
         duration=track.get("duration") if isinstance(track.get("duration"), int) else None,
         track_total=track.get("track_total") if isinstance(track.get("track_total"), int) else None,
+        disc_num=track.get("disc_num") if isinstance(track.get("disc_num"), int) else None,
+        album_artist=str(track.get("album_artist") or ""),
     )
 
 
@@ -163,11 +191,13 @@ def apply_song_metadata(path: pathlib.Path, meta: SongMetadata) -> bool:
         return False
     tags["\xa9nam"] = [meta.title]
     tags["\xa9ART"] = [meta.artist]
-    tags["aART"] = [meta.artist]
+    tags["aART"] = [meta.album_artist or meta.artist]
     if meta.album:
         tags["\xa9alb"] = [meta.album]
     if meta.track_num is not None:
         tags["trkn"] = [(int(meta.track_num), int(meta.track_total or 0))]
+    if meta.disc_num is not None:
+        tags["disk"] = [(int(meta.disc_num), 0)]
     if meta.year is not None:
         tags["\xa9day"] = [str(meta.year)]
     audio.save()

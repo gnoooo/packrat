@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 import pathlib
 import re
 import time
@@ -123,7 +124,8 @@ def _build_ydl_opts(
             {"key": "EmbedThumbnail"},
         ],
         "js_runtimes": {"deno": {}},
-        "quiet": True,
+        "quiet": not bool(os.environ.get("PACKRAT_YTDLP_VERBOSE")),
+        "verbose": bool(os.environ.get("PACKRAT_YTDLP_VERBOSE")),
         "progress": False,
         "logger": logger_obj,
         "noplaylist": True,
@@ -146,7 +148,8 @@ def _build_extract_opts(
     opts: dict[str, Any] = {
         "format": "bestaudio[ext=m4a]/bestaudio",
         "js_runtimes": {"deno": {}},
-        "quiet": True,
+        "quiet": not bool(os.environ.get("PACKRAT_YTDLP_VERBOSE")),
+        "verbose": bool(os.environ.get("PACKRAT_YTDLP_VERBOSE")),
         "logger": logger_obj,
         "noplaylist": True,
     }

@@ -1608,6 +1608,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         cli_args.resolve_run_control_aliases(args)
 
     verbose = cli_args.resolve_verbose(args)
+    if verbose >= 2:
+        os.environ["PACKRAT_YTDLP_VERBOSE"] = "1"
     if verbose:
         import logging
 
