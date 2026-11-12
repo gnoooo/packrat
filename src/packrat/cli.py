@@ -37,6 +37,8 @@ from packrat.manifest import Manifest
 from packrat.playlist import m3u8_entry, write_m3u8
 from packrat.sizes import format_size, parse_size
 from packrat.sync import browser_cookie_file
+from packrat.naming import track_path
+from packrat.song_meta import SongMetadata, apply_song_metadata, resolve_song_metadata
 
 
 def print_result_summary(result: Any) -> None:
@@ -461,6 +463,28 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     output_root = pathlib.Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
 
+    metadata: SongMetadata | None = None
+    headers_path = getattr(args, "headers", None) or cli_args._headers_default()
+    if pathlib.Path(headers_path).expanduser().exists():
+        try:
+            metadata = resolve_song_metadata(video_id, headers_path)
+        except Exception as exc:
+            print(f"metadata lookup failed: {_redact(exc)}", file=sys.stderr)
+    if metadata is not None:
+        output_path = track_path(
+            output_root,
+            metadata.artist,
+            metadata.album,
+            metadata.title,
+            metadata.track_num,
+            ext="m4a",
+            release_type=metadata.release_type,
+        )
+        print(f"metadata: {metadata.artist} / {metadata.album or 'Singles'}")
+        print(f"destination: {output_path}")
+    else:
+        output_path = output_root / "%(artist,uploader)s" / "%(album|Unknown Album)s" / "%(title)s.%(ext)s"
+
     import yt_dlp
 
     logger = _YtdlpLogger()
@@ -468,9 +492,7 @@ def cmd_download_one(args: argparse.Namespace) -> int:
 
     ydl_opts: dict = {
         "format": "bestaudio[ext=m4a]/bestaudio",
-        "outtmpl": str(
-            output_root / "%(artist,uploader)s" / "%(album|Unknown Album)s" / "%(title)s.%(ext)s"
-        ),
+        "outtmpl": str(output_path),
         "writethumbnail": True,
         "postprocessors": [
             {"key": "FFmpegMetadata", "add_metadata": True},
@@ -514,6 +536,8 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     if not downloaded.exists():
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
+    if metadata is not None:
+        apply_song_metadata(downloaded, metadata)
 
     print(f"downloaded: {downloaded}")
     print(

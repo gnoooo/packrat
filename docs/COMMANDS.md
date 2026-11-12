@@ -135,6 +135,11 @@ packrat download-one "https://music.youtube.com/watch?v=..."
 packrat download-one dQw4w9WgXcQ  # id of music, e.g. after '=' and before '&'
 ```
 
+Uses YouTube Music catalog metadata when available, so the file goes to
+`<Artist>/<Album>/<NN - Title>.m4a` and its tags match the album track rather
+than the uploader ("Official Audio" channels, `Unknown Album`). Falls back to
+the uploader/title layout if metadata lookup fails.
+
 Downloads, verifies the file with ffprobe/mutagen, and prints metadata.
 
 ## artist
