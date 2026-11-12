@@ -84,5 +84,5 @@ def test_standard_install_accepts_layout(monkeypatch, tmp_path):
     monkeypatch.setattr(upgrade, "BIN_DIR", tmp_path / "bin")
     monkeypatch.setattr(upgrade.sys, "prefix", str(venv))
     got_root, got_bin = upgrade.standard_install()
-    assert got_root == venv.resolve()
+    assert got_root == root.resolve()
     assert got_bin == (tmp_path / "bin").resolve()

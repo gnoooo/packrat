@@ -98,15 +98,14 @@ def latest_release(include_prerelease: bool = False) -> Release:
 
 
 def standard_install() -> tuple[pathlib.Path, pathlib.Path]:
-    root = pathlib.Path(sys.prefix).resolve()
-    expected = (INSTALL_ROOT / "venv").resolve()
-    if root != expected:
+    prefix = pathlib.Path(sys.prefix).resolve()
+    expected_venv = (INSTALL_ROOT / "venv").resolve()
+    if prefix != expected_venv:
         raise UpgradeError(
             "self-update is only supported for the standard installer layout "
-            f"({expected}); current prefix is {root}"
+            f"({expected_venv}); current prefix is {prefix}"
         )
-    bin_dir = BIN_DIR.resolve()
-    return root, bin_dir
+    return INSTALL_ROOT.resolve(), BIN_DIR.resolve()
 
 
 def _download(url: str, target: pathlib.Path) -> None:
