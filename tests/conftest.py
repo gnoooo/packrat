@@ -26,3 +26,21 @@ def block_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _blocked)
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked)
     monkeypatch.setattr(socket, "create_connection", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def isolate_user_state(tmp_path, monkeypatch):
+    """Keep config/state writes inside pytest's temp directory."""
+    from packrat import logging_config, paths, runs, tui
+
+    config = tmp_path / "config"
+    monkeypatch.setattr(paths, "CONFIG_DIR", config)
+    monkeypatch.setattr(paths, "LOGS_DIR", config / "logs")
+    monkeypatch.setattr(paths, "ARCHIVE_PATH", config / "archive")
+    monkeypatch.setattr(paths, "RUNS_PATH", config / "runs.jsonl")
+    monkeypatch.setattr(paths, "PROFILE_PATH", config / "profile.json")
+    monkeypatch.setattr(paths, "FAILED_DIR", config / "failed")
+    monkeypatch.setattr(runs, "RUNS_PATH", config / "runs.jsonl")
+    monkeypatch.setattr(logging_config, "LOG_DIR", config / "logs")
+    monkeypatch.setattr(tui, "LOG_DIR", config / "logs")
+    return config

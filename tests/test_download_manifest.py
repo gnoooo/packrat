@@ -69,7 +69,8 @@ def test_generic_runs_batch_download(
     manifest.write_text(json.dumps({"entries": entries}), encoding="utf-8")
 
     def fake_run(entries_arg, **kwargs):
-        assert kwargs.get("archive_path") == ".packrat_archive"
+        from packrat import paths
+        assert kwargs.get("archive_path") == str(paths.ARCHIVE_PATH)
         assert kwargs.get("mode") == "manifest"
         return {
             "downloaded": 1,

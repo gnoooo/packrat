@@ -109,8 +109,8 @@ packrat sync --limit 1 --dry-run
 packrat sync --limit 1
 ```
 
-The first real download creates `~/Music/PackratMidden/` and `.packrat_archive` in the
-current directory. See [Quickstart](QUICKSTART.md) for a complete first run.
+The first real download creates `~/Music/PackratMidden/`. Download state lives
+under `~/.config/packrat/` (`archive`, `runs.jsonl`, `profile.json`, `logs/`). See [Quickstart](QUICKSTART.md) for a complete first run.
 
 ## Updating
 
@@ -139,7 +139,7 @@ rm -rf ~/.local/share/packrat
 rm -f ~/.local/bin/packrat
 ```
 
-This removes the application only. Your music library, `.packrat_archive`,
+This removes the application only. Your music library, `~/.config/packrat/archive`,
 config and logs are preserved.
 
 For a manual venv install, deactivate it and remove the venv; use

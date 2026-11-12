@@ -111,7 +111,7 @@ def test_artist_min_duration_forwarded(tmp_path, monkeypatch):
                                            "est_source": "default",
                                            "measured_s_per_track": 0})
     cli.main(["artist", "A", "--headers", "/tmp/x", "--dry-run",
-              "--min-duration", "300"])
+              "--min-duration", "300", "--force-new-archive"])
     assert seen["min_duration"] == 300
     assert seen["duration_window"] is True
 

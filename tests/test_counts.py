@@ -49,9 +49,8 @@ def test_summarize_entries_measured_overrides():
 
 def test_runs_record_and_read_back(tmp_path: pathlib.Path):
     runs.record_run(tmp_path, mode="artist:X", tracks=3, downloaded=2, seconds=40.0)
-    paths = [tmp_path / "playlists" / "runs.jsonl"]
-    assert paths[0].exists()
-    data = json.loads(paths[0].read_text().splitlines()[-1])
+    assert runs.RUNS_PATH.exists()
+    data = json.loads(runs.RUNS_PATH.read_text().splitlines()[-1])
     assert data["downloaded"] == 2 and data["seconds"] == 40.0
     # 40 s / 2 downloads = 20 s/track
     assert artists.runs.last_measured(tmp_path) == 20.0
@@ -78,14 +77,14 @@ def test_batch_appends_runs_real_batches(tmp_path, monkeypatch):
     batch.run_batch_download(
         entries, output_root=tmp_path, mode="artist:Banda", delay=0.0
     )
-    lines = (tmp_path / "playlists" / "runs.jsonl").read_text().splitlines()
+    lines = runs.RUNS_PATH.read_text().splitlines()
     data = json.loads(lines[-1])
     assert data["mode"] == "artist:Banda" and data["tracks"] == 3
     assert data["downloaded"] == 3
 
 
-def test_runs_last_measured_skips_empty_and_broken(tmp_path: pathlib.Path):
-    p = tmp_path / "playlists" / "runs.jsonl"
+def test_runs_last_measured_skips_empty_and_broken(tmp_path: pathlib.Path, monkeypatch):
+    p = runs.RUNS_PATH
     p.parent.mkdir(parents=True)
     p.write_text(
         json.dumps({"ts": 1, "mode": "m", "tracks": 1, "downloaded": 0, "seconds": 9}) + "\n"
@@ -93,5 +92,6 @@ def test_runs_last_measured_skips_empty_and_broken(tmp_path: pathlib.Path):
         + json.dumps({"ts": 3, "mode": "m", "tracks": 2, "downloaded": 2, "seconds": 30}) + "\n"
     )
     assert runs.last_measured(tmp_path) == 15.0
-    # Empty file / missing file -> None.
+    # Empty/missing config state -> None.
+    monkeypatch.setattr(runs, "RUNS_PATH", tmp_path / "missing-runs.jsonl")
     assert runs.last_measured(tmp_path / "nowhere") is None

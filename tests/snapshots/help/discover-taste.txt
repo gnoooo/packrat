@@ -21,7 +21,7 @@ First-time setup:
 Advanced:
   --archive FILE        download history file, so finished songs are not
                         downloaded again (env: PACKRAT_ARCHIVE; default:
-                        .packrat_archive)
+                        ~/.config/packrat/archive)
   --max-size SIZE       skip songs bigger than SIZE (example: 3GB)
   --min-duration SECONDS
                         ignore songs shorter than this many seconds (default:

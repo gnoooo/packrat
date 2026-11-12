@@ -21,7 +21,7 @@ packrat -v sync --limit 1
 packrat -vv sync --limit 1
 ```
 
-Logs are written under `logs/packrat-*.log`.
+Logs are written under `~/.config/packrat/logs/packrat-*.log`.
 
 ## Common problems
 
@@ -31,12 +31,12 @@ Logs are written under `logs/packrat-*.log`.
 | Age-restricted / sign-in required | Use `--cookies-from-browser firefox` or `PACKRAT_COOKIES_FROM_BROWSER`. |
 | 403 / 429 / bot check | Wait, use cookies, or increase `--delay`; repeated retryable errors stop the batch after 3. |
 | Some songs fail without Deno | Install Deno ≥ 2.3. |
-| Nothing downloads | Check `.packrat_archive`, `--limit`, `--max-size`, and the manifest. |
+| Nothing downloads | Check `~/.config/packrat/archive`, `--limit`, `--max-size`, and the manifest. |
 | Track skipped as too large | Raise or remove `--max-size`. |
 | TUI colors look banded | Use tmux 3.7+ / `tmux-256color`; check the `TUI palette` log line. |
 | TUI text invisible in tmux | Update Packrat; old versions exceeded tmux's 256-pair limit. |
 | `terminal too small` | Use at least 40 columns × 12 rows. |
-| Archive warning | Back up `.packrat_archive`; use `--force-new-archive` only if you accept re-downloading. |
+| Archive warning | Back up `~/.config/packrat/archive`; use `--force-new-archive` only if you accept re-downloading. |
 | Output folder missing | It is created on first download; check `--output` / `PACKRAT_OUTPUT`. |
 
 ## Inspect a plan
@@ -68,4 +68,4 @@ packrat --version
 packrat -vv <failing command>
 ```
 
-and the matching `logs/packrat-*.log` (redact secrets before sharing).
+and the matching `~/.config/packrat/logs/packrat-*.log` (redact secrets before sharing).

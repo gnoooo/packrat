@@ -19,6 +19,7 @@ from ytmusicapi import YTMusic
 from yt_dlp.cookies import extract_cookies_from_browser
 
 from packrat.archive import Archive
+from packrat import paths
 from packrat.integrity import verify_audio
 from packrat.download import estimate_track  # kept for test/back-compat patch points
 from packrat.batch import exit_code_from_result, run_batch_download
@@ -193,7 +194,7 @@ def run_sync(
         source_name = _source_name(args.source)
         manifest_path = output_root / "playlists" / f"{source_name}.manifest.json"
         m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
-        failures_path = output_root / "playlists" / f"{source_name}.failed.json"
+        failures_path = paths.FAILED_DIR / f"{source_name}.json"
 
         max_size = parse_size(args.max_size) if args.max_size else None
 

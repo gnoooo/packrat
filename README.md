@@ -59,7 +59,7 @@ packrat --tui sync --source liked
 ```
 
 Files go to `~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a`; singles go to
-`~/Music/PackratMidden/<Artist>/Singles/`. Finished video IDs go to `.packrat_archive`.
+`~/Music/PackratMidden/<Artist>/Singles/`. Finished video IDs go to `~/.config/packrat/archive`.
 
 ## Commands
 
@@ -111,7 +111,7 @@ same whether it is headless or full-screen.
 
 ```text
 --output/-o DIR     # library root (default: ~/Music/PackratMidden)
---archive FILE      # download history (default: .packrat_archive)
+--archive FILE      # download history (default: ~/.config/packrat/archive)
 --delay SEC         # pause between tracks (default: 7.0)
 --max-size SIZE     # skip oversized tracks, e.g. 3GB
 --limit N           # download at most N new tracks
@@ -160,7 +160,7 @@ Security/integrity work in this phase:
 ## Security
 
 Never commit `browser.json`, `cookies*.txt`, headers files, `~/Music/PackratMidden/`,
-`.packrat_archive`, or logs. They are gitignored. See [Auth](docs/AUTH.md) for
+`~/.config/packrat/archive`, or logs. Config/state stays outside the repository. See [Auth](docs/AUTH.md) for
 the cookie model.
 
 ---

@@ -23,6 +23,7 @@ src/packrat/
   discover*.py, queues.py     # discovery planners
   tui.py, tui_theme.py        # curses renderer and palette
   archive.py, manifest.py     # state on disk
+  paths.py                    # config/state locations
 tests/                        # pytest suite, network blocked
 docs/                         # user documentation and images
 dev/hooks/                    # shared git hooks
@@ -146,4 +147,4 @@ packrat --version
 git status
 ```
 
-Keep credentials, `~/Music/PackratMidden/`, `.packrat_archive` and logs out of commits.
+Keep credentials, `~/Music/PackratMidden/`, `~/.config/packrat/archive` and logs out of commits.

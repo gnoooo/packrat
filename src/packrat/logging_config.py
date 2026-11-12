@@ -45,7 +45,9 @@ class RedactFilter(logging.Filter):
 
 
 RING_CAPACITY = 1000
-LOG_DIR = pathlib.Path("logs")
+from packrat.paths import LOGS_DIR
+
+LOG_DIR = LOGS_DIR
 
 
 class RingBufferHandler(logging.Handler):
@@ -79,13 +81,17 @@ def setup_logging(
 ) -> RingBufferHandler | None:
     """Configure root logging.
 
-    - Always logs to a timestamped file in logs/.
+    - Always logs to a timestamped file in ~/.config/packrat/logs/.
     - In TUI mode, also keeps a redacted ring buffer and removes console output.
     - Otherwise, also echoes to stderr.
     """
     if log_dir is None:
         log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir.chmod(0o700)
+    except OSError:
+        pass
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log_file = log_dir / f"packrat-{ts}.log"
 

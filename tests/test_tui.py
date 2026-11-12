@@ -39,7 +39,7 @@ def test_format_bytes(n, expected):
 
 def test_latest_log_path_returns_default_when_empty(monkeypatch):
     monkeypatch.setattr("glob.glob", lambda pattern: [])
-    assert tui._latest_log_path() == "logs/"
+    assert tui._latest_log_path() == f"{tui.LOG_DIR}/"
 
 
 def test_truncate():

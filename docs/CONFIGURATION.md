@@ -15,7 +15,7 @@
 | `PACKRAT_COOKIES` | - | Netscape cookie jar for yt-dlp. |
 | `PACKRAT_COOKIES_FROM_BROWSER` | - | Browser/profile spec. |
 | `PACKRAT_OUTPUT` | `~/Music/PackratMidden` | Music library root. |
-| `PACKRAT_ARCHIVE` | `.packrat_archive` | Finished video IDs. |
+| `PACKRAT_ARCHIVE` | `~/.config/packrat/archive` | Finished video IDs. |
 | `PACKRAT_SINGLES_DIR` | `Singles` | Singles folder inside each artist. |
 | `PACKRAT_MANIFEST_FORMAT` | `json` | `json` or `json+csv`. |
 | `PACKRAT_TUI_ANIM` | enabled | `0` disables TUI animation. |
@@ -29,11 +29,14 @@ CLI values override environment values. Old `YTM_*` names are accepted as fallba
 | Path | Meaning |
 |---|---|
 | `~/Music/PackratMidden/` | Default library root. |
-| `.packrat_archive` | Download history. |
+| `~/.config/packrat/archive` | Download history. |
+| `~/.config/packrat/runs.jsonl` | Throughput history. |
+| `~/.config/packrat/profile.json` | Discovery taste profile. |
+| `~/.config/packrat/failed/*.json` | Per-source failure lists. |
 | `~/Music/PackratMidden/playlists/*.manifest.json` | Saved plans. |
 | `~/Music/PackratMidden/playlists/*.m3u8` | Generated playlists. |
 | `~/.config/packrat/browser.json` | Login headers. |
-| `logs/packrat-*.log` | Run logs. |
+| `~/.config/packrat/logs/packrat-*.log` | Run logs. |
 
 Change the library per command:
 
@@ -67,7 +70,7 @@ The archive prevents re-downloading finished tracks.
 If you delete it but the output folder already contains audio, Packrat warns and asks before 
 starting a new history, even with `--yes`. `--force-new-archive` skips that check.
 
-Back up `.packrat_archive` together with `~/Music/PackratMidden/`.
+Back up `~/.config/packrat/archive` together with `~/Music/PackratMidden/`.
 
 ## Download pacing
 
@@ -96,4 +99,4 @@ See [TUI](TUI.md).
 - Old command `ytm-offline` still invokes Packrat.
 - Old `YTM_*` environment variables are fallbacks.
 - Old config path is read if the new one is absent.
-- Existing `.ytm_offline_archive` is used if `.packrat_archive` is absent.
+- Existing `.packrat_archive` / `.ytm_offline_archive` is used if `~/.config/packrat/archive` is absent.

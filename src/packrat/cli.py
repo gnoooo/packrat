@@ -28,6 +28,7 @@ from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.download import _browser_tuple, _final_filepath
 from packrat.logging_config import redact as _redact
 from packrat import security
+from packrat import paths
 from packrat.services import credentials as credentials_service
 from packrat.services import diagnostics as diagnostics_service
 from packrat.services import metadata as metadata_service
@@ -653,7 +654,7 @@ def cmd_discover_phase4(args: argparse.Namespace) -> int:
     manifest_path = output_root / "playlists" / "discover-phase4.manifest.json"
     manifest.write(manifest_path, "json")
 
-    print(f"\nphase 4 profile: {output_root / 'playlists' / 'profile.json'}")
+    print(f"\nphase 4 profile: {paths.PROFILE_PATH}")
     print(f"phase 4 manifest: {manifest_path}")
     print(f"total tracks: {summary['total']}")
     print("per bucket:")

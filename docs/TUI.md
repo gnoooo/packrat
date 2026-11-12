@@ -96,4 +96,4 @@ packrat --tui --ascii sync         # ASCII glyphs
 ## Logs
 
 The log card shows recent log lines. `l` hides or shows it. Logs are also
-written to `logs/packrat-*.log`; use `-v` for more detail.
+written to `~/.config/packrat/logs/packrat-*.log`; use `-v` for more detail.

@@ -24,6 +24,7 @@ from packrat.normalize import (
 )
 from packrat.lastfm import LastFMClient
 from packrat.manifest import Manifest, atomic_write_text
+from packrat import paths
 from packrat.sizes import format_size, heuristic_size, parse_size
 
 
@@ -217,7 +218,8 @@ def build_profile(
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
-    profile_path = output_root / "playlists" / "profile.json"
+    profile_path = paths.PROFILE_PATH
+    paths.ensure_config_dir()
     atomic_write_text(
         profile_path,
         json.dumps(profile, indent=2, ensure_ascii=False),

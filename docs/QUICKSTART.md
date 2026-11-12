@@ -37,7 +37,7 @@ packrat sync --limit 5
 ```
 
 Files land in `~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a` (singles use `~/Music/PackratMidden/<Artist>/Singles/`).
-Finished video IDs are added to `.packrat_archive`.
+Finished video IDs are added to `~/.config/packrat/archive`.
 
 ## 4. Use the full-screen view
 

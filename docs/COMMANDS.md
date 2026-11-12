@@ -40,7 +40,7 @@ Common options such as `--output`, `--limit`, `--dry-run` and `--yes` may go bef
 | Option | Meaning |
 |---|---|
 | `--output/-o DIR` | Output root; default `~/Music/PackratMidden`. |
-| `--archive FILE` | Download history; default `.packrat_archive`. |
+| `--archive FILE` | Download history; default `~/.config/packrat/archive`. |
 | `--delay SEC` | Pause between tracks; default `7.0`. |
 | `--max-size SIZE` | Skip tracks larger than SIZE, e.g. `3GB`. |
 | `--limit N` | Download at most N new tracks. |

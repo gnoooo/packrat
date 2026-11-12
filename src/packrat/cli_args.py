@@ -19,11 +19,12 @@ import pathlib
 from typing import Any
 
 from packrat import __version__
+from packrat import paths
 from packrat.naming import SINGLES_DIR_DEFAULT
 from packrat.sizes import parse_size
 
 DEFAULT_OUTPUT = "~/Music/PackratMidden"
-DEFAULT_ARCHIVE = ".packrat_archive"
+DEFAULT_ARCHIVE = "~/.config/packrat/archive"
 DEFAULT_DELAY = 7.0
 DEFAULT_THEME = "ocean"
 DEFAULT_PALETTE = "auto"
@@ -72,9 +73,18 @@ def _archive_default() -> str:
     env = _env("PACKRAT_ARCHIVE", "YTM_ARCHIVE")
     if env:
         return env
-    new = pathlib.Path(DEFAULT_ARCHIVE)
-    old = pathlib.Path(LEGACY_ARCHIVE)
-    return str(old) if old.exists() and not new.exists() else DEFAULT_ARCHIVE
+    new = paths.ARCHIVE_PATH
+    candidates = (
+        pathlib.Path(LEGACY_ARCHIVE),
+        pathlib.Path.home() / LEGACY_ARCHIVE,
+        pathlib.Path(".ytm_offline_archive"),
+        pathlib.Path.home() / ".ytm_offline_archive",
+    )
+    if not new.exists():
+        for old in candidates:
+            if old.exists():
+                return str(old)
+    return str(new)
 
 
 def _singles_dir_default() -> str:

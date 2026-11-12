@@ -1316,8 +1316,11 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
 def _latest_log_path() -> str:
     import glob
 
-    paths = sorted(glob.glob(str(LOG_DIR / "packrat-*.log")))
-    return paths[-1] if paths else "logs/"
+    paths = sorted(
+        glob.glob(str(LOG_DIR / "packrat-*.log"))
+        + glob.glob(str(LOG_DIR / "ytm-offline-*.log"))
+    )
+    return paths[-1] if paths else f"{LOG_DIR}/"
 
 
 def supports_tui() -> bool:
