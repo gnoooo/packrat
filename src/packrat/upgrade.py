@@ -322,6 +322,8 @@ def run_upgrade(
             if _sha256(requirements) != req_hash:
                 raise UpgradeError("requirements.lock checksum mismatch")
         _attest(wheel, release.tag)
+        if requirements is not None:
+            _attest(requirements, release.tag)
         print("attestation: verified")
 
         lock = _locked(root / ".install.lock")
