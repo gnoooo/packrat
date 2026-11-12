@@ -199,26 +199,36 @@ install_packrat() {
     rm -rf "$TMP_VENV" "$OLD_VENV"
     trap cleanup EXIT
 
+    # Recover a previous SIGKILL between the old/new directory moves.
+    for stale in "$PREFIX"/venv.old.*; do
+        [ -d "$stale" ] || continue
+        if [ ! -e "$PREFIX/venv" ]; then
+            mv "$stale" "$PREFIX/venv"
+        else
+            rm -rf "$stale"
+        fi
+    done
+    rm -rf "$PREFIX"/.venv.new.* 2>/dev/null || true
+
     install_backend "$TMP_VENV"
     "$TMP_VENV/bin/packrat" --version
+
+    # Rewrite console-script shebangs while the venv is still at its temp
+    # path, so the final directory is usable immediately after the move.
+    if [ -d "$TMP_VENV/bin" ]; then
+        local escaped_tmp escaped_prefix
+        escaped_tmp="$(printf '%s' "$TMP_VENV" | sed 's/[&|\\]/\\&/g')"
+        escaped_prefix="$(printf '%s' "$PREFIX/venv" | sed 's/[&|\\]/\\&/g')"
+        while IFS= read -r script; do
+            sed -i "s|$escaped_tmp|$escaped_prefix|g" "$script"
+        done < <(grep -IlF "$TMP_VENV" "$TMP_VENV/bin"/* 2>/dev/null || true)
+    fi
 
     if [ -e "$PREFIX/venv" ]; then
         mv "$PREFIX/venv" "$OLD_VENV"
     fi
-    local old_tmp="$TMP_VENV"
     mv "$TMP_VENV" "$PREFIX/venv"
     TMP_VENV=""
-
-    # Console scripts created inside the temporary venv still point at its
-    # old absolute path; rewrite their shebangs after the move.
-    if [ -d "$PREFIX/venv/bin" ]; then
-        local escaped_tmp escaped_prefix
-        escaped_tmp="$(printf '%s' "$old_tmp" | sed 's/[&|\\]/\\&/g')"
-        escaped_prefix="$(printf '%s' "$PREFIX/venv" | sed 's/[&|\\]/\\&/g')"
-        while IFS= read -r script; do
-            sed -i "s|$escaped_tmp|$escaped_prefix|g" "$script"
-        done < <(grep -IlF "$old_tmp" "$PREFIX/venv/bin"/* 2>/dev/null || true)
-    fi
 
     rm -f "$TMP_LINK"
     ln -s "$PREFIX/venv/bin/packrat" "$TMP_LINK"
