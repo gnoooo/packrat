@@ -9,8 +9,19 @@ from yt_dlp.utils import sanitize_filename
 
 
 def clean(text: str) -> str:
-    """Sanitize a single path component."""
-    return sanitize_filename(str(text).strip(), restricted=True).strip(".")
+    """Sanitize a single path component without discarding Unicode letters.
+
+    yt-dlp's restricted mode replaces every non-ASCII character with ``_``,
+    which collapses entire CJK/Cyrillic/Greek libraries into one directory.
+    Keep Unicode, but replace path separators and spaces with ``_`` so the
+    existing ``The_Hives`` layout stays stable.
+    """
+    name = sanitize_filename(str(text).strip(), restricted=False)
+    name = name.replace(" ", "_")
+    name = name.replace("⧸", "_").replace("⧹", "_")
+    name = name.replace("：", "_")
+    name = name.strip().strip(".")
+    return name or "_"
 
 
 def track_filename(
@@ -23,6 +34,12 @@ def track_filename(
     if track_num is not None:
         name = f"{int(track_num):02d} - {name}"
     return f"{name}.{ext.lstrip('.')}"
+
+
+def collision_path(path: pathlib.Path, video_id: str) -> pathlib.Path:
+    """Return a deterministic alternate path for a filename collision."""
+    safe_id = clean(video_id) or "video"
+    return path.with_name(f"{path.stem} [{safe_id}]{path.suffix}")
 
 
 SINGLES_DIR_DEFAULT = "Singles"

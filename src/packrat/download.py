@@ -14,7 +14,8 @@ import yt_dlp
 from packrat.integrity import verify_audio
 from packrat.logging_config import redact
 from packrat.sizes import estimate_size
-from packrat.naming import SINGLES_DIR_DEFAULT, track_path
+from packrat.naming import SINGLES_DIR_DEFAULT, collision_path, track_path
+from packrat.song_meta import apply_song_metadata, metadata_from_track
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +299,50 @@ def download_track(
             event_callback({"type": "track_done", "payload": kwargs})
         return DownloadResult(**kwargs)
 
+    def tag_existing(path: pathlib.Path) -> None:
+        try:
+            apply_song_metadata(path, metadata_from_track(track))
+        except Exception:
+            logger.warning("could not rewrite tags for %s", path, exc_info=True)
+
+    # Idempotency: a valid file already at the destination is the result.
+    # Compare duration when available so same-title/different-video collisions
+    # do not silently reuse the wrong audio.
+    expected_duration = track.get("duration")
+    if output_path.exists():
+        existing = verify_audio(output_path)
+        if existing.ok:
+            duration_mismatch = (
+                isinstance(expected_duration, (int, float))
+                and expected_duration > 0
+                and existing.duration is not None
+                and abs(float(existing.duration) - float(expected_duration)) > 3.0
+            )
+            if not duration_mismatch:
+                tag_existing(output_path)
+                return emit_done(
+                    status="downloaded",
+                    video_id=video_id,
+                    title=track.get("title", ""),
+                    filepath=output_path,
+                    bytes=existing.size,
+                )
+            output_path = collision_path(output_path, video_id)
+            if output_path.exists():
+                alternate = verify_audio(output_path)
+                if alternate.ok:
+                    tag_existing(output_path)
+                    return emit_done(
+                        status="downloaded",
+                        video_id=video_id,
+                        title=track.get("title", ""),
+                        filepath=output_path,
+                        bytes=alternate.size,
+                    )
+                _quarantine(output_path)
+        else:
+            _quarantine(output_path)
+
     ytdl_logger = _YtdlpLogger()
     progress_hook = (
         (lambda d: _progress_hook(control, event_callback, d))
@@ -307,19 +352,6 @@ def download_track(
     ydl_opts = _build_ydl_opts(
         output_path, cookies, cookies_from_browser, browser_profile, ytdl_logger, progress_hook
     )
-
-    # Idempotency: a valid file already at the destination is the result.
-    if output_path.exists():
-        existing = verify_audio(output_path)
-        if existing.ok:
-            return emit_done(
-                status="downloaded",
-                video_id=video_id,
-                title=track.get("title", ""),
-                filepath=output_path,
-                bytes=existing.size,
-            )
-        _quarantine(output_path)
 
     emit_start("resolving")
     for attempt in range(1, max_retries + 1):
@@ -372,6 +404,7 @@ def download_track(
                         retryable=True,
                         player_client=ytdl_logger.player_client,
                     )
+                tag_existing(downloaded)
                 return emit_done(
                     status="downloaded",
                     video_id=video_id,

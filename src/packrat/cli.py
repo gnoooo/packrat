@@ -537,7 +537,10 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
     if metadata is not None:
-        apply_song_metadata(downloaded, metadata)
+        try:
+            apply_song_metadata(downloaded, metadata)
+        except Exception as exc:
+            print(f"tag update failed: {_redact(exc)}", file=sys.stderr)
 
     print(f"downloaded: {downloaded}")
     print(

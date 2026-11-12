@@ -21,6 +21,7 @@ class SongMetadata:
     release_type: str | None = None
     year: int | None = None
     duration: int | None = None
+    track_total: int | None = None
 
 
 def _artist(raw: dict[str, Any]) -> str:
@@ -73,6 +74,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
 
     album_name = ""
     album_id = ""
+    track_total: int | None = None
     for result in yt.search(f"{title} {artist}", filter="songs", limit=10):
         result_artist = _artist(result)
         if normalize(result_artist) != normalize(artist):
@@ -90,6 +92,8 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
     if album_id:
         album = yt.get_album(album_id)
         album_title = str(album.get("title") or album_name or "")
+        if isinstance(album.get("trackCount"), int):
+            track_total = album["trackCount"]
         track = _pick_album_track(album, video_id, title)
         if track is not None:
             title = str(track.get("title") or title)
@@ -105,6 +109,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
                 release_type=str(album.get("type") or "") or None,
                 year=album.get("year") if isinstance(album.get("year"), int) else None,
                 duration=duration,
+                track_total=track_total,
             )
         return SongMetadata(
             video_id=video_id,
@@ -114,6 +119,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
             release_type=str(album.get("type") or "") or None,
             year=album.get("year") if isinstance(album.get("year"), int) else None,
             duration=duration,
+            track_total=track_total,
         )
 
     return SongMetadata(
@@ -125,23 +131,44 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
     )
 
 
-def apply_song_metadata(path: pathlib.Path, meta: SongMetadata) -> None:
-    """Rewrite MP4 tags with canonical catalog metadata; keep the cover."""
+def metadata_from_track(track: dict[str, Any]) -> SongMetadata:
+    """Build canonical metadata from a manifest/download-track mapping."""
+    return SongMetadata(
+        video_id=str(track.get("video_id") or ""),
+        title=str(track.get("title") or ""),
+        artist=str(track.get("artist") or ""),
+        album=str(track.get("album") or ""),
+        track_num=track.get("track_num") if isinstance(track.get("track_num"), int) else None,
+        release_type=track.get("release_type"),
+        year=track.get("release_year") if isinstance(track.get("release_year"), int) else None,
+        duration=track.get("duration") if isinstance(track.get("duration"), int) else None,
+        track_total=track.get("track_total") if isinstance(track.get("track_total"), int) else None,
+    )
+
+
+def apply_song_metadata(path: pathlib.Path, meta: SongMetadata) -> bool:
+    """Rewrite MP4 tags with canonical catalog metadata; keep the cover.
+
+    Returns False for non-MP4 fallback formats (WebM/Opus/MP3) instead of
+    raising after a successful download.
+    """
     import mutagen
+    from mutagen.mp4 import MP4
 
     audio = mutagen.File(str(path), easy=False)
-    if audio is None:
-        return
+    if not isinstance(audio, MP4):
+        return False
     tags = getattr(audio, "tags", None)
     if tags is None:
-        return
+        return False
     tags["\xa9nam"] = [meta.title]
     tags["\xa9ART"] = [meta.artist]
     tags["aART"] = [meta.artist]
     if meta.album:
         tags["\xa9alb"] = [meta.album]
     if meta.track_num is not None:
-        tags["trkn"] = [(int(meta.track_num), 0)]
+        tags["trkn"] = [(int(meta.track_num), int(meta.track_total or 0))]
     if meta.year is not None:
         tags["\xa9day"] = [str(meta.year)]
     audio.save()
+    return True

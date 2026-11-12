@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 from ytmusicapi import YTMusic
@@ -26,8 +27,13 @@ EDITION_WORDS = (
 
 
 def normalize(text: Any) -> str:
-    """Lowercase and strip punctuation for deduplication."""
-    return re.sub(r"[^a-z0-9]+", "", str(text).lower())
+    """Case-fold and strip punctuation while preserving Unicode letters.
+
+    The old ASCII-only regex collapsed every CJK/Cyrillic/Greek name to the
+    empty string, making unrelated artists look identical.
+    """
+    value = unicodedata.normalize("NFKC", str(text)).casefold()
+    return "".join(ch for ch in value if ch.isalnum())
 
 
 def artist_name(raw: dict[str, Any]) -> str:
