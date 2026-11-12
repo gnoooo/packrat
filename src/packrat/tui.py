@@ -1259,6 +1259,10 @@ def _join_worker(thread: threading.Thread, log_note: str = "") -> None:
     try:
         thread.join()
     except KeyboardInterrupt:
+        global _palette_dirty
+        if _palette_dirty:
+            tt.restore_palette()
+            _palette_dirty = False
         print("second Ctrl-C: download thread still running — a partial file may "
               f"remain{(f'; full log: {log_note}' if log_note else '')}",
               file=sys.stderr)
