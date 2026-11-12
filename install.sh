@@ -155,15 +155,29 @@ check_external_tools() {
 
 install_backend() {
     local venv="$1"
+    local requirements=""
+    if [ -z "$GIT_URL" ] && [ -f "$SOURCE/requirements.lock" ]; then
+        requirements="$SOURCE/requirements.lock"
+    fi
     if command -v uv >/dev/null 2>&1; then
         note "using uv $(uv --version 2>/dev/null | awk '{print $2}')"
         run uv venv --python "$PYTHON" "$venv"
-        run uv pip install --python "$venv/bin/python" "$PIP_SOURCE"
+        if [ -n "$requirements" ]; then
+            run uv pip install --python "$venv/bin/python" --no-deps "$PIP_SOURCE"
+            run uv pip install --python "$venv/bin/python" --require-hashes -r "$requirements"
+        else
+            run uv pip install --python "$venv/bin/python" "$PIP_SOURCE"
+        fi
     else
         note "uv not found; using pip fallback."
         note "For faster installs, install uv: https://docs.astral.sh/uv/getting-started/installation/"
         run "$PYTHON" -m venv "$venv"
-        run "$venv/bin/python" -m pip install "$PIP_SOURCE"
+        if [ -n "$requirements" ]; then
+            run "$venv/bin/python" -m pip install --no-deps "$PIP_SOURCE"
+            run "$venv/bin/python" -m pip install --require-hashes -r "$requirements"
+        else
+            run "$venv/bin/python" -m pip install "$PIP_SOURCE"
+        fi
     fi
 }
 

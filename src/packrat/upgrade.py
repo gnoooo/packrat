@@ -42,6 +42,8 @@ class Release:
     wheel_url: str
     wheel_name: str
     checksums_url: str
+    requirements_url: str | None = None
+    requirements_name: str = "requirements.lock"
     prerelease: bool = False
 
 
@@ -108,6 +110,7 @@ def latest_release(include_prerelease: bool = False) -> Release:
             wheel_url=assets[wheel_name],
             wheel_name=wheel_name,
             checksums_url=assets["SHA256SUMS"],
+            requirements_url=assets.get("requirements.lock"),
             prerelease=bool(data.get("prerelease")),
         )
     raise UpgradeError("no usable release with a wheel and SHA256SUMS was found")
@@ -169,21 +172,44 @@ def _attest(wheel: pathlib.Path, tag: str) -> None:
         )
 
 
-def _install_wheel(wheel: pathlib.Path, venv: pathlib.Path) -> None:
+def _install_wheel(
+    wheel: pathlib.Path,
+    venv: pathlib.Path,
+    requirements: pathlib.Path | None = None,
+) -> None:
     base_python = getattr(sys, "_base_executable", None) or sys.executable
     uv = shutil.which("uv")
     if uv:
         subprocess.run([uv, "venv", "--python", base_python, str(venv)], check=True)
         subprocess.run(
-            [uv, "pip", "install", "--python", str(venv / "bin" / "python"), str(wheel)],
+            [
+                uv, "pip", "install", "--python", str(venv / "bin" / "python"),
+                "--no-deps", str(wheel),
+            ],
             check=True,
         )
+        if requirements is not None:
+            subprocess.run(
+                [
+                    uv, "pip", "install", "--python", str(venv / "bin" / "python"),
+                    "--require-hashes", "-r", str(requirements),
+                ],
+                check=True,
+            )
     else:
         subprocess.run([base_python, "-m", "venv", str(venv)], check=True)
         subprocess.run(
-            [str(venv / "bin" / "python"), "-m", "pip", "install", str(wheel)],
+            [str(venv / "bin" / "python"), "-m", "pip", "install", "--no-deps", str(wheel)],
             check=True,
         )
+        if requirements is not None:
+            subprocess.run(
+                [
+                    str(venv / "bin" / "python"), "-m", "pip", "install",
+                    "--require-hashes", "-r", str(requirements),
+                ],
+                check=True,
+            )
 
 
 def _replace_install(
@@ -191,6 +217,7 @@ def _replace_install(
     root: pathlib.Path,
     bin_dir: pathlib.Path,
     target_version: str,
+    requirements: pathlib.Path | None = None,
 ) -> None:
     venv = root / "venv"
     backup = root / "venv.upgrade-backup"
@@ -204,7 +231,7 @@ def _replace_install(
     if venv.exists():
         venv.rename(backup)
     try:
-        _install_wheel(wheel, venv)
+        _install_wheel(wheel, venv, requirements)
         out = subprocess.run(
             [str(venv / "bin" / "packrat"), "--version"],
             check=True, text=True, capture_output=True,
@@ -281,17 +308,25 @@ def run_upgrade(
         checksums = tmpdir / "SHA256SUMS"
         _download(release.wheel_url, wheel)
         _download(release.checksums_url, checksums)
+        requirements = None
+        if release.requirements_url:
+            requirements = tmpdir / release.requirements_name
+            _download(release.requirements_url, requirements)
         expected = _expected_hash(checksums, release.wheel_name)
         actual = _sha256(wheel)
         if actual != expected:
             raise UpgradeError(f"wheel checksum mismatch: {actual} != {expected}")
         print(f"checksum: {actual}")
+        if requirements is not None:
+            req_hash = _expected_hash(checksums, release.requirements_name)
+            if _sha256(requirements) != req_hash:
+                raise UpgradeError("requirements.lock checksum mismatch")
         _attest(wheel, release.tag)
         print("attestation: verified")
 
         lock = _locked(root / ".install.lock")
         try:
-            _replace_install(wheel, root, bin_dir, release.version)
+            _replace_install(wheel, root, bin_dir, release.version, requirements)
         finally:
             lock.close()
     print(f"upgraded: {__version__} -> {release.version}")

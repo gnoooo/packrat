@@ -129,6 +129,8 @@ jobs:
           path.write_text(text, encoding="utf-8")
           PY
           uv lock
+          mkdir -p dist
+          uv export --format requirements.txt --no-dev --no-emit-project --output-file dist/requirements.lock
           uv build --out-dir dist
           git checkout -- pyproject.toml uv.lock
 
@@ -137,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum packrat-*.whl packrat-*.tar.gz > SHA256SUMS
+          sha256sum packrat-*.whl packrat-*.tar.gz requirements.lock > SHA256SUMS
           ls -l
 
       - name: Attest build provenance
