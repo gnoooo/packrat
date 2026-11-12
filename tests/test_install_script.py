@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -27,6 +28,10 @@ def test_install_script_help():
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="installer is Linux-only")
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
+    reason="installer dry-run checks ffmpeg/ffprobe",
+)
 def test_install_script_dry_run_does_not_write(tmp_path):
     prefix = tmp_path / "prefix"
     bin_dir = tmp_path / "bin"
@@ -44,6 +49,10 @@ def test_install_script_dry_run_does_not_write(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="installer is Linux-only")
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
+    reason="installer dry-run checks ffmpeg/ffprobe",
+)
 def test_piped_install_uses_default_repo():
     result = subprocess.run(
         ["bash", "-s", "--", "--dry-run"],
@@ -55,6 +64,10 @@ def test_piped_install_uses_default_repo():
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="installer is Linux-only")
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
+    reason="installer dry-run checks ffmpeg/ffprobe",
+)
 def test_piped_install_dry_run_with_git():
     result = subprocess.run(
         [

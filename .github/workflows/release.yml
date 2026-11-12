@@ -36,6 +36,17 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install system test dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Require release signing key
+        shell: bash
+        run: |
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::GPG_PRIVATE_KEY is not configured. Add the release signing key as a repository secret."
+            exit 1
+          fi
+
       - name: Check lockfile
         run: uv lock --check
 
