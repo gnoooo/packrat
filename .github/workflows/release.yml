@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-master
@@ -17,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-      GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -38,14 +37,6 @@ jobs:
 
       - name: Install system test dependencies
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Require release signing key
-        shell: bash
-        run: |
-          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
-            echo "::error::GPG_PRIVATE_KEY is not configured. Add the release signing key as a repository secret."
-            exit 1
-          fi
 
       - name: Check lockfile
         run: uv lock --check
@@ -104,28 +95,18 @@ jobs:
           uv build --out-dir dist
           git checkout -- pyproject.toml uv.lock
 
-      - name: Sign artifacts
+      - name: Create checksums
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
-            echo "GPG_PRIVATE_KEY secret is required for signed releases" >&2
-            exit 1
-          fi
-          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
-          KEYID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')}"
-          [ -n "$KEYID" ] || { echo "no signing key found" >&2; exit 1; }
           cd dist
           sha256sum packrat-*.whl packrat-*.tar.gz > SHA256SUMS
-          if [ -n "${GPG_PASSPHRASE:-}" ]; then
-            gpg --batch --yes --pinentry-mode loopback \
-              --passphrase "$GPG_PASSPHRASE" \
-              --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
-          else
-            gpg --batch --yes --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
-          fi
-          gpg --armor --export "$KEYID" > release-key.asc
           ls -l
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*
 
       - name: Create tag
         shell: bash

@@ -47,9 +47,10 @@ It runs on every push to `master` (and can be started manually):
 2. `uv sync --frozen --extra dev`
 3. `uv run --frozen pytest`
 4. build wheel + sdist
-5. sign `SHA256SUMS` with GPG
-6. create/push a tag
-7. publish a GitHub release
+5. create `SHA256SUMS`
+6. attest build provenance with GitHub's keyless attestation
+7. create/push a tag
+8. publish a GitHub release
 
 ### Stable vs snapshot releases
 
@@ -71,24 +72,27 @@ git push github master
 The workflow uses `uv.lock`; commit it whenever dependencies or the project
 version change.
 
-### Signing setup
+### Provenance
 
-The workflow requires a GPG private key in repository secrets. Generate a
-dedicated release key:
+No long-lived signing key is required. The workflow uses GitHub's keyless build-provenance attestation:
 
-```bash
-gpg --full-generate-key          # sign-only key is enough
-KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
-gpg --armor --export-secret-keys "$KEYID" > /tmp/packrat-release.asc
-gh secret set GPG_PRIVATE_KEY < /tmp/packrat-release.asc
-gh secret set GPG_PASSPHRASE     # if the key has a passphrase
-gh secret set GPG_KEY_ID --body "$KEYID"
-gpg --armor --export "$KEYID" > docs/release-key.asc
+```yaml
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
 ```
 
-Commit `docs/release-key.asc`; never commit the private key. The future
-`packrat upgrade` command will verify `SHA256SUMS.asc` against this public key.
-The release workflow fails if `GPG_PRIVATE_KEY` is missing.
+After a release, verify an artifact with:
+
+```bash
+gh attestation verify dist/packrat-<version>-py3-none-any.whl \
+  --repo gnoooo/packrat
+```
+
+`SHA256SUMS` is still published for simple integrity checks. 
+A checksum is not an authenticity guarantee; the GitHub attestation is the provenance record.
+No GPG secrets or public key file are needed.
 
 ### Release artifacts
 
@@ -96,8 +100,6 @@ The release workflow fails if `GPG_PRIVATE_KEY` is missing.
 packrat-<version>-py3-none-any.whl
 packrat-<version>.tar.gz
 SHA256SUMS
-SHA256SUMS.asc
-release-key.asc
 ```
 
 Tags and releases are immutable; never move a published tag.
