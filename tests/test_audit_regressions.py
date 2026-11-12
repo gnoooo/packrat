@@ -155,3 +155,51 @@ def test_download_one_updates_archive(monkeypatch, tmp_path):
     assert cli.cmd_download_one(args) == 0
     archive = paths.ARCHIVE_PATH.read_text()
     assert "SGw5bKLV-tY" in archive
+
+
+def test_retry_classifier_includes_503_and_timeouts():
+    from packrat.download import _is_retryable
+
+    assert _is_retryable(Exception("HTTP Error 503: Service Unavailable"))
+    assert _is_retryable(Exception("Read timed out."))
+    assert _is_retryable(Exception("HTTP Error 403: Forbidden"))
+    assert not _is_retryable(Exception("HTTP Error 404: Not Found"))
+
+
+def test_verbose_reordering_keeps_option_values():
+    from packrat import cli_compat
+
+    parser = cli.build_parser()
+    assert cli_compat.move_global_options_after_subcommand(
+        parser, ["-v", "--output", "/tmp/x", "sync"]
+    ) == ["sync", "-v", "--output", "/tmp/x"]
+    assert cli_compat.move_global_options_after_subcommand(
+        parser, ["--output", "sync", "sync"]
+    ) == ["sync", "--output", "sync"]
+
+
+def test_sync_non_tty_requires_yes(tmp_path, monkeypatch):
+    headers = tmp_path / "headers.json"
+    headers.write_text("{}")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    rc = cli.main([
+        "sync", "--source", "liked", "--headers", str(headers),
+        "--output", str(tmp_path), "--archive", str(tmp_path / "archive"),
+    ])
+    assert rc == 2
+
+
+def test_invalid_manifest_env_does_not_break_doctor(monkeypatch):
+    monkeypatch.setenv("PACKRAT_MANIFEST_FORMAT", "bogus")
+    monkeypatch.setattr("packrat.cli.cmd_doctor", lambda _args: 0)
+    assert cli.main(["doctor"]) == 0
+
+
+def test_visual_options_none_does_not_reset_theme():
+    from packrat import tui
+
+    tui.set_visual_options("sunset", True, "basic")
+    tui.set_visual_options(palette=None, no_color=None)
+    assert tui._visual_state["theme"] == "sunset"
+    assert tui._visual_state["no_color"] is True
+    assert tui._visual_state["palette"] == "basic"

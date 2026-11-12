@@ -50,10 +50,7 @@ def move_global_options_after_subcommand(
     for action in parser._actions:
         if not action.option_strings:
             continue
-        takes_value = not isinstance(
-            action,
-            (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction),
-        )
+        takes_value = action.nargs != 0
         for opt in action.option_strings:
             option_info[opt] = takes_value
 
@@ -62,7 +59,21 @@ def move_global_options_after_subcommand(
         None,
     )
     choices = set(sub_action.choices) if sub_action is not None else set()
-    cmd_idx = next((i for i, arg in enumerate(argv) if arg in choices), None)
+    cmd_idx = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in choices:
+            cmd_idx = i
+            break
+        base = arg.split("=", 1)[0]
+        if base in option_info:
+            if option_info[base] and "=" not in arg and i + 1 < len(argv):
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
     if cmd_idx is None or cmd_idx == 0:
         return argv
 

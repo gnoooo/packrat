@@ -48,7 +48,7 @@ def test_sync_limit_caps_batch_after_dedupe(tmp_path, monkeypatch):
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
-        "--limit", "2",
+        "--limit", "2", "--yes",
     ])
     assert rc == 0
     assert captured["n"] == 2
@@ -402,7 +402,7 @@ def test_sync_limit_applies_after_archive_filtering(tmp_path, monkeypatch):
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
-        "--limit", "2", "--force-new-archive",
+        "--limit", "2", "--yes", "--force-new-archive",
     ])
     assert rc == 0
     assert captured["ids"] == ["v1", "v2"]

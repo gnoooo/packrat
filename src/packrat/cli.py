@@ -766,6 +766,15 @@ def cmd_sync(args: argparse.Namespace) -> int:
     _print_paths(output_root, args.archive)
     if not _check_archive_safety(args, output_root):
         return 2
+    if not args.dry_run and not getattr(args, "yes", False):
+        prompt = (
+            "Download your Liked Songs now? This can download many songs; "
+            "add --limit N to cap. [Y/n] "
+            if args.source == "liked"
+            else "Download this playlist now? [Y/n] "
+        )
+        if not _confirm_download(args, prompt):
+            return 2
     if args.tui and not args.dry_run:
         return exit_code_from_result(
             tui_module.run_tui(
@@ -775,15 +784,6 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 ascii_mode=args.ascii,
             )
         )
-    if not args.dry_run and sys.stdin.isatty() and not getattr(args, "yes", False):
-        prompt = (
-            "Download your Liked Songs now? This can download many songs; "
-            "add --limit N to cap. [Y/n] "
-            if args.source == "liked"
-            else "Download this playlist now? [Y/n] "
-        )
-        if not _confirm_download(args, prompt):
-            return 2
     return exit_code_from_result(sync_module.run_sync(args))
 
 
@@ -1604,7 +1604,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output = os.path.expanduser(str(args.output))
 
     cli_args.resolve_auth(args, raw)
-    cli_args.resolve_run_control_aliases(args)
+    if args.command in _STATE_COMMANDS:
+        cli_args.resolve_run_control_aliases(args)
 
     verbose = cli_args.resolve_verbose(args)
     if verbose:
@@ -1634,6 +1635,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         getattr(args, "no_color", False),
         getattr(args, "palette", "auto"),
     )
+    _tui.set_no_anim_default(getattr(args, "no_anim", False))
 
     # If the user did not pass cookies explicitly, reuse the browser that
     # produced the login headers.  The headers file only authenticates

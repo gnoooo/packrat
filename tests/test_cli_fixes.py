@@ -244,7 +244,7 @@ def test_sync_limit_fetches_the_full_source(tmp_path, monkeypatch):
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
-        "--limit", "2",
+        "--limit", "2", "--yes",
     ])
     assert rc == 0
     assert seen["limit"] is None

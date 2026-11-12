@@ -21,10 +21,21 @@ logger = logging.getLogger(__name__)
 
 _RETRYABLE_PATTERNS = (
     "http error 403",
+    "http error 408",
     "http error 429",
+    "http error 500",
+    "http error 502",
+    "http error 503",
+    "http error 504",
     "too many requests",
     "sign in to confirm",
     "bot",
+    "timed out",
+    "timeout",
+    "connection reset",
+    "connection aborted",
+    "temporarily unavailable",
+    "network is unreachable",
 )
 
 

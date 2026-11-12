@@ -84,13 +84,23 @@ MAX_CONTENT_WIDTH = 200
 _palette_dirty = False
 
 
-def set_visual_options(theme: str = "ocean", no_color: bool = False,
-                       palette: str = "auto") -> None:
+_no_anim_default = False
+
+
+def set_no_anim_default(value: bool) -> None:
+    global _no_anim_default
+    _no_anim_default = bool(value)
+
+
+def set_visual_options(theme: str | None = None, no_color: bool | None = None,
+                       palette: str | None = None) -> None:
     """Single place the CLI passes its visual flags; run_tui call sites unchanged."""
-    if theme in tt.THEMES:
+    if theme is not None and theme in tt.THEMES:
         _visual_state["theme"] = theme
-    _visual_state["no_color"] = bool(no_color)
-    _visual_state["palette"] = palette
+    if no_color is not None:
+        _visual_state["no_color"] = bool(no_color)
+    if palette is not None:
+        _visual_state["palette"] = palette
 
 
 def anim_mode(status: str) -> str:
@@ -1258,18 +1268,18 @@ def _join_worker(thread: threading.Thread, log_note: str = "") -> None:
 
 
 def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
-            ascii_mode: bool = False, no_anim: bool = False,
-            no_color: bool | None = None, palette: str = "auto") -> int:
+            ascii_mode: bool = False, no_anim: bool | None = None,
+            no_color: bool | None = None, palette: str | None = None) -> int:
     """Run worker under the TUI; plain logging fallback when stdout/stdin is no TTY."""
     if not supports_tui():
         print("This terminal can't show the full-screen view; "
               "continuing with normal output.", file=sys.stderr)
         return worker_func(**worker_kwargs)
-    if no_color is not None:
-        # Explicit no_color wins; None leaves the global (set by main()) intact.
+    if no_color is not None or palette is not None:
+        # None leaves the global (set by main()) intact.
         set_visual_options(no_color=no_color, palette=palette)
-    else:
-        set_visual_options(palette=palette)
+    if no_anim is None:
+        no_anim = _no_anim_default
     ring_handler = setup_logging(tui_active=True)  # creates LOG_DIR itself
     state = State(mode=mode)
     control = Control()
