@@ -386,3 +386,46 @@ def test_restore_palette_only_touched_slots():
     stream = io.StringIO()
     tui_theme.restore_palette(stream, slots=[7, 3])
     assert "104;3;7" in stream.getvalue()
+
+
+def test_download_one_updates_saved_manifest(monkeypatch, tmp_path):
+    from packrat import paths
+    from packrat.song_meta import SongMetadata
+
+    manifest_path = tmp_path / "playlists" / "artist-A.manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps({
+        "command": "artist", "label": "A",
+        "entries": [{"video_id": "abcdefghijk", "title": "T", "status": "failed",
+                     "path": None, "error": "x"}],
+    }))
+    downloaded = tmp_path / "A" / "Al" / "01 - T.m4a"
+    downloaded.parent.mkdir(parents=True)
+    downloaded.write_bytes(b"x")
+
+    class FakeYDL:
+        def __init__(self, *_a, **_k):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *_exc):
+            return False
+        def extract_info(self, *_a, **_k):
+            return {"filepath": str(downloaded)}
+
+    monkeypatch.setattr("packrat.cli.resolve_song_metadata", lambda *_a, **_k: SongMetadata(
+        video_id="abcdefghijk", title="T", artist="A", album="Al", track_num=1,
+    ))
+    monkeypatch.setattr("packrat.cli._check_deno", lambda: (True, "2.9"))
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYDL)
+    monkeypatch.setattr("packrat.cli._final_filepath", lambda *_a: downloaded)
+    monkeypatch.setattr("packrat.cli.apply_song_metadata", lambda *_a, **_k: True)
+    monkeypatch.setattr("packrat.cli._verify_with_ffprobe", lambda _p: {})
+    monkeypatch.setattr("packrat.cli._verify_with_mutagen", lambda _p: {})
+    args = cli.build_parser().parse_args([
+        "download-one", "abcdefghijk", "--output", str(tmp_path),
+    ])
+    assert cli.cmd_download_one(args) == 0
+    entry = json.loads(manifest_path.read_text())["entries"][0]
+    assert entry["status"] == "downloaded"
+    assert entry["path"] == str(downloaded)

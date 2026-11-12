@@ -459,6 +459,28 @@ def _verify_with_mutagen(path: pathlib.Path) -> dict:
     }
 
 
+def _mark_downloaded_in_manifests(
+    output_root: pathlib.Path, video_id: str, filepath: pathlib.Path
+) -> None:
+    """Best-effort: update an existing plan that contains this video."""
+    from packrat.manifest import atomic_write_text
+
+    for manifest_path in (output_root / "playlists").glob("*.manifest.json"):
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        changed = False
+        for entry in payload.get("entries", []):
+            if entry.get("video_id") == video_id:
+                entry["status"] = "downloaded"
+                entry["path"] = str(filepath)
+                entry["error"] = None
+                changed = True
+        if changed:
+            atomic_write_text(manifest_path, json.dumps(payload, indent=2))
+
+
 def cmd_download_one(args: argparse.Namespace) -> int:
     """Download a single song from a link or video ID and verify the result."""
     video_id = queues_module.parse_video_id(args.video_id)
@@ -584,6 +606,11 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         archive.save()
     except Exception as exc:
         print(f"warning: could not update download history: {_redact(exc)}",
+              file=sys.stderr)
+    try:
+        _mark_downloaded_in_manifests(output_root, video_id, downloaded)
+    except Exception as exc:
+        print(f"warning: could not update saved plans: {_redact(exc)}",
               file=sys.stderr)
 
     print(f"downloaded: {downloaded}")
