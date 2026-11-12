@@ -896,6 +896,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_doctor.set_defaults(func=_noop)
 
+    p_upgrade = sub.add_parser(
+        "upgrade",
+        help="check for or install a newer release",
+        description=(
+            "Check GitHub Releases for a newer Packrat version and, for the "
+            "standard installer layout, install the verified release wheel."
+        ),
+        parents=[verbose_silent],
+    )
+    p_upgrade.add_argument(
+        "--check",
+        action="store_true",
+        help="only check for a newer release; do not install",
+    )
+    p_upgrade.add_argument(
+        "--pre",
+        action="store_true",
+        help="include prerelease versions",
+    )
+    p_upgrade.add_argument(
+        "--yes",
+        action="store_true",
+        help="upgrade without asking for confirmation",
+    )
+    p_upgrade.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be upgraded without changing the install",
+    )
+    p_upgrade.set_defaults(func=_noop)
+
     p_export = sub.add_parser(
         "export-metadata",
         help="export track metadata from a saved plan",

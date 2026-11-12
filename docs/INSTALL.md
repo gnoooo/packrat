@@ -114,6 +114,17 @@ under `~/.config/packrat/` (`archive`, `runs.jsonl`, `profile.json`, `logs/`). S
 
 ## Updating
 
+For a standard installer install:
+
+```bash
+packrat upgrade --check
+packrat upgrade
+```
+
+`upgrade` requires `gh` for attestation verification. It replaces only the
+application venv and command link; the music library and
+`~/.config/packrat/` state are preserved.
+
 With the install script:
 
 ```bash

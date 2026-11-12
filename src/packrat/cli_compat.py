@@ -107,6 +107,7 @@ def register_handlers(parser: argparse.ArgumentParser) -> None:
     sub.choices["login"].set_defaults(func=cli.cmd_login)
     sub.choices["logout"].set_defaults(func=cli.cmd_logout)
     sub.choices["doctor"].set_defaults(func=cli.cmd_doctor)
+    sub.choices["upgrade"].set_defaults(func=cli.cmd_upgrade)
     sub.choices["export-metadata"].set_defaults(func=cli.cmd_export_metadata)
     sub.choices["library"].set_defaults(func=cli.cmd_library)
     sub.choices["download-one"].set_defaults(func=cli.cmd_download_one)

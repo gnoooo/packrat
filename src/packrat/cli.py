@@ -28,6 +28,7 @@ from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.download import _browser_tuple, _final_filepath
 from packrat.logging_config import redact as _redact
 from packrat import security
+from packrat import upgrade as upgrade_module
 from packrat import paths
 from packrat.services import credentials as credentials_service
 from packrat.services import diagnostics as diagnostics_service
@@ -275,6 +276,20 @@ def cmd_export_metadata(args: argparse.Namespace) -> int:
         return 1
     print(f"metadata: {target}")
     return 0
+
+
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    """Check for or install a newer release."""
+    try:
+        return upgrade_module.run_upgrade(
+            check_only=getattr(args, "check", False),
+            include_prerelease=getattr(args, "pre", False),
+            yes=getattr(args, "yes", False),
+            dry_run=getattr(args, "dry_run", False),
+        )
+    except upgrade_module.UpgradeError as exc:
+        print(f"upgrade: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:

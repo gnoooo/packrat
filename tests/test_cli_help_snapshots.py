@@ -17,6 +17,7 @@ COMMANDS = [
     ("login",),
     ("logout",),
     ("doctor",),
+    ("upgrade",),
     ("export-metadata",),
     ("library",),
     ("download-one",),

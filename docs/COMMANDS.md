@@ -23,6 +23,7 @@ Common options such as `--output`, `--limit`, `--dry-run` and `--yes` may go bef
 | `packrat auth` | Verify the headers file. |
 | `packrat logout` | Delete the saved headers file. |
 | `packrat doctor` | Check dependencies, credentials and an optional canary. |
+| `packrat upgrade` | Check for or install a newer release. |
 | `packrat export-metadata` | Export JSON/CSV metadata from a saved plan. |
 | `packrat library` | List playlists (`--top N`). |
 | `packrat download-one LINK_OR_ID` | Download one song and verify it. |
@@ -65,6 +66,33 @@ packrat sync --dry-run --yes
 
 Without `--source`, `sync` uses Liked Songs. 
 It fetches the full source first, then applies archive/dedupe/limit logic.
+
+## upgrade
+
+Check for or install a newer GitHub release:
+
+```bash
+packrat upgrade --check     # only check
+packrat upgrade             # prompt, then update
+packrat upgrade --yes       # no prompt
+packrat upgrade --pre       # include prereleases
+packrat upgrade --dry-run   # show what would change
+```
+
+Self-update is supported only for the standard installer layout:
+
+```text
+~/.local/share/packrat/venv
+~/.local/bin/packrat
+```
+
+It refuses editable checkouts, distro packages, `uv tool`, pipx, and unknown
+installations.
+
+The downloaded wheel is checked against `SHA256SUMS` and verified with
+GitHub's keyless build attestation through `gh attestation verify`. The old
+venv is kept as a backup until the new venv and its `packrat --version` check
+succeed. Music, manifests, and config/state are untouched.
 
 ## doctor
 

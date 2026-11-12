@@ -186,6 +186,8 @@ def test_shared_options_have_same_definition_across_commands(parser):
                 # A command may legitimately override help/default for a shared option.
                 if name in ("download-manifest", "resume") and opt == "--output":
                     continue
+                if name == "upgrade" and opt in ("--yes", "--dry-run"):
+                    continue
                 assert action.help == ref.help, f"{name} {opt} help mismatch"
 
 

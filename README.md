@@ -67,6 +67,7 @@ Files go to `~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a`; singles g
 |---|---|
 | `packrat login` / `auth` / `logout` | Create, verify or delete the login file. |
 | `packrat doctor` | Check dependencies, credentials and an optional online canary. |
+| `packrat upgrade` | Check for or install a newer release. |
 | `packrat export-metadata` | Export normalized JSON/CSV metadata from a plan. |
 | `packrat library` | List playlists. |
 | `packrat sync` | Sync Liked Songs or a playlist. |
