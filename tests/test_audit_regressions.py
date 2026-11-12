@@ -377,3 +377,12 @@ def test_artist_aggregate_playlist_preserves_old_downloads(tmp_path):
         )
     text = (tmp_path / "playlists" / "artists" / "A" / "artist-all.m3u8").read_text()
     assert "Old" in text and "New" in text
+
+
+def test_restore_palette_only_touched_slots():
+    import io
+    from packrat import tui_theme
+
+    stream = io.StringIO()
+    tui_theme.restore_palette(stream, slots=[7, 3])
+    assert "104;3;7" in stream.getvalue()

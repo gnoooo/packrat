@@ -82,6 +82,7 @@ def _fit(text: str, width: int) -> str:
 _visual_state = {"theme": "ocean", "no_color": False}
 MAX_CONTENT_WIDTH = 200
 _palette_dirty = False
+_custom_slots: set[int] = set()
 
 
 _no_anim_default = False
@@ -199,6 +200,8 @@ def _make_bar_pairs(cur, grad_values: dict[int, int], track_value: int,
 
 def _set_custom_color(cur, slot: int, rgb: tuple[int, int, int]) -> None:
     """Set one palette slot; tmux always uses OSC 4 for pane palettes."""
+    global _custom_slots
+    _custom_slots.add(slot)
     if os.environ.get("TMUX"):
         sys.stdout.write(
             f"\x1b]4;{slot};rgb:{rgb[0]:02x}/{rgb[1]:02x}/{rgb[2]:02x}\x07"
@@ -1261,8 +1264,9 @@ def _join_worker(thread: threading.Thread, log_note: str = "") -> None:
     except KeyboardInterrupt:
         global _palette_dirty
         if _palette_dirty:
-            tt.restore_palette()
+            tt.restore_palette(slots=_custom_slots)
             _palette_dirty = False
+            _custom_slots.clear()
         print("second Ctrl-C: download thread still running — a partial file may "
               f"remain{(f'; full log: {log_note}' if log_note else '')}",
               file=sys.stderr)
@@ -1316,8 +1320,9 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
     finally:
         global _palette_dirty
         if _palette_dirty:
-            tt.restore_palette()
+            tt.restore_palette(slots=_custom_slots)
             _palette_dirty = False
+            _custom_slots.clear()
         control.request_stop()
         _join_worker(thread, _latest_log_path())
     if result_container["exception"]:

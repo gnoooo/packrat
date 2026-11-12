@@ -498,15 +498,23 @@ def activate(palette: Palette) -> dict[int, int]:
 RESTORE_SEQUENCE = "\x1b]104\x07"
 
 
-def restore_palette(stream=None) -> None:
-    """Reset terminal palette entries after the TUI exits (OSC 104)."""
+def restore_palette(stream=None, slots=None) -> None:
+    """Reset terminal palette entries after the TUI exits (OSC 104).
+
+    When ``slots`` is given, only those entries are reset so unrelated user
+    palette customisations survive.
+    """
     import sys
 
     stream = sys.stdout if stream is None else stream
     if stream is None:
         return
+    if slots:
+        sequence = "\x1b]104;" + ";".join(str(int(slot)) for slot in sorted(set(slots))) + "\x07"
+    else:
+        sequence = RESTORE_SEQUENCE
     try:
-        stream.write(RESTORE_SEQUENCE)
+        stream.write(sequence)
         stream.flush()
     except (OSError, ValueError):
         pass
