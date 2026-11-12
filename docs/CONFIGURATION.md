@@ -32,7 +32,6 @@ CLI values override environment values. Old `YTM_*` names are accepted as fallba
 | `$XDG_CONFIG_HOME/packrat/archive` (default `~/.config/packrat/archive`) | Download history. |
 | `~/.config/packrat/runs.jsonl` | Throughput history. |
 | `~/.config/packrat/profile.json` | Discovery taste profile. |
-| `~/.config/packrat/failed/*.json` | Per-source failure lists. |
 | `~/Music/PackratMidden/playlists/*.manifest.json` | Saved plans. |
 | `~/Music/PackratMidden/playlists/*.m3u8` | Generated playlists. |
 | `~/.config/packrat/browser.json` | Login headers. |

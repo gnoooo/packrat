@@ -19,7 +19,6 @@ from ytmusicapi import YTMusic
 from yt_dlp.cookies import extract_cookies_from_browser
 
 from packrat.archive import Archive
-from packrat import paths
 from packrat.integrity import verify_audio
 from packrat.download import estimate_track  # kept for test/back-compat patch points
 from packrat.batch import exit_code_from_result, run_batch_download
@@ -154,13 +153,6 @@ def _source_name(source: str) -> str:
     return re.sub(r"[^\w.-]+", "_", source)
 
 
-def _write_failures(path: pathlib.Path, video_ids: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(video_ids, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
-
-
 def _m3u8_from_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         m3u8_entry(e)
@@ -195,7 +187,6 @@ def run_sync(
         source_name = _source_name(args.source)
         manifest_path = output_root / "playlists" / f"{source_name}.manifest.json"
         m3u8_path = output_root / "playlists" / f"{source_name}.m3u8"
-        failures_path = paths.FAILED_DIR / f"{source_name}.json"
 
         max_size = parse_size(args.max_size) if args.max_size else None
 
@@ -326,10 +317,6 @@ def run_sync(
             # mutated in place so manifest.entries already reflects updates.
             manifest.write(manifest_path, args.manifest_format)
             write_m3u8(m3u8_path, _m3u8_from_entries(manifest.entries))
-            _write_failures(
-                failures_path,
-                [e["video_id"] for e in manifest.entries if e.get("status") == "failed"],
-            )
 
         summary = run_batch_download(
             pending_entries,
