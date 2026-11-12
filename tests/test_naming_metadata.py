@@ -81,3 +81,38 @@ def test_apply_song_metadata_ignores_non_mp4(monkeypatch, tmp_path):
         path,
         song_meta.SongMetadata(video_id="v1", title="T", artist="A", album="Al"),
     ) is False
+
+
+def test_apply_song_metadata_writes_album_artist_and_disc(monkeypatch, tmp_path):
+    import mutagen
+    import mutagen.mp4
+
+    class FakeMP4:
+        def __init__(self):
+            self.tags = {}
+            self.saved = False
+
+        def save(self):
+            self.saved = True
+
+    fake = FakeMP4()
+    monkeypatch.setattr(mutagen, "File", lambda *_a, **_k: fake)
+    monkeypatch.setattr(mutagen.mp4, "MP4", FakeMP4)
+    path = tmp_path / "song.m4a"
+    path.write_bytes(b"x")
+    meta = song_meta.SongMetadata(
+        video_id="v1", title="T", artist="Track Artist", album="Album",
+        album_artist="Album Artist", track_num=2, track_total=10, disc_num=1,
+    )
+    assert song_meta.apply_song_metadata(path, meta) is True
+    assert fake.tags["aART"] == ["Album Artist"]
+    assert fake.tags["disk"] == [(1, 0)]
+
+
+def test_verbose_env_enables_ytdlp_verbose(monkeypatch):
+    from packrat import download
+
+    monkeypatch.setenv("PACKRAT_YTDLP_VERBOSE", "1")
+    opts = download._build_extract_opts(None, None, None, download._YtdlpLogger())
+    assert opts["verbose"] is True
+    assert opts["quiet"] is False
