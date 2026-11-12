@@ -138,3 +138,13 @@ def test_replace_install_rolls_back(monkeypatch, tmp_path):
         upgrade._replace_install(tmp_path / "wheel.whl", root, tmp_path / "bin", "99.0.0")
     assert (venv / "marker").read_text() == "old"
     assert not (root / "venv.upgrade-backup").exists()
+
+
+def test_from_master_uses_prerelease_channel(monkeypatch):
+    from packrat import cli
+
+    seen = {}
+    monkeypatch.setattr(upgrade, "run_upgrade", lambda **kw: seen.update(kw) or 0)
+    args = cli.build_parser().parse_args(["upgrade", "--from-master", "--check"])
+    assert cli.cmd_upgrade(args) == 0
+    assert seen["include_prerelease"] is True

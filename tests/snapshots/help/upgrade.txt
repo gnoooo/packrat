@@ -1,13 +1,15 @@
-usage: packrat upgrade [-h] [--check] [--pre] [--yes] [--dry-run]
+usage: packrat upgrade [-h] [--check] [--pre] [--from-master] [--yes]
+                       [--dry-run]
 
 Check GitHub Releases for a newer Packrat version and, for the standard
 installer layout, install the verified release wheel.
 
 Common options:
-  --yes       upgrade without asking for confirmation
-  --dry-run   show what would be upgraded without changing the install
+  --yes          upgrade without asking for confirmation
+  --dry-run      show what would be upgraded without changing the install
 
 options:
-  -h, --help  show this help message and exit
-  --check     only check for a newer release; do not install
-  --pre       include prerelease versions
+  -h, --help     show this help message and exit
+  --check        only check for a newer release; do not install
+  --pre          include prerelease versions
+  --from-master  install the newest attested master snapshot prerelease

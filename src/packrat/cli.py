@@ -314,7 +314,7 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     try:
         return upgrade_module.run_upgrade(
             check_only=getattr(args, "check", False),
-            include_prerelease=getattr(args, "pre", False),
+            include_prerelease=getattr(args, "pre", False) or getattr(args, "from_master", False),
             yes=getattr(args, "yes", False),
             dry_run=getattr(args, "dry_run", False),
         )

@@ -913,6 +913,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="include prerelease versions",
     )
     p_upgrade.add_argument(
+        "--from-master",
+        action="store_true",
+        help="install the newest attested master snapshot prerelease",
+    )
+    p_upgrade.add_argument(
         "--yes",
         action="store_true",
         help="upgrade without asking for confirmation",
