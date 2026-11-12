@@ -90,7 +90,7 @@ def test_cli_overrides_env_of_other_auth_kind(monkeypatch, capsys):
 def test_env_falls_back_to_default(monkeypatch):
     monkeypatch.delenv("PACKRAT_OUTPUT", raising=False)
     args = _parse(["sync", "--source", "liked"])
-    assert args.output == cli_args.DEFAULT_OUTPUT
+    assert args.output == __import__("os").path.expanduser(cli_args.DEFAULT_OUTPUT)
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@
 packrat login
 ```
 
-The command explains how to copy request headers from a logged-in `music.youtube.com` tab. 
+The command explains how to copy request headers from a logged-in `music.youtube.com` tab.
 It writes `~/.config/packrat/browser.json` by default.
 
 Check it:
@@ -36,7 +36,7 @@ This resolves Liked Songs, builds a manifest and prints the pending tracks witho
 packrat sync --limit 5
 ```
 
-Files land in `.music/<Artist>/<Album>/<NN - Title>.m4a` (singles use `.music/<Artist>/Singles/`). 
+Files land in `~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a` (singles use `~/Music/PackratMidden/<Artist>/Singles/`).
 Finished video IDs are added to `.packrat_archive`.
 
 ## 4. Use the full-screen view
@@ -53,7 +53,7 @@ Keys: `p` pause, `s` skip, `q` quit, `l` log, `a` animation, `t` theme,
 ## 5. Resume or retry
 
 ```bash
-packrat download-manifest                 # newest plan in .music/playlists/
+packrat download-manifest                 # newest plan in ~/Music/PackratMidden/playlists/
 packrat download-manifest --failed-only   # retry failures only
 ```
 

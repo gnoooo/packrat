@@ -1475,6 +1475,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_group_help(parser, raw[0])
         return 0
     args = parser.parse_args(raw)
+    if getattr(args, "output", None):
+        args.output = os.path.expanduser(str(args.output))
 
     cli_args.resolve_auth(args, raw)
     cli_args.resolve_run_control_aliases(args)

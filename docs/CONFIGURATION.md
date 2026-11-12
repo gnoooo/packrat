@@ -14,7 +14,7 @@
 | `PACKRAT_HEADERS` | `~/.config/packrat/browser.json` | ytmusicapi login headers. |
 | `PACKRAT_COOKIES` | - | Netscape cookie jar for yt-dlp. |
 | `PACKRAT_COOKIES_FROM_BROWSER` | - | Browser/profile spec. |
-| `PACKRAT_OUTPUT` | `.music` | Music library root. |
+| `PACKRAT_OUTPUT` | `~/Music/PackratMidden` | Music library root. |
 | `PACKRAT_ARCHIVE` | `.packrat_archive` | Finished video IDs. |
 | `PACKRAT_SINGLES_DIR` | `Singles` | Singles folder inside each artist. |
 | `PACKRAT_MANIFEST_FORMAT` | `json` | `json` or `json+csv`. |
@@ -28,10 +28,10 @@ CLI values override environment values. Old `YTM_*` names are accepted as fallba
 
 | Path | Meaning |
 |---|---|
-| `.music/` | Default library root. |
+| `~/Music/PackratMidden/` | Default library root. |
 | `.packrat_archive` | Download history. |
-| `.music/playlists/*.manifest.json` | Saved plans. |
-| `.music/playlists/*.m3u8` | Generated playlists. |
+| `~/Music/PackratMidden/playlists/*.manifest.json` | Saved plans. |
+| `~/Music/PackratMidden/playlists/*.m3u8` | Generated playlists. |
 | `~/.config/packrat/browser.json` | Login headers. |
 | `logs/packrat-*.log` | Run logs. |
 
@@ -67,7 +67,7 @@ The archive prevents re-downloading finished tracks.
 If you delete it but the output folder already contains audio, Packrat warns and asks before 
 starting a new history, even with `--yes`. `--force-new-archive` skips that check.
 
-Back up `.packrat_archive` together with `.music/`.
+Back up `.packrat_archive` together with `~/Music/PackratMidden/`.
 
 ## Download pacing
 

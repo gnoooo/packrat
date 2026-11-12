@@ -15,7 +15,61 @@
 - **Deno ≥ 2.3**: recommended; yt-dlp uses it for YouTube's JavaScript challenges. Without it some tracks fail.
 - Optional: **tmux 3.7+** for the exact TUI palette via OSC 4.
 
-## From source
+## Recommended: install script
+
+From the repository:
+
+```bash
+./install.sh
+```
+
+The script is Linux-only for now. It uses **uv** when available and falls back
+to `python -m venv` + `pip`. It installs into:
+
+```text
+~/.local/share/packrat/venv
+~/.local/bin/packrat
+```
+
+and links only the main `packrat` command. Re-running the script replaces the
+venv atomically; it never touches your music library, archive, config or logs.
+
+```bash
+./install.sh --git https://github.com/you/packrat.git
+./install.sh --prefix ~/.local/share/packrat --bin-dir ~/.local/bin
+./install.sh --dry-run
+```
+
+External tools are **detected, never installed**:
+
+- ffmpeg/ffprobe: required; the script stops with distro-specific instructions.
+- Deno ≥ 2.3: detected; a warning is printed if missing/old.
+- uv: if absent, pip is used and the uv install URL is printed.
+
+If `~/.local/bin` is not on your PATH, the script prints the exact export line.
+
+## Remote install with curl
+
+The script can be piped, but there is no local checkout to install from, so
+`--git` is required:
+
+```bash
+curl -fsSL <raw-install-url> | bash -s -- --git https://github.com/you/packrat.git
+```
+
+Safer: download and inspect it first:
+
+```bash
+curl -fsSL <raw-install-url> -o install.sh
+less install.sh
+bash install.sh --git https://github.com/you/packrat.git
+```
+
+Piping a remote script executes unreviewed code. The installer does not
+verify a checksum or signature. Prefer a pinned commit/tag with `--ref` when
+using this path.
+
+## Manual install
 
 ```bash
 git clone <your-packrat-remote> packrat
@@ -25,7 +79,8 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-`pip install -e .` installs the `packrat` command and the `python -m packrat` entry point.
+`pip install -e .` installs the `packrat` command and the `python -m packrat`
+entry point.
 
 ## Verify
 
@@ -44,22 +99,38 @@ packrat sync --limit 1 --dry-run
 packrat sync --limit 1
 ```
 
-The first real download creates `.music/` and `.packrat_archive` in the
+The first real download creates `~/Music/PackratMidden/` and `.packrat_archive` in the
 current directory. See [Quickstart](QUICKSTART.md) for a complete first run.
 
 ## Updating
 
+With the install script:
+
 ```bash
-cd packrat
+git pull
+./install.sh
+```
+
+The script rebuilds the venv and swaps it atomically.
+
+Manual editable install:
+
+```bash
 git pull
 pip install -e .
 ```
 
 ## Uninstall
 
+With the default script layout:
+
 ```bash
-pip uninstall packrat
+rm -rf ~/.local/share/packrat
+rm -f ~/.local/bin/packrat
 ```
 
-Your music and download history are ordinary files and are not removed by
-`pip uninstall`.
+This removes the application only. Your music library, `.packrat_archive`,
+config and logs are preserved.
+
+For a manual venv install, deactivate it and remove the venv; use
+`pip uninstall packrat` only if you installed it into a shared environment.

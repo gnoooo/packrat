@@ -8,7 +8,7 @@ usage: packrat discover taste [-h] [--headers FILE] [--output DIR]
 
 Common options:
   --output, -o DIR      folder where songs are saved (env: PACKRAT_OUTPUT;
-                        default: .music)
+                        default: ~/Music/PackratMidden)
   --quota N             how many songs per category (overrides the defaults
                         below)
   --skip-previous       skip songs already in the last discover plan

@@ -80,4 +80,4 @@ packrat --version
 git status
 ```
 
-Keep credentials, `.music/`, `.packrat_archive` and logs out of commits.
+Keep credentials, `~/Music/PackratMidden/`, `.packrat_archive` and logs out of commits.

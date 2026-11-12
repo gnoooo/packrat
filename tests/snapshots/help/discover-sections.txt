@@ -10,7 +10,7 @@ usage: packrat discover sections [-h] [--headers FILE] [--cookies FILE]
 
 Common options:
   --output, -o DIR      folder where songs are saved (env: PACKRAT_OUTPUT;
-                        default: .music)
+                        default: ~/Music/PackratMidden)
   --limit N             download at most N new songs this run
   --dry-run, -n         show what would be downloaded, without downloading
                         anything

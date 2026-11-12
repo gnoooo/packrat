@@ -7,19 +7,19 @@
 
 <h1 align="center">packrat</h1>
 
-<p align="center"><em>Take your YouTube Music library offline carefully, resumably, and with a beautiful terminal UI.</em></p>
+<p align="center"><em>Like a little packrat, stash your YouTube Music library offline.</em></p>
 
 <p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square">
   <img alt="Packrat 0.3" src="https://img.shields.io/badge/packrat-0.3-38bdf8?style=flat-square">
-  <img alt="Local first" src="https://img.shields.io/badge/local--first-.music-22c55e?style=flat-square">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-22c55e?style=flat-square">
 </p>
 
 ![Packrat TUI](docs/images/tui-overview.png)
 
 Packrat is a local-first YouTube Music downloader. It syncs Liked Songs and
 playlists, builds artist catalogs, plans discovery runs, and downloads through
-`yt-dlp` into a plain `.music/` folder. Every run is backed by a manifest and an
+`yt-dlp` into a plain `~/Music/PackratMidden/` folder. Every run is backed by a manifest and an
 archive, so it is safe to stop, resume, and retry.
 
 ## Why Packrat?
@@ -32,7 +32,7 @@ archive, so it is safe to stop, resume, and retry.
   always written to a manifest before downloading.
 - **A real TUI**: rounded frame, smooth HSL progress bars, log panel,
   pause/skip, themes, and tmux-aware palettes.
-- **Local-first layout**: `.music/`, JSON manifests, `.m3u8` playlists and a
+- **Local-first layout**: `~/Music/PackratMidden/`, JSON manifests, `.m3u8` playlists and a
   simple archive; no database.
 - **Recoverable by design**: failed tracks are recorded, `download-manifest`
   resumes, and `--failed-only` retries only failures.
@@ -41,9 +41,13 @@ archive, so it is safe to stop, resume, and retry.
 
 ```bash
 # 1. Install from the repository
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+./install.sh
+
+# Or manually:
+# python -m venv .venv && source .venv/bin/activate && pip install -e .
+
+# Remote install (requires --git; review the script first):
+# curl -fsSL <raw-install-url> | bash -s -- --git https://github.com/you/packrat.git
 
 # 2. Save your YouTube Music login
 packrat login
@@ -58,8 +62,8 @@ packrat sync --limit 5
 packrat --tui sync --source liked
 ```
 
-Files go to `.music/<Artist>/<Album>/<NN - Title>.m4a`; singles go to
-`.music/<Artist>/Singles/`. Finished video IDs go to `.packrat_archive`.
+Files go to `~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a`; singles go to
+`~/Music/PackratMidden/<Artist>/Singles/`. Finished video IDs go to `.packrat_archive`.
 
 ## Commands
 
@@ -110,7 +114,7 @@ same whether it is headless or full-screen.
 ## Common options
 
 ```text
---output/-o DIR     # library root (default: .music)
+--output/-o DIR     # library root (default: ~/Music/PackratMidden)
 --archive FILE      # download history (default: .packrat_archive)
 --delay SEC         # pause between tracks (default: 7.0)
 --max-size SIZE     # skip oversized tracks, e.g. 3GB
@@ -158,7 +162,7 @@ Security/integrity work in this phase:
 
 ## Security
 
-Never commit `browser.json`, `cookies*.txt`, headers files, `.music/`,
+Never commit `browser.json`, `cookies*.txt`, headers files, `~/Music/PackratMidden/`,
 `.packrat_archive`, or logs. They are gitignored. See [Auth](docs/AUTH.md) for
 the cookie model.
 

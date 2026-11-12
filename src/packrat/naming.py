@@ -53,9 +53,9 @@ def track_path(
     release_type: str | None = None,
     singles_dir: str = SINGLES_DIR_DEFAULT,
 ) -> pathlib.Path:
-    """Return .music/<Artist>/<Album>/<NN - title>.m4a.
+    """Return ~/Music/PackratMidden/<Artist>/<Album>/<NN - title>.m4a.
 
-    Singles (see is_single) go to .music/<Artist>/<singles_dir>/<title>.m4a
+    Singles (see is_single) go to ~/Music/PackratMidden/<Artist>/<singles_dir>/<title>.m4a
     with no track number.
     """
     artist_dir = clean(artist or "Unknown Artist")

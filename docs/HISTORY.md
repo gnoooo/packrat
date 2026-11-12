@@ -53,7 +53,7 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 
 - Use the **yt-dlp Python API**, not per-track subprocess calls.
 - Prefer native M4A/AAC; do not transcode unless the source has no suitable audio-only format.
-- Output layout: `.music/<Artist>/<Album>/<title>.m4a`.
+- Output layout: `~/Music/PackratMidden/<Artist>/<Album>/<title>.m4a`.
 - Generate relative-path `.m3u8` playlists per source playlist.
 - Support `--max-size` with up-front size estimates (best-effort from yt-dlp format metadata).
 - Dry-run produces a manifest in JSON or CSV instead of downloading.
@@ -91,7 +91,7 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 2. Downloads: yt-dlp Python API, one invocation per track with archive, dry-run, configurable delay, and backoff.
 3. Tagging: mutagen after download.
 4. JS runtime: Deno is configured for extraction; `download-one` exits when it is missing, batch commands let yt-dlp degrade to the limited clients.
-5. Layout: `.music/<Artist>/<Album>/<title>.m4a` plus `.m3u8` playlists.
+5. Layout: `~/Music/PackratMidden/<Artist>/<Album>/<title>.m4a` plus `.m3u8` playlists.
 6. PO token provider: optional documented fallback.
 7. Explore/Home discovery: deferred to later phases.
 

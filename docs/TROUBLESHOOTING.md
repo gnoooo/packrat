@@ -43,7 +43,7 @@ Logs are written under `logs/packrat-*.log`.
 
 ```bash
 packrat sync --dry-run
-cat .music/playlists/liked.manifest.json | head
+cat ~/Music/PackratMidden/playlists/liked.manifest.json | head
 ```
 
 ## Resume

@@ -12,7 +12,7 @@ positional arguments:
 
 Common options:
   --output, -o DIR      folder where songs are saved (env: PACKRAT_OUTPUT;
-                        default: .music)
+                        default: ~/Music/PackratMidden)
 
 First-time setup:
   --cookies FILE        advanced: a cookies.txt file exported from your

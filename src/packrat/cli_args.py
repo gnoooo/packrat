@@ -22,7 +22,7 @@ from packrat import __version__
 from packrat.naming import SINGLES_DIR_DEFAULT
 from packrat.sizes import parse_size
 
-DEFAULT_OUTPUT = ".music"
+DEFAULT_OUTPUT = "~/Music/PackratMidden"
 DEFAULT_ARCHIVE = ".packrat_archive"
 DEFAULT_DELAY = 7.0
 DEFAULT_THEME = "ocean"
@@ -63,7 +63,9 @@ def _cookies_from_browser_default() -> str | None:
 
 
 def _output_default() -> str:
-    return _env("PACKRAT_OUTPUT", "YTM_OUTPUT") or DEFAULT_OUTPUT
+    return os.path.expanduser(
+        _env("PACKRAT_OUTPUT", "YTM_OUTPUT") or DEFAULT_OUTPUT
+    )
 
 
 def _archive_default() -> str:

@@ -39,7 +39,7 @@ Common options such as `--output`, `--limit`, `--dry-run` and `--yes` may go bef
 
 | Option | Meaning |
 |---|---|
-| `--output/-o DIR` | Output root; default `.music`. |
+| `--output/-o DIR` | Output root; default `~/Music/PackratMidden`. |
 | `--archive FILE` | Download history; default `.packrat_archive`. |
 | `--delay SEC` | Pause between tracks; default `7.0`. |
 | `--max-size SIZE` | Skip tracks larger than SIZE, e.g. `3GB`. |
@@ -80,7 +80,7 @@ Local checks cover Python/dependencies, ffmpeg/ffprobe/Deno, the login file and 
 
 ```bash
 packrat export-metadata
-packrat export-metadata --manifest .music/playlists/liked.manifest.json --format csv
+packrat export-metadata --manifest ~/Music/PackratMidden/playlists/liked.manifest.json --format csv
 packrat export-metadata --file /tmp/metadata.json
 ```
 
@@ -92,7 +92,7 @@ Writes a normalized document with `video_id`, `title`, `artist`, `album`,
 
 ```bash
 packrat download-manifest
-packrat download-manifest --manifest .music/playlists/liked.manifest.json
+packrat download-manifest --manifest ~/Music/PackratMidden/playlists/liked.manifest.json
 packrat download-manifest --failed-only
 packrat resume --limit 5
 ```

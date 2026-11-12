@@ -70,8 +70,8 @@ filesystem paths and normalized title matching.
 Folder layout:
 
 ```text
-.music/<Artist>/<Album>/<NN - Title>.m4a
-.music/<Artist>/Singles/<Title>.m4a
+~/Music/PackratMidden/<Artist>/<Album>/<NN - Title>.m4a
+~/Music/PackratMidden/<Artist>/Singles/<Title>.m4a
 ```
 
 The catalog artist is forced as the folder owner, even when a release lists a
