@@ -32,7 +32,7 @@ DEFAULT_MANIFEST_FORMAT = "json"
 
 HEADERS_CONFIG_PATH = "~/.config/packrat/browser.json"
 LEGACY_HEADERS_CONFIG_PATH = "~/.config/ytmusic-composer/browser.json"
-LEGACY_ARCHIVE = ".ytm_offline_archive"
+LEGACY_ARCHIVE_NAMES = (".packrat_archive", ".ytm_offline_archive")
 
 
 # ---------------------------------------------------------------------------
@@ -74,16 +74,15 @@ def _archive_default() -> str:
     if env:
         return env
     new = paths.ARCHIVE_PATH
-    candidates = (
-        pathlib.Path(LEGACY_ARCHIVE),
-        pathlib.Path.home() / LEGACY_ARCHIVE,
-        pathlib.Path(".ytm_offline_archive"),
-        pathlib.Path.home() / ".ytm_offline_archive",
-    )
+    candidates = [
+        candidate
+        for name in LEGACY_ARCHIVE_NAMES
+        for candidate in (pathlib.Path(name), pathlib.Path.home() / name)
+    ]
     if not new.exists():
         for old in candidates:
             if old.exists():
-                return str(old)
+                return str(old.resolve())
     return str(new)
 
 

@@ -41,6 +41,8 @@ def isolate_user_state(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PROFILE_PATH", config / "profile.json")
     monkeypatch.setattr(paths, "FAILED_DIR", config / "failed")
     monkeypatch.setattr(runs, "RUNS_PATH", config / "runs.jsonl")
+    from packrat import cli_args
+    monkeypatch.setattr(cli_args, "LEGACY_ARCHIVE_NAMES", ())
     monkeypatch.setattr(logging_config, "LOG_DIR", config / "logs")
     monkeypatch.setattr(tui, "LOG_DIR", config / "logs")
     return config

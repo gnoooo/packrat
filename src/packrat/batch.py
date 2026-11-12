@@ -11,7 +11,7 @@ from packrat.control import Control
 from packrat.download import download_track
 from packrat.integrity import verify_audio
 from packrat.manifest import Manifest
-from packrat.naming import SINGLES_DIR_DEFAULT
+from packrat.naming import SINGLES_DIR_DEFAULT, track_path
 from packrat.sizes import parse_size
 from packrat import runs
 
@@ -90,7 +90,10 @@ def run_batch_download(
         # If the file is missing/corrupt, put the entry back to pending and let
         # the downloader quarantine/redownload it.
         if entry.get("status") == "downloaded" and entry.get("path"):
-            check = verify_audio(pathlib.Path(entry["path"]))
+            check = verify_audio(
+                pathlib.Path(entry["path"]),
+                expected_duration=entry.get("duration"),
+            )
             if check.ok:
                 _emit(
                     event_callback,
@@ -107,23 +110,43 @@ def run_batch_download(
             entry["error"] = f"existing file failed integrity: {check.reason}"
 
         if archive is not None and entry["video_id"] in archive:
-            entry["status"] = "archived"
-            entry["error"] = None
-            _emit(
-                event_callback,
-                "track_done",
-                {
-                    "video_id": entry["video_id"],
-                    "title": entry.get("title", ""),
-                    "status": "archived",
-                    "bytes": 0,
-                },
+            archived_path = pathlib.Path(entry["path"]) if entry.get("path") else track_path(
+                output_root,
+                entry.get("artist", ""),
+                entry.get("album", ""),
+                entry.get("title", ""),
+                entry.get("track_num"),
+                ext="m4a",
+                release_type=entry.get("release_type"),
+                singles_dir=entry.get("singles_dir", SINGLES_DIR_DEFAULT),
             )
-            if save_callback is not None and (
-                i % _SAVE_INTERVAL == 0 or (control and control.should_stop())
-            ):
-                save_callback(entries)
-            continue
+            archived_check = verify_audio(
+                archived_path, expected_duration=entry.get("duration")
+            )
+            if archived_check.ok:
+                entry["status"] = "archived"
+                entry["path"] = str(archived_path)
+                entry["error"] = None
+                _emit(
+                    event_callback,
+                    "track_done",
+                    {
+                        "video_id": entry["video_id"],
+                        "title": entry.get("title", ""),
+                        "status": "archived",
+                        "bytes": archived_check.size,
+                    },
+                )
+                if save_callback is not None and (
+                    i % _SAVE_INTERVAL == 0 or (control and control.should_stop())
+                ):
+                    save_callback(entries)
+                continue
+            # The archive is only a hint. If the file is missing (different
+            # output root, deleted library, crash before manifest save), fall
+            # through and download it instead of marking it archived forever.
+            entry["status"] = "pending"
+            entry["error"] = "archive entry has no valid file; re-downloading"
 
         track = {
             "video_id": entry["video_id"],

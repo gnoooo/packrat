@@ -24,7 +24,7 @@ from packrat.integrity import verify_audio
 from packrat.download import estimate_track  # kept for test/back-compat patch points
 from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.manifest import Manifest
-from packrat.naming import SINGLES_DIR_DEFAULT, parse_playlist_id
+from packrat.naming import SINGLES_DIR_DEFAULT, parse_playlist_id, track_path
 from packrat.playlist import m3u8_entry, write_m3u8
 from packrat.sizes import format_size, heuristic_size, parse_size
 
@@ -230,7 +230,10 @@ def run_sync(
             old = previous.get(track["video_id"])
             retry_existing = False
             if old and old.get("status") == "downloaded" and old.get("path"):
-                check = verify_audio(pathlib.Path(old["path"]))
+                check = verify_audio(
+                    pathlib.Path(old["path"]),
+                    expected_duration=old.get("duration"),
+                )
                 if check.ok:
                     entries.append(old)
                     continue
@@ -243,21 +246,34 @@ def run_sync(
             elif old:
                 retry_existing = True
             if not retry_existing and track["video_id"] in archive:
-                entry = {
-                    "video_id": track["video_id"],
-                    "title": track["title"],
-                    "artist": track["artist"],
-                    "album": track["album"],
-                    "duration": track.get("duration", 0),
-                    "est_size": None,
-                    "status": "archived",
-                    "path": None,
-                    "error": None,
-                    "source": args.source,
-                    "singles_dir": getattr(args, "singles_dir", SINGLES_DIR_DEFAULT),
-                }
-                entries.append(entry)
-                continue
+                archive_path = track_path(
+                    output_root,
+                    track["artist"],
+                    track["album"],
+                    track["title"],
+                    track.get("track_num"),
+                    ext="m4a",
+                    release_type=track.get("release_type"),
+                    singles_dir=getattr(args, "singles_dir", SINGLES_DIR_DEFAULT),
+                )
+                if verify_audio(archive_path).ok:
+                    entry = {
+                        "video_id": track["video_id"],
+                        "title": track["title"],
+                        "artist": track["artist"],
+                        "album": track["album"],
+                        "track_num": track.get("track_num"),
+                        "release_type": track.get("release_type"),
+                        "duration": track.get("duration", 0),
+                        "est_size": None,
+                        "status": "archived",
+                        "path": str(archive_path),
+                        "error": None,
+                        "source": args.source,
+                        "singles_dir": getattr(args, "singles_dir", SINGLES_DIR_DEFAULT),
+                    }
+                    entries.append(entry)
+                    continue
             # No per-track yt-dlp extraction here: that doubled the network
             # work (once for the estimate, again in download_track) and made
             # startup scale with the whole library.  Duration is already in

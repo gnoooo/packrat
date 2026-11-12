@@ -6,6 +6,8 @@ import os
 import pathlib
 from typing import Iterable
 
+from packrat.manifest import atomic_write_text
+
 
 def m3u8_entry(entry: dict) -> dict:
     """The four fields write_m3u8 needs, from a manifest entry."""
@@ -37,4 +39,4 @@ def write_m3u8(
         artist = entry.get("artist", "Unknown")
         lines.append(f"#EXTINF:{duration},{artist} - {title}")
         lines.append(rel)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n", encoding="utf-8")

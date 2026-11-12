@@ -171,9 +171,14 @@ class Manifest:
         else:
             csv_path = json_path.with_suffix(json_path.suffix + ".csv")
 
-        fieldnames = list(self.entries[0].keys()) if self.entries else []
+        fieldnames: list[str] = []
+        for entry in self.entries:
+            for key in entry:
+                if key not in fieldnames:
+                    fieldnames.append(key)
         buf = io.StringIO(newline="")
-        writer = csv.DictWriter(buf, fieldnames=fieldnames)
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(self.entries)
+        for entry in self.entries:
+            writer.writerow({key: entry.get(key, "") for key in fieldnames})
         atomic_write_text(csv_path, buf.getvalue(), newline="")

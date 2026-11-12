@@ -378,6 +378,14 @@ def test_sync_limit_applies_after_archive_filtering(tmp_path, monkeypatch):
             return video_id == "v0"
 
     monkeypatch.setattr("packrat.sync.Archive", _Archive)
+    archived_file = tmp_path / "A" / "Al" / "T0.m4a"
+    archived_file.parent.mkdir(parents=True)
+    archived_file.write_bytes(b"x")
+    monkeypatch.setattr(
+        "packrat.sync.verify_audio", lambda *_a, **_k: type(
+            "C", (), {"ok": True, "size": 1}
+        )()
+    )
     monkeypatch.setattr(
         "packrat.sync.estimate_track", lambda *_a, **_k: {"filesize": 1000}
     )
@@ -394,7 +402,7 @@ def test_sync_limit_applies_after_archive_filtering(tmp_path, monkeypatch):
     rc = cli.main([
         "sync", "--source", "liked", "--headers", "/tmp/x",
         "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
-        "--limit", "2",
+        "--limit", "2", "--force-new-archive",
     ])
     assert rc == 0
     assert captured["ids"] == ["v1", "v2"]

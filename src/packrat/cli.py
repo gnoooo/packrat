@@ -35,6 +35,7 @@ from packrat.services import credentials as credentials_service
 from packrat.services import diagnostics as diagnostics_service
 from packrat.services import metadata as metadata_service
 from packrat.manifest import Manifest
+from packrat.integrity import verify_audio
 from packrat.playlist import m3u8_entry, write_m3u8
 from packrat.sizes import format_size, parse_size
 from packrat.sync import browser_cookie_file
@@ -80,6 +81,33 @@ def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
 
 
 _AUDIO_EXTENSIONS = {".m4a", ".mp3", ".opus", ".flac", ".webm", ".aac", ".ogg"}
+_STATE_COMMANDS = {
+    "download-one", "sync", "download-manifest", "resume", "artist",
+    "discover", "upgrade",
+}
+
+
+@contextlib.contextmanager
+def _run_lock():
+    """One state-changing Packrat process at a time."""
+    import fcntl
+
+    paths.ensure_config_dir()
+    lock_path = paths.CONFIG_DIR / "run.lock"
+    fh = lock_path.open("w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        raise RuntimeError(
+            "another Packrat run is active; wait for it to finish "
+            "before starting another download or upgrade"
+        )
+    try:
+        yield
+    finally:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
 
 
 def _print_paths(output_root: pathlib.Path, archive: str) -> None:
@@ -807,6 +835,33 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     # Artist manifests carry their own label and playlist layout.
     if payload.get("command") == "artist":
         label = payload.get("label") or payload.get("artist", manifest_path.stem)
+        failed_only = bool(getattr(args, "failed_only", False))
+        wanted = "failed" if failed_only else "pending"
+        artist_entries = [
+            e for e in payload.get("entries", [])
+            if e.get("status") == wanted
+        ]
+        if not artist_entries:
+            print(f"no {wanted} tracks in manifest")
+            return 0
+        total_size = sum((e.get("est_size") or 0) for e in artist_entries)
+        print(f"pending tracks: {len(artist_entries)}")
+        print(f"estimated size: {format_size(total_size)}")
+        if getattr(args, "dry_run", False):
+            print("dry-run: no downloads")
+            return 0
+        if not getattr(args, "yes", False):
+            if sys.stdin.isatty():
+                answer = input("download now? [y/N] ").strip().lower()
+                if answer not in ("y", "yes"):
+                    print("Not downloading. Use --yes to skip the question.")
+                    return 2
+            else:
+                print(
+                    "Not downloading: this terminal can't ask. Add --yes to continue.",
+                    file=sys.stderr,
+                )
+                return 2
         kwargs: dict[str, Any] = {
             "label": label,
             "output_root": output_root,
@@ -819,6 +874,7 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
             "payload": payload,
             "limit": getattr(args, "limit", None),
             "manifest_path": str(manifest_path),
+            "failed_only": failed_only,
         }
         if args.tui:
             result = tui_module.run_tui(
@@ -839,9 +895,19 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     # Generic manifest (sync, discover, albums, queues, phase4, radio, ...).
     manifest = Manifest.load(manifest_path)
     if getattr(args, "failed_only", False):
-        entries = [e for e in manifest.entries if e.get("status") == "failed"]
+        retryable = {"failed", "skipped_size", "skipped"}
+        entries = [e for e in manifest.entries if e.get("status") in retryable]
     else:
-        entries = manifest.pending()
+        entries = []
+        for entry in manifest.entries:
+            if entry.get("status") == "pending":
+                entries.append(entry)
+            elif entry.get("status") == "downloaded":
+                path = entry.get("path")
+                if not path or not verify_audio(pathlib.Path(path)).ok:
+                    entry["status"] = "pending"
+                    entry["error"] = entry.get("error") or "downloaded file is missing or invalid"
+                    entries.append(entry)
     if not entries:
         print("no failed tracks in manifest" if getattr(args, "failed_only", False)
               else "no pending tracks in manifest")
@@ -1598,6 +1664,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 else:
                     args.cookies = cookie_path
+            if args.command in _STATE_COMMANDS:
+                stack.enter_context(_run_lock())
             return args.func(args)
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)

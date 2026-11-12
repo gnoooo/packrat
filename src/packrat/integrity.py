@@ -14,7 +14,11 @@ class AudioCheck:
     size: int = 0
 
 
-def verify_audio(path: pathlib.Path, expected_size: int | None = None) -> AudioCheck:
+def verify_audio(
+    path: pathlib.Path,
+    expected_size: int | None = None,
+    expected_duration: float | None = None,
+) -> AudioCheck:
     """Validate that *path* is a non-empty, parseable audio file.
 
     Mutagen is used as the lightweight structural check (it parses the
@@ -27,7 +31,7 @@ def verify_audio(path: pathlib.Path, expected_size: int | None = None) -> AudioC
         return AudioCheck(False, "file is missing", size=0)
     if size <= 0:
         return AudioCheck(False, "file is empty", size=size)
-    if expected_size and size < int(expected_size * 0.5):
+    if expected_size and size < int(expected_size * 0.8):
         return AudioCheck(False, "file is much smaller than expected", size=size)
     try:
         import mutagen
@@ -39,4 +43,15 @@ def verify_audio(path: pathlib.Path, expected_size: int | None = None) -> AudioC
     duration = getattr(getattr(audio, "info", None), "length", None)
     if duration is not None and duration <= 0:
         return AudioCheck(False, "zero-length audio stream", duration=duration, size=size)
+    if (
+        expected_duration
+        and duration is not None
+        and abs(float(duration) - float(expected_duration)) > 5.0
+    ):
+        return AudioCheck(
+            False,
+            f"duration mismatch: got {duration:.1f}s, expected {expected_duration:.1f}s",
+            duration=duration,
+            size=size,
+        )
     return AudioCheck(True, duration=duration, size=size)

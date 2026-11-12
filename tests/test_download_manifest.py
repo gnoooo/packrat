@@ -98,7 +98,11 @@ def test_artist_manifest_routes_to_download_artist(
         "command": "artist",
         "label": "Test",
         "artist": "Test Artist",
-        "entries": [],
+        "entries": [
+            {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+             "duration": 100, "est_size": 1, "status": "pending",
+             "path": None, "error": None},
+        ],
     }
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -131,7 +135,11 @@ def test_artist_manifest_reports_error(
     manifest = tmp_path / "playlists" / "artist-Test.manifest.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
-        json.dumps({"command": "artist", "label": "Test", "entries": []}),
+        json.dumps({"command": "artist", "label": "Test", "entries": [
+            {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+             "duration": 100, "est_size": 1, "status": "pending",
+             "path": None, "error": None},
+        ]}),
         encoding="utf-8",
     )
 

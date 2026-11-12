@@ -310,7 +310,7 @@ def download_track(
     # do not silently reuse the wrong audio.
     expected_duration = track.get("duration")
     if output_path.exists():
-        existing = verify_audio(output_path)
+        existing = verify_audio(output_path, expected_duration=expected_duration)
         if existing.ok:
             duration_mismatch = (
                 isinstance(expected_duration, (int, float))
@@ -329,7 +329,7 @@ def download_track(
                 )
             output_path = collision_path(output_path, video_id)
             if output_path.exists():
-                alternate = verify_audio(output_path)
+                alternate = verify_audio(output_path, expected_duration=expected_duration)
                 if alternate.ok:
                     tag_existing(output_path)
                     return emit_done(
@@ -391,7 +391,10 @@ def download_track(
                     actual_bytes = downloaded.stat().st_size
                 except OSError:
                     actual_bytes = est_size or 0
-                check = verify_audio(downloaded, est_size)
+                check = verify_audio(
+                    downloaded, est_size,
+                    expected_duration=track.get("duration"),
+                )
                 if not check.ok:
                     _quarantine(downloaded)
                     if attempt < max_retries:

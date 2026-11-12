@@ -103,6 +103,7 @@ def download_artist(
     payload: dict[str, Any] | None = None,
     limit: int | None = None,
     manifest_path: str | pathlib.Path | None = None,
+    failed_only: bool = False,
 ) -> dict[str, Any]:
     """Download pending tracks from an artist manifest.
 
@@ -120,11 +121,12 @@ def download_artist(
             return {"error": f"saved plan not found: {resolved_manifest}"}
         payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
-    pending = [e for e in entries if e.get("status") == "pending"]
+    wanted = "failed" if failed_only else "pending"
+    pending = [e for e in entries if e.get("status") == wanted]
     if limit and len(pending) > limit:
         pending = pending[:limit]
     if not pending:
-        return {"error": "no pending tracks in manifest"}
+        return {"error": f"no {wanted} tracks in manifest"}
 
     playlists_dir = output_root / "playlists" / "artists" / (clean(label) or "artist")
     manifest_max_size = payload.get("max_size")
