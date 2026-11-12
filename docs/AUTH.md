@@ -39,6 +39,24 @@ packrat auth
 
 If this fails, the headers may have expired. Run `packrat login` again.
 
+## Delete the login file
+
+```bash
+packrat logout
+packrat logout --file /path/to/browser.json
+```
+
+This removes the saved headers from disk. It cannot securely erase SSD blocks or backups; rotate the Google session if the file may have leaked.
+
+## Doctor
+
+```bash
+packrat doctor
+packrat doctor --online
+```
+
+`--online` verifies the login and runs a small yt-dlp extraction canary.
+
 ## Cookies for yt-dlp
 
 Public tracks usually need no cookies. But private, age-restricted or bot-gated tracks do.

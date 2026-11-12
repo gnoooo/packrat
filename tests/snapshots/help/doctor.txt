@@ -1,0 +1,14 @@
+usage: packrat doctor [-h] [--headers FILE] [--online]
+
+Check Python/dependencies, the login file, ffmpeg/Deno, and optionally run an
+online YouTube Music/yt-dlp canary.
+
+First-time setup:
+  --headers FILE  your YouTube Music login file; create it with `packrat
+                  login` (env: PACKRAT_HEADERS; default:
+                  ~/.config/packrat/browser.json)
+
+options:
+  -h, --help      show this help message and exit
+  --online        also verify the login and run a small yt-dlp extraction
+                  canary

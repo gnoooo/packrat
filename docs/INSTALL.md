@@ -32,6 +32,7 @@ pip install -e .
 ```bash
 packrat --version
 packrat --help
+packrat doctor
 ```
 
 ## First run

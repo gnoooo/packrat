@@ -27,6 +27,10 @@ from packrat import cli_args
 from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.download import _browser_tuple, _final_filepath
 from packrat.logging_config import redact as _redact
+from packrat import security
+from packrat.services import credentials as credentials_service
+from packrat.services import diagnostics as diagnostics_service
+from packrat.services import metadata as metadata_service
 from packrat.manifest import Manifest
 from packrat.playlist import m3u8_entry, write_m3u8
 from packrat.sizes import format_size, parse_size
@@ -134,6 +138,8 @@ def load_ytmusic(headers_path: str) -> YTMusic:
     p = pathlib.Path(headers_path)
     if not p.exists():
         raise FileNotFoundError(f"login file not found: {p}")
+    security.secure_file(p)
+    security.warn_if_insecure(p, "login file")
     return YTMusic(str(p))
 
 
@@ -179,10 +185,10 @@ def cmd_login(args: argparse.Namespace) -> int:
         return 2
 
     existed = target.exists()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    security.secure_directory(target.parent)
     try:
         target.touch(mode=0o600, exist_ok=True)
-        os.chmod(target, 0o600)
+        security.secure_file(target)
     except OSError:
         pass
 
@@ -201,10 +207,7 @@ def cmd_login(args: argparse.Namespace) -> int:
         _remove_empty_login(target, existed)
         return 1
     finally:
-        try:
-            os.chmod(target, 0o600)
-        except OSError:
-            pass
+        security.secure_file(target)
 
     print(f"Login file saved: {target}")
     print("Checking it...")
@@ -220,6 +223,68 @@ def cmd_login(args: argparse.Namespace) -> int:
         return 1
     print("Login works.")
     return 0
+
+
+def cmd_logout(args: argparse.Namespace) -> int:
+    """Delete the saved login headers file."""
+    try:
+        target, removed = credentials_service.delete_login(
+            getattr(args, "file", None)
+        )
+    except IsADirectoryError:
+        print("Refusing to delete a non-file login path.", file=sys.stderr)
+        return 1
+    if not target.exists() and not removed:
+        print(f"No login file found at {target}")
+        return 0
+    if not removed:
+        print(f"Could not delete {target}", file=sys.stderr)
+        return 1
+    print(f"Removed login file: {target}")
+    return 0
+
+
+def cmd_export_metadata(args: argparse.Namespace) -> int:
+    """Export normalized track metadata from a saved manifest."""
+    if args.manifest:
+        manifest_path = pathlib.Path(args.manifest)
+    else:
+        root = pathlib.Path(cli_args._output_default())
+        plans = sorted(
+            (root / "playlists").glob("*.manifest.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if not plans:
+            print("No saved plan found; pass --manifest FILE.", file=sys.stderr)
+            return 1
+        manifest_path = plans[0]
+    if not manifest_path.exists():
+        print(f"Saved plan not found: {manifest_path}", file=sys.stderr)
+        return 1
+    target = (
+        pathlib.Path(args.file)
+        if args.file
+        else manifest_path.with_name(f"metadata.{args.format}")
+    )
+    try:
+        metadata_service.export_manifest_metadata(manifest_path, target, args.format)
+    except Exception as exc:
+        print(f"Cannot export metadata: {exc}", file=sys.stderr)
+        return 1
+    print(f"metadata: {target}")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check local prerequisites and optionally run an online canary."""
+    checks = diagnostics_service.run_checks(
+        getattr(args, "headers", None),
+        online=getattr(args, "online", False),
+    )
+    for check in checks:
+        print(f"{check.status:4}  {check.label:24} {check.detail}")
+    return 1 if any(c.status == "FAIL" for c in checks) else 0
 
 
 def cmd_auth(args: argparse.Namespace) -> int:

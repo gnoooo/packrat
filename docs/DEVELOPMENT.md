@@ -15,7 +15,10 @@
 src/packrat/
   cli.py, cli_args.py         # CLI parsing and command dispatch
   sync.py, batch.py           # track lists, manifests, download loop
-  download.py                 # one-track yt-dlp wrapper
+  download.py                 # one-track yt-dlp wrapper + idempotency
+  integrity.py                # mutagen audio integrity check
+  security.py                 # credential permissions/removal
+  services/                   # credentials, diagnostics, metadata export
   artists.py                  # artist catalog + picker
   discover*.py, queues.py     # discovery planners
   tui.py, tui_theme.py        # curses renderer and palette
@@ -53,6 +56,13 @@ retries all branches. Tags are not mirrored.
 - [README.md](../README.md): landing page and navbar
 - `docs/*.md`: focused guides
 - `docs/images/`: TUI screenshots and architecture diagram
+
+## Verification and credentials
+
+- `integrity.verify_audio()` checks size, parseability and duration before a file is treated as complete.
+- `download_track()` skips a valid existing destination and quarantines invalid files before retrying.
+- `security.secure_file()` / `secure_directory()` enforce owner-only modes; `logout` removes saved headers.
+- `doctor` is the regression canary for YouTube/yt-dlp changes.
 
 ## Performance notes
 

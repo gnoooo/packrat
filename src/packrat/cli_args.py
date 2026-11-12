@@ -851,6 +851,64 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_login.set_defaults(func=_noop)
 
+    p_logout = sub.add_parser(
+        "logout",
+        help="delete your saved YouTube Music login file",
+        description=(
+            "Delete the login file created by 'packrat login'. This removes "
+            "the saved browser session headers from disk."
+        ),
+        parents=[verbose_silent],
+    )
+    p_logout.add_argument(
+        "--file",
+        metavar="FILE",
+        default=None,
+        help=f"login file to delete (default: {HEADERS_CONFIG_PATH})",
+    )
+    p_logout.set_defaults(func=_noop)
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="check the local setup and optionally the YouTube Music canary",
+        description=(
+            "Check Python/dependencies, the login file, ffmpeg/Deno, and "
+            "optionally run an online YouTube Music/yt-dlp canary."
+        ),
+        parents=[headers_only, verbose_silent],
+    )
+    p_doctor.add_argument(
+        "--online",
+        action="store_true",
+        help="also verify the login and run a small yt-dlp extraction canary",
+    )
+    p_doctor.set_defaults(func=_noop)
+
+    p_export = sub.add_parser(
+        "export-metadata",
+        help="export track metadata from a saved plan",
+        description=(
+            "Export a normalized JSON or CSV metadata document from a saved "
+            "manifest, for interoperability with other music tools."
+        ),
+        parents=[verbose_silent],
+    )
+    p_export.add_argument(
+        "--manifest",
+        metavar="FILE",
+        default=None,
+        help="saved plan (default: newest plan in the output folder)",
+    )
+    p_export.add_argument(
+        "--file", metavar="FILE", default=None,
+        help="write here instead of metadata.json/csv next to the plan",
+    )
+    p_export.add_argument(
+        "--format", choices=("json", "csv"), default="json",
+        help="metadata format (default: json)",
+    )
+    p_export.set_defaults(func=_noop)
+
     p_library = sub.add_parser(
         "library",
         help="list your playlists",

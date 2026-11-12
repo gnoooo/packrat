@@ -47,6 +47,20 @@ Or for every run:
 export PACKRAT_OUTPUT=/srv/music
 ```
 
+## Manifest as source of truth
+
+For a sync, the saved manifest is authoritative: a `downloaded` entry with a valid file is skipped, a missing/corrupt 
+file is retried, and the legacy archive is only a fallback when the manifest has no entry. 
+The archive remains a fast index and a compatibility path.
+
+Manifest and archive writes are atomic (`tempfile` + `os.replace` + `fsync`).
+
+## Credentials
+
+`packrat login` stores headers at `~/.config/packrat/browser.json` with mode `0600` and creates the config directory as `0700`. 
+`packrat logout` deletes the file. Browser cookie jars extracted by Packrat are temporary `0600` files and are removed at exit. 
+Logs redact cookies, authorization headers and Google session cookies.
+
 ## Archive
 
 The archive prevents re-downloading finished tracks. 

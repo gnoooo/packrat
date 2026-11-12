@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 import yt_dlp
 
+from packrat.integrity import verify_audio
 from packrat.logging_config import redact
 from packrat.sizes import estimate_size
 from packrat.naming import SINGLES_DIR_DEFAULT, track_path
@@ -237,6 +238,20 @@ def _progress_hook(
         )
 
 
+def _quarantine(path: pathlib.Path) -> None:
+    """Move a corrupt/partial file aside so yt-dlp cannot silently reuse it."""
+    try:
+        target = path.with_name(path.name + ".corrupt")
+        n = 1
+        while target.exists():
+            target = path.with_name(f"{path.name}.corrupt.{n}")
+            n += 1
+        path.replace(target)
+        logger.warning("quarantined invalid audio file: %s", target)
+    except OSError:
+        logger.debug("could not quarantine %s", path, exc_info=True)
+
+
 def download_track(
     track: dict[str, Any],
     output_root: pathlib.Path,
@@ -293,6 +308,19 @@ def download_track(
         output_path, cookies, cookies_from_browser, browser_profile, ytdl_logger, progress_hook
     )
 
+    # Idempotency: a valid file already at the destination is the result.
+    if output_path.exists():
+        existing = verify_audio(output_path)
+        if existing.ok:
+            return emit_done(
+                status="downloaded",
+                video_id=video_id,
+                title=track.get("title", ""),
+                filepath=output_path,
+                bytes=existing.size,
+            )
+        _quarantine(output_path)
+
     emit_start("resolving")
     for attempt in range(1, max_retries + 1):
         try:
@@ -331,6 +359,19 @@ def download_track(
                     actual_bytes = downloaded.stat().st_size
                 except OSError:
                     actual_bytes = est_size or 0
+                check = verify_audio(downloaded, est_size)
+                if not check.ok:
+                    _quarantine(downloaded)
+                    if attempt < max_retries:
+                        continue
+                    return emit_done(
+                        status="failed",
+                        video_id=video_id,
+                        title=track.get("title", ""),
+                        error=f"audio integrity check failed: {check.reason}",
+                        retryable=True,
+                        player_client=ytdl_logger.player_client,
+                    )
                 return emit_done(
                     status="downloaded",
                     video_id=video_id,

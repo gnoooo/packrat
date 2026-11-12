@@ -37,14 +37,15 @@ class Archive:
         return set(self._ids)
 
     def save(self) -> None:
-        """Append any IDs added since the last save to the archive file."""
+        """Atomically rewrite the archive, never leaving a partial file."""
         if not self._dirty:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        lines = sorted(self._dirty)
-        with self.path.open("a", encoding="utf-8") as f:
-            for vid in lines:
-                f.write(vid + "\n")
+        from packrat.manifest import atomic_write_text
+
+        atomic_write_text(
+            self.path,
+            "".join(f"{vid}\n" for vid in sorted(self._ids)),
+        )
         self._dirty.clear()
 
     def __len__(self) -> int:

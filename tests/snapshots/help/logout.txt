@@ -1,0 +1,10 @@
+usage: packrat logout [-h] [--file FILE]
+
+Delete the login file created by 'packrat login'. This removes the saved
+browser session headers from disk.
+
+Common options:
+  --file FILE  login file to delete (default: ~/.config/packrat/browser.json)
+
+options:
+  -h, --help   show this help message and exit

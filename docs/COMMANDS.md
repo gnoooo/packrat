@@ -21,6 +21,9 @@ Common options such as `--output`, `--limit`, `--dry-run` and `--yes` may go bef
 |---|---|
 | `packrat login` | Create the YouTube Music headers file. |
 | `packrat auth` | Verify the headers file. |
+| `packrat logout` | Delete the saved headers file. |
+| `packrat doctor` | Check dependencies, credentials and an optional canary. |
+| `packrat export-metadata` | Export JSON/CSV metadata from a saved plan. |
 | `packrat library` | List playlists (`--top N`). |
 | `packrat download-one LINK_OR_ID` | Download one song and verify it. |
 | `packrat sync` | Sync Liked Songs or a playlist. |
@@ -62,6 +65,28 @@ packrat sync --dry-run --yes
 
 Without `--source`, `sync` uses Liked Songs. 
 It fetches the full source first, then applies archive/dedupe/limit logic.
+
+## doctor
+
+```bash
+packrat doctor
+packrat doctor --online
+```
+
+Local checks cover Python/dependencies, ffmpeg/ffprobe/Deno, the login file and its permissions. 
+`--online` also calls YouTube Music and runs a small yt-dlp canary, which is the quickest way to detect a YouTube-side regression.
+
+## export-metadata
+
+```bash
+packrat export-metadata
+packrat export-metadata --manifest .music/playlists/liked.manifest.json --format csv
+packrat export-metadata --file /tmp/metadata.json
+```
+
+Writes a normalized document with `video_id`, `title`, `artist`, `album`,
+`track_num`, `duration_seconds`, `release_year`, `release_type`, `status`,
+`path` and `source`.
 
 ## download-manifest / resume
 

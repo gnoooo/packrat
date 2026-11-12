@@ -1,0 +1,14 @@
+usage: packrat export-metadata [-h] [--manifest FILE] [--file FILE]
+                               [--format {json,csv}]
+
+Export a normalized JSON or CSV metadata document from a saved manifest, for
+interoperability with other music tools.
+
+Common options:
+  --manifest FILE      saved plan (default: newest plan in the output folder)
+  --file FILE          write here instead of metadata.json/csv next to the
+                       plan
+
+options:
+  -h, --help           show this help message and exit
+  --format {json,csv}  metadata format (default: json)

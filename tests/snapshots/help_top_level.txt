@@ -1,15 +1,19 @@
 usage: packrat [-h] [--headers FILE] [--cookies FILE]
                [--cookies-from-browser BROWSER[:PROFILE]] [-v] [--version]
-               {auth,login,library,download-one,sync,download-manifest,resume,artist,discover} ...
+               {auth,login,logout,doctor,export-metadata,library,download-one,sync,download-manifest,resume,artist,discover} ...
 
 Download music from YouTube Music so you can listen offline. First time? Run
 'packrat login', then 'auth' to check it. Then 'sync' downloads your Liked
 Songs.
 
 positional arguments:
-  {auth,login,library,download-one,sync,download-manifest,resume,artist,discover}
+  {auth,login,logout,doctor,export-metadata,library,download-one,sync,download-manifest,resume,artist,discover}
     auth                check that your YouTube Music login works
     login               create your YouTube Music login file
+    logout              delete your saved YouTube Music login file
+    doctor              check the local setup and optionally the YouTube Music
+                        canary
+    export-metadata     export track metadata from a saved plan
     library             list your playlists
     download-one        download one song from a link or video ID
     sync                download new songs from Liked Songs or a playlist

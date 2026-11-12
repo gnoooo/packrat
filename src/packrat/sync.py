@@ -19,6 +19,7 @@ from ytmusicapi import YTMusic
 from yt_dlp.cookies import extract_cookies_from_browser
 
 from packrat.archive import Archive
+from packrat.integrity import verify_audio
 from packrat.download import estimate_track  # kept for test/back-compat patch points
 from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.manifest import Manifest
@@ -207,12 +208,39 @@ def run_sync(
 
         logger.info("resolved %d tracks from %s", len(tracks), args.source)
 
+        # The manifest is the source of truth for prior runs.  Only fall
+        # back to the legacy archive when no manifest entry exists.
+        previous: dict[str, dict[str, Any]] = {}
+        if manifest_path.exists():
+            try:
+                previous = {
+                    e["video_id"]: e
+                    for e in Manifest.load(manifest_path).entries
+                }
+            except Exception as exc:
+                logger.warning("could not read previous manifest: %s", exc)
+
         # Pre-flight: build manifest and estimate sizes for non-archived tracks.
         entries: list[dict[str, Any]] = []
         pending_entries: list[dict[str, Any]] = []
         total_est_bytes = 0
         for track in tracks:
-            if track["video_id"] in archive:
+            old = previous.get(track["video_id"])
+            retry_existing = False
+            if old and old.get("status") == "downloaded" and old.get("path"):
+                check = verify_audio(pathlib.Path(old["path"]))
+                if check.ok:
+                    entries.append(old)
+                    continue
+                old["status"] = "pending"
+                old["error"] = f"existing file failed integrity: {check.reason}"
+                retry_existing = True
+            elif old and old.get("status") == "archived":
+                entries.append(old)
+                continue
+            elif old:
+                retry_existing = True
+            if not retry_existing and track["video_id"] in archive:
                 entry = {
                     "video_id": track["video_id"],
                     "title": track["title"],

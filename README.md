@@ -48,6 +48,7 @@ pip install -e .
 # 2. Save your YouTube Music login
 packrat login
 packrat auth
+packrat doctor
 
 # 3. Preview, then download
 packrat sync --limit 5 --dry-run
@@ -64,7 +65,9 @@ Files go to `.music/<Artist>/<Album>/<NN - Title>.m4a`; singles go to
 
 | Command | What it does |
 |---|---|
-| `packrat login` / `auth` | Create and verify the login file. |
+| `packrat login` / `auth` / `logout` | Create, verify or delete the login file. |
+| `packrat doctor` | Check dependencies, credentials and an optional online canary. |
+| `packrat export-metadata` | Export normalized JSON/CSV metadata from a plan. |
 | `packrat library` | List playlists. |
 | `packrat sync` | Sync Liked Songs or a playlist. |
 | `packrat download-one LINK_OR_ID` | Download one song and verify it. |
@@ -107,14 +110,14 @@ same whether it is headless or full-screen.
 ## Common options
 
 ```text
---output/-o DIR        library root (default: .music)
---archive FILE         download history (default: .packrat_archive)
---delay SEC            pause between tracks (default: 7.0)
---max-size SIZE        skip oversized tracks, e.g. 3GB
---limit N              download at most N new tracks
---dry-run/-n           plan only
---yes/-y               skip confirmation
---tui                  full-screen progress view
+--output/-o DIR     # library root (default: .music)
+--archive FILE      # download history (default: .packrat_archive)
+--delay SEC         # pause between tracks (default: 7.0)
+--max-size SIZE     # skip oversized tracks, e.g. 3GB
+--limit N           # download at most N new tracks
+--dry-run/-n        # plan only
+--yes/-y            # skip confirmation
+--tui               # full-screen progress view
 ```
 
 Environment equivalents are documented in
@@ -143,6 +146,15 @@ python -m pytest
 The test suite blocks real network access. The local bare mirror and shared
 hooks are documented in [Development](docs/DEVELOPMENT.md); design history is in
 [History](docs/HISTORY.md).
+
+Security/integrity work in this phase:
+
+- login files are owner-only, config directories are 0700, and `logout` deletes the saved headers
+- logs redact `Cookie`, `Authorization`, `SID`/`HSID`/`SSID`/`APISID`/`SAPISID` and `__Secure-*` values
+- manifests and the archive are written atomically
+- a valid existing file is treated as already downloaded
+- audio files are parsed with mutagen before being marked complete
+- `packrat doctor --online` runs a small YouTube Music + yt-dlp canary.
 
 ## Security
 

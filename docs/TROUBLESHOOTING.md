@@ -7,7 +7,14 @@
   <a href="TUI.md">TUI</a> · <a href="DISCOVERY.md">Discovery</a> · <a href="ARTISTS.md">Artists</a> · <strong>Troubleshooting</strong> · <a href="DEVELOPMENT.md">Development</a> · <a href="HISTORY.md">History</a>
 </p>
 
-Start with verbose logging:
+Start with the setup check:
+
+```bash
+packrat doctor
+packrat doctor --online
+```
+
+Then enable verbose logging:
 
 ```bash
 packrat -v sync --limit 1

@@ -20,6 +20,12 @@ class RedactFilter(logging.Filter):
         (re.compile(r"(?i)(Cookie:\s*)[^\s\r\n]+"), r"\1<redacted>"),
         (re.compile(r"(?i)(Authorization:\s*)[^;\r\n]+"), r"\1<redacted>"),
         (re.compile(r"(?i)(SAPISID\s*=\s*)[^\s;,&]+"), r"\1<redacted>"),
+        (re.compile(r"(?i)((?:SID|HSID|SSID|APISID|SAPISID)\s*=\s*)[^;\s,]+"),
+         r"\1<redacted>"),
+        (re.compile(r"(?i)((?:__Secure-[^=;\s]+)\s*=\s*)[^;\s,]+"),
+         r"\1<redacted>"),
+        (re.compile(r'(?i)("(?:cookie|set-cookie|authorization)"\s*:\s*")[^"]*'),
+         r"\1<redacted>"),
     ]
 
     def filter(self, record: logging.LogRecord) -> bool:
