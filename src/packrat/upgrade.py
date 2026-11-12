@@ -221,8 +221,12 @@ def _replace_install(
 ) -> None:
     venv = root / "venv"
     backup = root / "venv.upgrade-backup"
+    marker = root / "venv.upgrade-ok"
     if backup.exists():
-        if not venv.exists():
+        if marker.exists():
+            shutil.rmtree(backup, ignore_errors=True)
+            marker.unlink(missing_ok=True)
+        elif not venv.exists():
             backup.rename(venv)
         else:
             raise UpgradeError(
@@ -252,9 +256,20 @@ def _replace_install(
         shutil.rmtree(venv, ignore_errors=True)
         if backup.exists():
             backup.rename(venv)
+        marker.unlink(missing_ok=True)
         raise
     else:
+        # Keep the old venv until the next upgrade so late imports in the
+        # current process never resolve against a deleted tree.
+        marker.write_text("ok\n", encoding="utf-8")
+
+
+def _cleanup_previous_backup() -> None:
+    backup = INSTALL_ROOT / "venv.upgrade-backup"
+    marker = INSTALL_ROOT / "venv.upgrade-ok"
+    if backup.exists() and marker.exists():
         shutil.rmtree(backup, ignore_errors=True)
+        marker.unlink(missing_ok=True)
 
 
 def _locked(path: pathlib.Path):
@@ -276,6 +291,7 @@ def run_upgrade(
     yes: bool = False,
     dry_run: bool = False,
 ) -> int:
+    _cleanup_previous_backup()
     release = latest_release(include_prerelease)
     print(f"current: {__version__}")
     print(f"latest:  {release.version} ({release.tag})")
