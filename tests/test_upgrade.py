@@ -41,16 +41,16 @@ def test_check_only_does_not_touch_install(monkeypatch, capsys):
         upgrade,
         "latest_release",
         lambda include_prerelease=False: upgrade.Release(
-            version="0.3.2",
-            tag="v0.3.2",
+            version="99.0.0",
+            tag="v99.0.0",
             wheel_url="https://example/w.whl",
-            wheel_name="packrat-0.3.2-py3-none-any.whl",
+            wheel_name="packrat-99.0.0-py3-none-any.whl",
             checksums_url="https://example/SHA256SUMS",
         ),
     )
     assert upgrade.run_upgrade(check_only=True) == 0
     out = capsys.readouterr().out
-    assert "update available: 0.3.2" in out
+    assert "update available: 99.0.0" in out
 
 
 def test_check_reports_current(monkeypatch, capsys):
