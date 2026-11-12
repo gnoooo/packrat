@@ -464,8 +464,8 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
 
     metadata: SongMetadata | None = None
-    headers_path = getattr(args, "headers", None) or cli_args._headers_default()
-    if pathlib.Path(headers_path).expanduser().exists():
+    headers_path = getattr(args, "headers", None) or cli_args._headers_default() or ""
+    if headers_path and pathlib.Path(headers_path).expanduser().exists():
         try:
             metadata = resolve_song_metadata(video_id, headers_path)
         except Exception as exc:
