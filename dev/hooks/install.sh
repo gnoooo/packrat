@@ -5,7 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOKS_DIR="$REPO_ROOT/dev/hooks"
 
-for hook in post-commit post-rewrite post-merge; do
+for hook in pre-push post-commit post-rewrite post-merge; do
   [ -x "$HOOKS_DIR/$hook" ] || chmod +x "$HOOKS_DIR/$hook"
 done
 

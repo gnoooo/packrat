@@ -60,11 +60,10 @@ It runs on every push to `master` (and can be started manually):
 - Otherwise the push creates a **prerelease snapshot**
   `v<version>.dev<run-number>+<short-sha>`.
 
-Bump `pyproject.toml` to create the next stable release:
+Bump the version and lockfile together:
 
 ```bash
-# edit version = "0.4.0"
-uv lock
+./dev/bump-version.sh 0.4.0
 git add pyproject.toml uv.lock
 git commit -m "release: 0.4.0"
 git push github master
@@ -72,6 +71,30 @@ git push github master
 
 The workflow uses `uv.lock`; commit it whenever dependencies or the project
 version change.
+
+### Version/tag guard
+
+The shared hooks include a `pre-push` check:
+
+```bash
+./dev/hooks/install.sh
+```
+
+It rejects a manually pushed `v*` tag when:
+
+- the tag does not match the `pyproject.toml` version (stable tags must match
+  exactly; prerelease tags must share the base version);
+- `uv.lock` is stale or has a different `packrat` version;
+- the tag already exists on the remote.
+
+You can run the same check directly:
+
+```bash
+python3 dev/check_version.py v0.4.0
+```
+
+The release workflow repeats the tag/version check, so a bypassed local hook
+still cannot publish an inconsistent stable tag.
 
 ### Provenance
 

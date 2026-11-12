@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Reject version-inconsistent or already-existing release tags.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/tags/v*) ;;
+        *) continue ;;
+    esac
+    tag="${remote_ref#refs/tags/}"
+    if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+        echo "pre-push: refusing to move existing tag $tag" >&2
+        exit 1
+    fi
+    if ! python3 dev/check_version.py "$tag"; then
+        exit 1
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        if ! uv lock --check; then
+            echo "pre-push: uv.lock is stale; run 'uv lock' and commit it" >&2
+            exit 1
+        fi
+    else
+        echo "pre-push: uv not found; cannot verify uv.lock" >&2
+        exit 1
+    fi
+    if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+        echo "pre-push: warning: tag $tag does not point at HEAD" >&2
+    fi
+done

@@ -80,14 +80,15 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
             VERSION="${TAG#v}"
             case "$VERSION" in
-              *.dev*|*-*|*rc[0-9]*|*a[0-9]*|*b[0-9]*) PRERELEASE="--prerelease" ;;
+              "$BASE"|"$BASE".*|"$BASE"-*|"$BASE"rc*|"$BASE"a*|"$BASE"b*) ;;
               *)
-                if [ "$VERSION" != "$BASE" ]; then
-                  echo "tag version $VERSION does not match pyproject $BASE" >&2
-                  exit 1
-                fi
-                PRERELEASE=""
+                echo "tag version $VERSION does not match pyproject $BASE" >&2
+                exit 1
                 ;;
+            esac
+            case "$VERSION" in
+              *.dev*|*-*|*rc[0-9]*|*a[0-9]*|*b[0-9]*) PRERELEASE="--prerelease" ;;
+              *) PRERELEASE="" ;;
             esac
           else
             TAG="v${BASE}"
