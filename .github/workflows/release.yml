@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -54,23 +55,32 @@ jobs:
           set -euo pipefail
           BASE="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
           SHORT="${GITHUB_SHA::7}"
-          TAG="v${BASE}"
-          STABLE=0
-          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-              STABLE=1
-            elif [ "$(git rev-parse "refs/tags/${TAG}")" = "${GITHUB_SHA}" ]; then
-              STABLE=1
-            fi
-          fi
-          if [ "${STABLE}" = "1" ]; then
-            VERSION="${BASE}"
-            PRERELEASE=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            case "$VERSION" in
+              *.dev*|*-*) PRERELEASE="--prerelease" ;;
+              *) PRERELEASE="" ;;
+            esac
           else
-            VERSION="${BASE}.dev${GITHUB_RUN_NUMBER}+${SHORT}"
-            PRERELEASE="--prerelease"
+            TAG="v${BASE}"
+            STABLE=0
+            if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+              if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+                STABLE=1
+              elif [ "$(git rev-parse "refs/tags/${TAG}")" = "${GITHUB_SHA}" ]; then
+                STABLE=1
+              fi
+            fi
+            if [ "${STABLE}" = "1" ]; then
+              VERSION="${BASE}"
+              PRERELEASE=""
+            else
+              VERSION="${BASE}.dev${GITHUB_RUN_NUMBER}+${SHORT}"
+              PRERELEASE="--prerelease"
+            fi
+            TAG="v${VERSION}"
           fi
-          TAG="v${VERSION}"
           echo "base=${BASE}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
