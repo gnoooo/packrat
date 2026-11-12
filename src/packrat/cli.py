@@ -28,6 +28,7 @@ from packrat.batch import exit_code_from_result, run_batch_download
 from packrat.download import _browser_tuple, _final_filepath
 from packrat.logging_config import redact as _redact
 from packrat import security
+from packrat.archive import Archive
 from packrat import upgrade as upgrade_module
 from packrat import paths
 from packrat.services import credentials as credentials_service
@@ -469,7 +470,15 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         try:
             metadata = resolve_song_metadata(video_id, headers_path)
         except Exception as exc:
-            print(f"metadata lookup failed: {_redact(exc)}", file=sys.stderr)
+            print(
+                f"metadata lookup failed: {_redact(exc)}; using uploader layout",
+                file=sys.stderr,
+            )
+    elif not headers_path:
+        print(
+            "warning: no login file; using uploader layout (run 'packrat login')",
+            file=sys.stderr,
+        )
     if metadata is not None:
         output_path = track_path(
             output_root,
@@ -541,6 +550,13 @@ def cmd_download_one(args: argparse.Namespace) -> int:
             apply_song_metadata(downloaded, metadata)
         except Exception as exc:
             print(f"tag update failed: {_redact(exc)}", file=sys.stderr)
+    try:
+        archive = Archive(cli_args._archive_default())
+        archive.add(video_id)
+        archive.save()
+    except Exception as exc:
+        print(f"warning: could not update download history: {_redact(exc)}",
+              file=sys.stderr)
 
     print(f"downloaded: {downloaded}")
     print(

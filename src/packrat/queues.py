@@ -135,11 +135,14 @@ def _build_queue(
         artist_counts[artist] += 1
         key = (_normalize(artist), _normalize(raw.get("title", "")))
         seen_keys.add(key)
+        release_type = str(raw.get("releaseType") or "").lower() or None
         path = track_path(
             root,
             artist,
             _album_name(raw),
             raw.get("title", "Unknown"),
+            track_num=raw.get("trackNumber") if isinstance(raw.get("trackNumber"), int) else None,
+            release_type=release_type,
             singles_dir=singles_dir,
         )
         vid = raw["videoId"]
@@ -152,6 +155,8 @@ def _build_queue(
                 "duration": _duration_seconds(raw) or 0,
                 "path": str(path),
                 "singles_dir": singles_dir,
+                "track_num": raw.get("trackNumber") if isinstance(raw.get("trackNumber"), int) else None,
+                "release_type": release_type,
                 "seed": seed.get("title", seed["videoId"]),
                 "seed_video_id": seed["videoId"],
                 "hop": hop,
@@ -293,6 +298,9 @@ def discover_queues(
             hop=t["hop"],
             reason=t["reason"],
             duration=t["duration"],
+            track_num=t.get("track_num"),
+            release_type=t.get("release_type"),
+            singles_dir=t.get("singles_dir"),
         )
 
     manifest_path = output_root / "playlists" / "queues.manifest.json"

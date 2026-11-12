@@ -1,6 +1,6 @@
 usage: packrat download-one [-h] [--cookies FILE]
                             [--cookies-from-browser BROWSER[:PROFILE]]
-                            [--output DIR]
+                            [--headers FILE] [--output DIR]
                             LINK_OR_ID
 
 Download one song. Deno (https://deno.com) is recommended; cookies are
@@ -21,6 +21,9 @@ First-time setup:
                         recommended: read cookies from a browser: firefox,
                         chrome, edge, ...; add :profile for a specific profile
                         (env: PACKRAT_COOKIES_FROM_BROWSER)
+  --headers FILE        your YouTube Music login file; create it with `packrat
+                        login` (env: PACKRAT_HEADERS; default:
+                        ~/.config/packrat/browser.json)
 
 options:
   -h, --help            show this help message and exit

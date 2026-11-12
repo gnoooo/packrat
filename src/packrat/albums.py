@@ -126,6 +126,9 @@ def _album_track_path(
     artist: str,
     album_title: str,
     track: dict[str, Any],
+    *,
+    release_type: str | None = None,
+    singles_dir: str = "Singles",
 ) -> pathlib.Path:
     return track_path(
         root,
@@ -133,6 +136,8 @@ def _album_track_path(
         album_title,
         track.get("title", "Unknown"),
         track_num=track.get("trackNumber"),
+        release_type=release_type,
+        singles_dir=singles_dir,
     )
 
 
@@ -188,6 +193,7 @@ def discover_albums(
             except Exception:
                 continue
             album_title = data.get("title", album.get("title", "Unknown Album"))
+            release_type = str(data.get("type") or "").lower() or None
             tracks = data.get("tracks", [])
 
             new_tracks: list[dict[str, Any]] = []
@@ -209,7 +215,10 @@ def discover_albums(
                 if key in owned_keys:
                     owned_in_album += 1
                     continue
-                path = _album_track_path(output_root, artist_name, album_title, t)
+                path = _album_track_path(
+                    output_root, artist_name, album_title, t,
+                    release_type=release_type,
+                )
                 est_size = heuristic_size(dur)
                 status = "pending"
                 if max_size_bytes is not None and est_size > max_size_bytes:
@@ -225,6 +234,9 @@ def discover_albums(
                         "path": str(path),
                         "status": status,
                         "est_size": est_size,
+                        "track_num": t.get("trackNumber"),
+                        "release_type": release_type,
+                        "singles_dir": "Singles",
                     }
                 )
 
@@ -262,6 +274,9 @@ def discover_albums(
                     album_browse_id=browse_id,
                     reason=f"album from liked artist {artist_name}",
                     duration=t["duration"],
+                    track_num=t.get("track_num"),
+                    release_type=t.get("release_type"),
+                    singles_dir=t.get("singles_dir"),
                 )
 
             album_summaries.append(

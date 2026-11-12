@@ -30,7 +30,7 @@ def _help(path=()):
 
 
 # 1. download-one is narrow
-@pytest.mark.parametrize("flag", ["--dry-run", "--limit", "--yes", "--tui", "--archive", "--delay", "--max-size", "--headers"])
+@pytest.mark.parametrize("flag", ["--dry-run", "--limit", "--yes", "--tui", "--archive", "--delay", "--max-size"])
 def test_download_one_rejects_unused_options(flag):
     with pytest.raises(SystemExit) as exc:
         _parse(["download-one", "v1", flag])

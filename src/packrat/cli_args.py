@@ -987,6 +987,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         parents=[
             cookies_only,
+            headers_only,
             build_run_control_parent(
                 suppress_defaults=True,
                 archive=False,
