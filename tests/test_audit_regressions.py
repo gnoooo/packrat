@@ -335,3 +335,45 @@ def test_sync_marks_albumless_track_as_single():
         "videoId": "v1", "title": "Single", "artists": [{"name": "A"}],
     }, 1)
     assert track["release_type"] == "single"
+
+
+def test_artist_aggregate_playlist_preserves_old_downloads(tmp_path):
+    from packrat import artist_playlists
+
+    old = tmp_path / "A" / "Al" / "01 - Old.m4a"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"x")
+    manifest_path = tmp_path / "playlists" / "artist-A.manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    payload = {
+        "command": "artist", "label": "A",
+        "entries": [{
+            "video_id": "new", "title": "New", "artist": "A", "album": "Al",
+            "track_num": 2, "duration": 100, "est_size": 1,
+            "status": "pending", "path": None, "error": None,
+        }],
+        "playlist_entries": [
+            {"video_id": "old", "title": "Old", "artist": "A", "album": "Al",
+             "track_num": 1, "duration": 100, "status": "downloaded",
+             "path": str(old)},
+            {"video_id": "new", "title": "New", "artist": "A", "album": "Al",
+             "track_num": 2, "duration": 100, "status": "pending", "path": None},
+        ],
+    }
+    manifest_path.write_text(json.dumps(payload))
+
+    def _batch(entries, **kw):
+        for entry in entries:
+            entry["status"] = "downloaded"
+            entry["path"] = str(tmp_path / "A" / "Al" / "02 - New.m4a")
+        kw["save_callback"](entries)
+        return {"downloaded": 1, "archived": 0, "skipped_size": 0,
+                "failed": 0, "stopped": False}
+
+    with patch("packrat.artist_playlists.run_batch_download", side_effect=_batch):
+        artist_playlists.download_artist(
+            "A", tmp_path, str(tmp_path / "archive"),
+            payload=payload, manifest_path=manifest_path,
+        )
+    text = (tmp_path / "playlists" / "artists" / "A" / "artist-all.m3u8").read_text()
+    assert "Old" in text and "New" in text

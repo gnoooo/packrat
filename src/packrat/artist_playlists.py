@@ -89,6 +89,17 @@ def save_manifest(payload: dict[str, Any]) -> None:
     atomic_write_text(manifest_path, json.dumps(payload, indent=2))
 
 
+def _playlist_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    merged = {
+        e.get("video_id"): e
+        for e in (payload.get("playlist_entries") or payload.get("entries") or [])
+    }
+    for entry in payload.get("entries") or []:
+        if entry.get("status") == "downloaded":
+            merged[entry.get("video_id")] = entry
+    return list(merged.values())
+
+
 def download_artist(
     label: str,
     output_root: pathlib.Path,
@@ -156,7 +167,7 @@ def download_artist(
             resolved_manifest,
             json.dumps({k: v for k, v in payload.items()}, indent=2),
         )
-        write_artist_playlists(payload["entries"], playlists_dir)
+        write_artist_playlists(_playlist_entries(payload), playlists_dir)
 
     summary = run_batch_download(
         pending,
@@ -176,7 +187,9 @@ def download_artist(
         "summary": summary,
         "manifest_path": str(resolved_manifest),
         "m3u8_dir": str(playlists_dir),
-        "m3u8_paths": write_artist_playlists(entries, playlists_dir),
+        "m3u8_paths": write_artist_playlists(
+            _playlist_entries(payload), playlists_dir
+        ),
     }
 
 

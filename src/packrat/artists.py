@@ -892,6 +892,23 @@ def build_catalog(
     else:
         all_entries = entries
         top_totals = None
+    # Preserve previously downloaded tracks for aggregate playlists even when
+    # this run's plan excludes already-owned releases.
+    playlist_entries: list[dict[str, Any]] = []
+    if manifest_path.exists():
+        try:
+            previous = Manifest.load(manifest_path)
+            playlist_entries = [
+                e for e in previous.entries
+                if e.get("status") == "downloaded" and e.get("path")
+            ]
+        except Exception:
+            playlist_entries = []
+    seen_playlist_ids = {e.get("video_id") for e in playlist_entries}
+    for entry in all_entries:
+        if entry.get("video_id") not in seen_playlist_ids:
+            playlist_entries.append(entry)
+            seen_playlist_ids.add(entry.get("video_id"))
     total_seconds = sum(e["duration"] for e in all_entries)
     measured = runs.last_measured(output_root)
     summary = summarize_entries(all_entries, delay=delay, measured=measured)
@@ -904,6 +921,7 @@ def build_catalog(
         "releases": release_meta,
         "excluded_counts": excluded_counts,
         "entries": all_entries,
+        "playlist_entries": playlist_entries,
         "scope": scope,
         "top_songs": top_totals,
         "max_size": parse_size(max_size) if max_size else None,
