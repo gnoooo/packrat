@@ -123,6 +123,8 @@ class State:
                     )
                 self.current = CurrentTrack()
             elif event.type == "delay":
+                if p.get("paused") and self.status == "PAUSED":
+                    return
                 self.status = f"WAITING {p.get('remaining', 0):.1f}s"
                 if p.get("finished") is not None:
                     self.last_finished = str(p["finished"])

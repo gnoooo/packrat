@@ -1668,6 +1668,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.cookies = cookie_path
             if args.command in _STATE_COMMANDS:
                 stack.enter_context(_run_lock())
+                if not getattr(args, "tui", False):
+                    from packrat.logging_config import setup_logging
+                    setup_logging(tui_active=False)
             return args.func(args)
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)

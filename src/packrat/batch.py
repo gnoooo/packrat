@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import time
 from typing import Any, Callable
@@ -14,6 +15,8 @@ from packrat.manifest import Manifest
 from packrat.naming import SINGLES_DIR_DEFAULT, track_path
 from packrat.sizes import parse_size
 from packrat import runs
+
+logger = logging.getLogger(__name__)
 
 
 _SAVE_INTERVAL = 10
@@ -85,6 +88,11 @@ def run_batch_download(
                     {"remaining": delay, "paused": True},
                 )
             )
+            if control.should_stop():
+                stop_early = True
+                stop_reason = "user"
+                entry["error"] = "batch stopped by user"
+                break
 
         # Manifest truth: a downloaded entry with a valid file is already done.
         # If the file is missing/corrupt, put the entry back to pending and let
@@ -241,18 +249,21 @@ def run_batch_download(
         save_callback(entries)
 
     downloaded_count = sum(1 for e in entries if e.get("status") == "downloaded")
-    runs.record_run(
-        output_root,
-        mode=mode,
-        tracks=len(entries),
-        downloaded=downloaded_count,
-        seconds=time.monotonic() - started,
-    )
+    try:
+        runs.record_run(
+            output_root,
+            mode=mode,
+            tracks=len(entries),
+            downloaded=downloaded_count,
+            seconds=time.monotonic() - started,
+        )
+    except Exception:
+        logger.exception("could not record run throughput")
 
     _emit(
         event_callback,
-        "done",
-        {"reason": "stopped" if stop_early else "completed"},
+        "stopped" if stop_early else "done",
+        {"reason": stop_reason if stop_early else "completed"},
     )
 
     return {

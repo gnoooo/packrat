@@ -1121,8 +1121,12 @@ def _handle_keys(stdscr, control: Control, state: State,
     if key == -1:
         return True, show_log, log_offset, help_mode, action
     if key in (ord("q"), ord("Q")):
-        control.request_stop()
-        state.apply(Event("status", {"status": "STOPPING", "reason": "user quit"}))
+        if state.status in ("DONE", "STOPPED", "ABORTED", "STOPPING"):
+            action = "quit"
+        else:
+            control.request_stop()
+            state.apply(Event("status", {"status": "STOPPING", "reason": "user quit"}))
+            action = "stopping"
     elif key in (ord("p"), ord("P"), 32):
         control.toggle_pause()
         state.apply(Event("status", {"status": "PAUSED" if control.paused else "RUNNING"}))
@@ -1212,6 +1216,8 @@ def _ui(stdscr, state: State, control: Control, ring_handler, ascii_mode: bool,
         stdscr.timeout(50 if animating else 250)
         cont, show_log, log_offset, help_mode, action = _handle_keys(
             stdscr, control, state, show_log, log_offset, help_mode)
+        if action == "quit":
+            break
         if action == "toggle_anim":
             vis.no_anim = not vis.no_anim
             prev_sig = None
@@ -1224,17 +1230,6 @@ def _ui(stdscr, state: State, control: Control, ring_handler, ascii_mode: bool,
             prev_sig = None
         if not cont:
             break
-        if snap.status in ("DONE", "STOPPED", "ABORTED"):
-            sweep_done = sweep is not None and sweep >= 1.0
-            stdscr.timeout(100 if not sweep_done else 1000)
-            try:
-                key = stdscr.getch()
-            except curses.error:
-                key = -1
-            if key in (ord("q"), ord("Q"), 27):
-                break
-            if key == curses.KEY_RESIZE:
-                prev_sig = None
 
 
 def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
@@ -1248,11 +1243,14 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
     try:
         result_container["return_value"] = worker_func(**kwargs)
     except Exception as exc:
+        logging.getLogger(__name__).exception("worker crashed")
         state.apply(Event("stopped", {"reason": f"worker crashed: {exc}"}))
         result_container["exception"] = exc
         result_container["traceback"] = traceback.format_exc()
         return
-    if state.status not in ("STOPPED", "ABORTED"):
+    if isinstance(result_container.get("return_value"), dict) and result_container["return_value"].get("error"):
+        state.apply(Event("stopped", {"reason": str(result_container["return_value"]["error"])}))
+    elif state.status not in ("STOPPED", "ABORTED", "STOPPING"):
         state.apply(Event("done", {"reason": "finished"}))
 
 
@@ -1326,10 +1324,11 @@ def run_tui(worker_func: Callable, worker_kwargs: dict, mode: str = "",
 def _latest_log_path() -> str:
     import glob
 
-    paths = sorted(
+    paths = (
         glob.glob(str(LOG_DIR / "packrat-*.log"))
         + glob.glob(str(LOG_DIR / "ytm-offline-*.log"))
     )
+    paths.sort(key=lambda path: os.path.getmtime(path))
     return paths[-1] if paths else f"{LOG_DIR}/"
 
 

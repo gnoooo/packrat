@@ -203,3 +203,54 @@ def test_visual_options_none_does_not_reset_theme():
     assert tui._visual_state["theme"] == "sunset"
     assert tui._visual_state["no_color"] is True
     assert tui._visual_state["palette"] == "basic"
+
+
+def test_tui_q_at_done_quits_immediately():
+    from packrat import tui
+    from packrat.events import State
+
+    class Screen:
+        def getch(self):
+            return ord("q")
+
+    state = State()
+    state.apply(type("E", (), {"type": "done", "payload": {"reason": "finished"}})())
+    control = tui.Control()
+    cont, *_rest, action = tui._handle_keys(Screen(), control, state, True, 0, False)
+    assert cont is True
+    assert action == "quit"
+
+
+def test_paused_wait_stops_immediately():
+    from packrat.control import Control
+
+    control = Control()
+    control.pause()
+    control.request_stop()
+    start = __import__("time").monotonic()
+    control.wait_while_paused()
+    assert __import__("time").monotonic() - start < 0.5
+
+
+def test_delay_does_not_overwrite_paused_status():
+    from packrat.events import Event, State
+
+    state = State()
+    state.apply(Event("status", {"status": "PAUSED"}))
+    state.apply(Event("delay", {"remaining": 3.0, "paused": True}))
+    assert state.status == "PAUSED"
+
+
+def test_headless_sync_writes_log(tmp_path, monkeypatch):
+    from packrat import logging_config
+
+    headers = tmp_path / "headers.json"
+    headers.write_text("{}")
+    monkeypatch.setattr("packrat.cli.sync_module.run_sync", lambda _args: 0)
+    assert cli.main([
+        "sync", "--source", "liked", "--headers", str(headers),
+        "--output", str(tmp_path), "--archive", str(tmp_path / "arc"),
+        "--dry-run",
+    ]) == 0
+    logs = list(logging_config.LOG_DIR.glob("packrat-*.log"))
+    assert logs

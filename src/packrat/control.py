@@ -51,7 +51,7 @@ class Control:
         """Block until paused is False, optionally calling callback each interval."""
         while True:
             with self._lock:
-                if not self.paused:
+                if not self.paused or self.stop_after_current:
                     return
             if callback:
                 callback()
