@@ -10,6 +10,7 @@ GIT_URL=""
 GIT_REF=""
 DRY_RUN=0
 PIPED=0
+DEFAULT_GIT_URL="https://github.com/gnoooo/packrat.git"
 TMP_VENV=""
 OLD_VENV=""
 TMP_LINK=""
@@ -40,7 +41,9 @@ Options:
 External tools are detected but never installed automatically:
   ffmpeg/ffprobe are required; Deno >= 2.3 is strongly recommended.
   If uv is absent, the script falls back to python -m venv + pip.
-  When piped (curl | bash), pass --git URL; there is no local checkout.
+  Piped installs default to:
+    https://github.com/gnoooo/packrat.git
+  Override with --git URL (and optionally --ref).
 EOF
 }
 
@@ -245,6 +248,11 @@ main() {
     require_cmd "$PYTHON"
     check_python
 
+    if [ -z "$GIT_URL" ] && (( PIPED )); then
+        GIT_URL="$DEFAULT_GIT_URL"
+        note "piped install: using default repository $GIT_URL"
+    fi
+
     if [ -n "$GIT_URL" ]; then
         if [[ "$GIT_URL" == git+* ]]; then
             PIP_SOURCE="$GIT_URL"
@@ -253,9 +261,6 @@ main() {
         fi
         [ -n "$GIT_REF" ] && PIP_SOURCE="$PIP_SOURCE@$GIT_REF"
     else
-        if (( PIPED )); then
-            die "when piping install.sh, pass --git URL (there is no checkout to install from)"
-        fi
         [ -f "$SOURCE/pyproject.toml" ] || die "pyproject.toml not found; run from a checkout or pass --git URL"
         PIP_SOURCE="$SOURCE"
     fi

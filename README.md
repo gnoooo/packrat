@@ -40,14 +40,13 @@ archive, so it is safe to stop, resume, and retry.
 ## Quick start
 
 ```bash
-# 1. Install from the repository
+# 1.a) Remote install (review the script first, don't run random scripts plz):
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash
+# 1.b) Install from the repository (same thing, review the script before): 
+git clone https://github.com/gnoooo/packrat.git && cd packrat
 ./install.sh
-
-# Or manually:
-# python -m venv .venv && source .venv/bin/activate && pip install -e .
-
-# Remote install (requires --git; review the script first):
-# curl -fsSL <raw-install-url> | bash -s -- --git https://github.com/you/packrat.git
+# 1.c) Or manually:
+python -m venv .venv && source .venv/bin/activate && pip install -e .
 
 # 2. Save your YouTube Music login
 packrat login

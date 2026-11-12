@@ -44,14 +44,14 @@ def test_install_script_dry_run_does_not_write(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="installer is Linux-only")
-def test_piped_install_requires_git():
+def test_piped_install_uses_default_repo():
     result = subprocess.run(
         ["bash", "-s", "--", "--dry-run"],
         input=SCRIPT.read_text(encoding="utf-8"),
         text=True, capture_output=True,
     )
-    assert result.returncode == 1
-    assert "pass --git URL" in result.stderr
+    assert result.returncode == 0
+    assert "https://github.com/gnoooo/packrat.git" in result.stderr
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="installer is Linux-only")

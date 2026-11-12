@@ -50,19 +50,29 @@ If `~/.local/bin` is not on your PATH, the script prints the exact export line.
 
 ## Remote install with curl
 
-The script can be piped, but there is no local checkout to install from, so
-`--git` is required:
+The easiest path:
 
 ```bash
-curl -fsSL <raw-install-url> | bash -s -- --git https://github.com/you/packrat.git
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash
+```
+
+A piped install defaults to `https://github.com/gnoooo/packrat.git`. Override it for a fork or a pinned branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash -s -- --git https://github.com/you/packrat.git --ref main
+```
+
+Preview without installing:
+```bash
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash -s -- --dry-run
 ```
 
 Safer: download and inspect it first:
 
 ```bash
-curl -fsSL <raw-install-url> -o install.sh
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh -o install.sh
 less install.sh
-bash install.sh --git https://github.com/you/packrat.git
+bash install.sh --git https://github.com/gnoooo/packrat.git
 ```
 
 Piping a remote script executes unreviewed code. The installer does not
