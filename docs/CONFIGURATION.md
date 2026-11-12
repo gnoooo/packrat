@@ -29,7 +29,7 @@ CLI values override environment values. Old `YTM_*` names are accepted as fallba
 | Path | Meaning |
 |---|---|
 | `~/Music/PackratMidden/` | Default library root. |
-| `~/.config/packrat/archive` | Download history. |
+| `$XDG_CONFIG_HOME/packrat/archive` (default `~/.config/packrat/archive`) | Download history. |
 | `~/.config/packrat/runs.jsonl` | Throughput history. |
 | `~/.config/packrat/profile.json` | Discovery taste profile. |
 | `~/.config/packrat/failed/*.json` | Per-source failure lists. |
