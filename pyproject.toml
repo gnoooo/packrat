@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "packrat"
-version = "0.3.0"
+version = "0.3.1"
 description = "Download music from YouTube Music for offline use."
 requires-python = ">=3.11"
 dependencies = [
