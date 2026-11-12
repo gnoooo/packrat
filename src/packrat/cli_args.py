@@ -31,11 +31,7 @@ DEFAULT_PALETTE = "auto"
 DEFAULT_MANIFEST_FORMAT = "json"
 
 HEADERS_CONFIG_PATH = str(paths.CONFIG_DIR / "browser.json")
-HEADERS_CONFIG_DISPLAY = (
-    "$XDG_CONFIG_HOME/packrat/browser.json"
-    if os.environ.get("XDG_CONFIG_HOME")
-    else "~/.config/packrat/browser.json"
-)
+HEADERS_CONFIG_DISPLAY = "~/.config/packrat/browser.json"
 LEGACY_HEADERS_CONFIG_PATH = "~/.config/ytmusic-composer/browser.json"
 LEGACY_ARCHIVE_NAMES = (".packrat_archive", ".ytm_offline_archive")
 
