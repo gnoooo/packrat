@@ -32,7 +32,7 @@ Install Packrat into a user-local venv and link the main command.
 Options:
   --prefix DIR     install root (default: \$XDG_DATA_HOME/packrat or ~/.local/share/packrat)
   --bin-dir DIR    command directory (default: \$XDG_BIN_HOME or ~/.local/bin)
-  --python PATH    Python >= 3.10 (default: python3)
+  --python PATH    Python >= 3.11 (default: python3)
   --git URL        install from a git remote instead of this checkout
   --ref REF        branch/tag when using --git
   --dry-run        print actions without changing anything
@@ -90,7 +90,7 @@ require_cmd() {
 }
 
 check_python() {
-    "$PYTHON" - <<'PY' || die "Python >= 3.10 is required"
+    "$PYTHON" - <<'PY' || die "Python >= 3.11 is required"
 import sys
 if sys.version_info < (3, 10):
     raise SystemExit(1)

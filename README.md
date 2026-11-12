@@ -10,7 +10,7 @@
 <p align="center"><em>Like a little packrat, stash your YouTube Music library offline.</em></p>
 
 <p align="center">
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square">
   <img alt="Packrat 0.3" src="https://img.shields.io/badge/packrat-0.3-38bdf8?style=flat-square">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-22c55e?style=flat-square">
 </p>
@@ -143,8 +143,9 @@ source .venv/bin/activate
 python -m pytest
 ```
 
-The test suite blocks real network access. The local bare mirror and shared
-hooks are documented in [Development](docs/DEVELOPMENT.md); design history is in
+The test suite blocks real network access. The local bare mirror, shared hooks
+and signed release workflow are documented in
+[Development](docs/DEVELOPMENT.md); design history is in
 [History](docs/HISTORY.md).
 
 Security/integrity work in this phase:

@@ -38,6 +38,70 @@ python -m pytest
 The suite blocks real network connections (`tests/conftest.py`). Use mocks or
 local fixtures for anything that would hit YouTube Music.
 
+## Releases and CI
+
+The release workflow is [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+It runs on every push to `master` (and can be started manually):
+
+1. `uv lock --check`
+2. `uv sync --frozen --extra dev`
+3. `uv run --frozen pytest`
+4. build wheel + sdist
+5. sign `SHA256SUMS` with GPG
+6. create/push a tag
+7. publish a GitHub release
+
+### Stable vs snapshot releases
+
+- If the remote does not have `v<version>` yet, the push creates the **stable**
+  release `v<version>`.
+- Otherwise the push creates a **prerelease snapshot**
+  `v<version>.dev<run-number>+<short-sha>`.
+
+Bump `pyproject.toml` to create the next stable release:
+
+```bash
+# edit version = "0.4.0"
+uv lock
+git add pyproject.toml uv.lock
+git commit -m "release: 0.4.0"
+git push github master
+```
+
+The workflow uses `uv.lock`; commit it whenever dependencies or the project
+version change.
+
+### Signing setup
+
+The workflow requires a GPG private key in repository secrets. Generate a
+dedicated release key:
+
+```bash
+gpg --full-generate-key          # sign-only key is enough
+KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+gpg --armor --export-secret-keys "$KEYID" > /tmp/packrat-release.asc
+gh secret set GPG_PRIVATE_KEY < /tmp/packrat-release.asc
+gh secret set GPG_PASSPHRASE     # if the key has a passphrase
+gh secret set GPG_KEY_ID --body "$KEYID"
+gpg --armor --export "$KEYID" > docs/release-key.asc
+```
+
+Commit `docs/release-key.asc`; never commit the private key. The future
+`packrat upgrade` command will verify `SHA256SUMS.asc` against this public key.
+The release workflow fails if `GPG_PRIVATE_KEY` is missing.
+
+### Release artifacts
+
+```text
+packrat-<version>-py3-none-any.whl
+packrat-<version>.tar.gz
+SHA256SUMS
+SHA256SUMS.asc
+release-key.asc
+```
+
+Tags and releases are immutable; never move a published tag.
+
 ## Local bare mirror
 
 In my configuration, I have a local cloud with Nextcloud, and it can be messy syncing a `.git` folder. 

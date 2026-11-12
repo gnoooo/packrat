@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-master
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Install test dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run tests
+        run: uv run --frozen pytest -q
+
+      - name: Compute release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          SHORT="${GITHUB_SHA::7}"
+          TAG="v${BASE}"
+          STABLE=0
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              STABLE=1
+            elif [ "$(git rev-parse "refs/tags/${TAG}")" = "${GITHUB_SHA}" ]; then
+              STABLE=1
+            fi
+          fi
+          if [ "${STABLE}" = "1" ]; then
+            VERSION="${BASE}"
+            PRERELEASE=""
+          else
+            VERSION="${BASE}.dev${GITHUB_RUN_NUMBER}+${SHORT}"
+            PRERELEASE="--prerelease"
+          fi
+          TAG="v${VERSION}"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG}"
+
+      - name: Build release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "${{ steps.version.outputs.version }}" <<'PY'
+          import pathlib
+          import re
+          import sys
+          version = sys.argv[1]
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text(encoding="utf-8")
+          text = re.sub(r'^version = ".*"$', f'version = "{version}"', text, count=1, flags=re.M)
+          path.write_text(text, encoding="utf-8")
+          PY
+          uv lock
+          uv build --out-dir dist
+          git checkout -- pyproject.toml uv.lock
+
+      - name: Sign artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "GPG_PRIVATE_KEY secret is required for signed releases" >&2
+            exit 1
+          fi
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')}"
+          [ -n "$KEYID" ] || { echo "no signing key found" >&2; exit 1; }
+          cd dist
+          sha256sum packrat-*.whl packrat-*.tar.gz > SHA256SUMS
+          if [ -n "${GPG_PASSPHRASE:-}" ]; then
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+          else
+            gpg --batch --yes --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+          fi
+          gpg --armor --export "$KEYID" > release-key.asc
+          ls -l
+
+      - name: Create tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            [ "$(git rev-parse "refs/tags/${TAG}")" = "${GITHUB_SHA}" ] || {
+              echo "tag ${TAG} already exists at another commit" >&2
+              exit 1
+            }
+          else
+            git tag "$TAG"
+          fi
+          git push origin "$TAG"
+
+      - name: Publish GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.version.outputs.tag }}" dist/* \
+            --title "Packrat ${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            ${{ steps.version.outputs.prerelease }}

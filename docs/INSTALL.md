@@ -9,7 +9,7 @@
 
 ## Requirements
 
-- **Python 3.10+**
+- **Python 3.11+**
 - **pip**
 - **ffmpeg**: used by yt-dlp for m4a/metadata/thumbnail post-processing.
 - **Deno ≥ 2.3**: recommended; yt-dlp uses it for YouTube's JavaScript challenges. Without it some tracks fail.
