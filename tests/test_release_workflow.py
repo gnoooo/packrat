@@ -16,3 +16,11 @@ def test_release_workflow_splits_test_and_write_jobs():
     assert "      id-token: write" in text
     assert "      attestations: write" in text
     assert "GH_TOKEN: ${{ github.token }}" in text
+
+
+def test_release_workflow_pins_actions_by_sha():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if "uses: actions/" in line or "uses: astral-sh/" in line:
+            assert "@" in line
+            assert "@v" not in line, line

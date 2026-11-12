@@ -40,15 +40,25 @@ def _duration(raw: dict[str, Any]) -> int | None:
     return None
 
 
-def _pick_album_track(album: dict[str, Any], video_id: str, title: str) -> dict[str, Any] | None:
+def _pick_album_track(
+    album: dict[str, Any],
+    video_id: str,
+    title: str,
+    duration: int | None = None,
+) -> dict[str, Any] | None:
     tracks = album.get("tracks") or []
     for track in tracks:
         if track.get("videoId") == video_id:
             return track
     wanted = normalize(title)
     for track in tracks:
-        if normalize(track.get("title")) == wanted:
-            return track
+        if normalize(track.get("title")) != wanted:
+            continue
+        track_duration = _duration(track)
+        if duration is not None and track_duration is not None:
+            if abs(duration - track_duration) > 3:
+                continue
+        return track
     return None
 
 
@@ -118,7 +128,7 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
         album_artist = _artist(album) if album.get("artists") else ""
         if isinstance(album.get("trackCount"), int):
             track_total = album["trackCount"]
-        track = _pick_album_track(album, video_id, title)
+        track = _pick_album_track(album, video_id, title, duration)
         if track is not None:
             title = str(track.get("title") or title)
             artist = _artist(track) or artist
@@ -138,16 +148,15 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
                 disc_num=disc_num if isinstance(disc_num, int) else None,
                 album_artist=album_artist,
             )
+        # The search result's album does not actually contain this video and
+        # no title/duration match was found; do not mislabel a live/OMV upload
+        # with the studio album.
         return SongMetadata(
             video_id=video_id,
             title=title,
             artist=artist,
-            album=album_title,
-            release_type=str(album.get("type") or "") or None,
-            year=album.get("year") if isinstance(album.get("year"), int) else None,
+            album="",
             duration=duration,
-            track_total=track_total,
-            album_artist=album_artist,
         )
 
     return SongMetadata(

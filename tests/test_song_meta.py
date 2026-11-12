@@ -93,3 +93,17 @@ def test_resolve_rejects_search_title_mismatch(monkeypatch):
     meta = song_meta.resolve_song_metadata("SGw5bKLV-tY", "/tmp/headers.json")
     assert meta.album == ""
     assert meta.track_num is None
+
+
+def test_resolve_rejects_album_track_with_wrong_duration(monkeypatch):
+    class WrongDuration(FakeYTMusic):
+        def get_album(self, album_id):
+            album = super().get_album(album_id)
+            album["tracks"][0]["videoId"] = "other"
+            album["tracks"][0]["duration_seconds"] = 300
+            return album
+
+    monkeypatch.setattr(song_meta, "YTMusic", WrongDuration)
+    meta = song_meta.resolve_song_metadata("SGw5bKLV-tY", "/tmp/headers.json")
+    assert meta.album == ""
+    assert meta.track_num is None
