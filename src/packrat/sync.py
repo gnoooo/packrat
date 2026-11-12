@@ -315,19 +315,6 @@ def run_sync(
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest.write(manifest_path, args.manifest_format)
 
-        if event_callback:
-            event_callback(
-                {
-                    "type": "start",
-                    "payload": {
-                        "mode": args.source,
-                        "total": len(entries),
-                        "total_est_bytes": total_est_bytes,
-                        "max_size_bytes": max_size,
-                    },
-                }
-            )
-
         if args.dry_run:
             print(f"manifest: {manifest_path}")
             print("dry-run: manifest written, no downloads.")

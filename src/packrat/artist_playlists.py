@@ -8,6 +8,7 @@ from typing import Any
 
 from packrat.batch import run_batch_download
 from packrat.manifest import atomic_write_text
+from packrat.integrity import verify_audio
 from packrat.naming import clean, is_single
 from packrat.playlist import m3u8_entry, write_m3u8
 from packrat.sizes import parse_size
@@ -121,8 +122,23 @@ def download_artist(
             return {"error": f"saved plan not found: {resolved_manifest}"}
         payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
-    wanted = "failed" if failed_only else "pending"
-    pending = [e for e in entries if e.get("status") == wanted]
+    if failed_only:
+        pending = [
+            e for e in entries
+            if e.get("status") in {"failed", "skipped_size", "skipped"}
+        ]
+        wanted = "failed"
+    else:
+        pending = []
+        for e in entries:
+            if e.get("status") == "pending":
+                pending.append(e)
+            elif e.get("status") == "downloaded":
+                path = e.get("path")
+                if not path or not verify_audio(pathlib.Path(path)).ok:
+                    e["status"] = "pending"
+                    pending.append(e)
+        wanted = "pending"
     if limit and len(pending) > limit:
         pending = pending[:limit]
     if not pending:

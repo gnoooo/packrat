@@ -29,12 +29,16 @@ Advanced:
   --max-duration SECONDS
                         ignore songs longer than this many seconds (default:
                         540)
-  --deep N              songs from deep in an artist's catalog (default: 12)
-  --adjacent N          songs by similar artists (default: 10)
-  --radio N             songs from radio stations (default: 10)
-  --external N          songs from Last.fm recommendations, needs
+  --deep, --quota-deep N
+                        songs from deep in an artist's catalog (default: 12)
+  --adjacent, --quota-adjacent N
+                        songs by similar artists (default: 10)
+  --radio, --quota-radio N
+                        songs from radio stations (default: 10)
+  --external, --quota-external N
+                        songs from Last.fm recommendations, needs
                         LASTFM_API_KEY (default: 5)
-  --tag N               songs found by genre tag (default: 5)
+  --tag, --quota-tag N  songs found by genre tag (default: 5)
   --per-album N         how many songs per album (default: 2)
   --per-artist N        how many songs per artist (default: 3)
   --family-cap N        limit songs per artist family, 0 = no limit (default:

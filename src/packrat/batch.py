@@ -179,6 +179,10 @@ def run_batch_download(
             event_callback=event_callback,
             control=control,
         )
+        if control is not None:
+            # A skip pressed during postprocessing must not silently skip the
+            # next track after this one completed.
+            control.clear_skip()
 
         entry["status"] = result.status
         if result.error:
@@ -335,16 +339,6 @@ def download_pending_manifest(
         return {"error": f"no pending tracks in {mode} plan"}
 
     max_size_bytes = parse_size(max_size) if max_size else None
-    _emit(
-        event_callback,
-        "start",
-        {
-            "mode": mode,
-            "total": len(entries),
-            "total_est_bytes": sum((e.get("est_size") or 0) for e in entries),
-            "max_size_bytes": max_size_bytes,
-        },
-    )
     summary = run_batch_download(
         entries,
         output_root=output_root,

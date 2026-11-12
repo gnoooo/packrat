@@ -448,6 +448,16 @@ def get_top_songs(yt: YTMusic, artist_id: str) -> dict[str, Any]:
     }
 
 
+def release_owned_key(artist_name: str, album: str, title: str) -> tuple[str, str, str]:
+    """Dedupe key for release tracks: album-aware, so two albums can each
+    contain an "Intro" without one suppressing the other."""
+    return (
+        _normalize(artist_name or ""),
+        _normalize(album or ""),
+        _base_title(title or ""),
+    )
+
+
 def owned_key(artist_name: str, title: str) -> tuple[str, str]:
     """The ONE dedupe key for owned-ness: catalog artist + base song title.
 
@@ -468,7 +478,10 @@ def disk_owned_keys(output_root: pathlib.Path) -> set[tuple[str, str]]:
     root = pathlib.Path(output_root)
     if not root.exists():
         return keys
-    for p in root.rglob("*.m4a"):
+    audio_suffixes = {".m4a", ".mp3", ".opus", ".flac", ".webm", ".aac", ".ogg"}
+    for p in root.rglob("*"):
+        if p.suffix.lower() not in audio_suffixes:
+            continue
         parent = p.parent
         artist_dir = parent.parent.name if parent.parent != root else parent.name
         title = re.sub(r"^\d+\s*-\s*", "", p.stem)
@@ -693,6 +706,8 @@ def build_catalog(
     skipped_duration = 0
     new_tracks = 0
     owned_keys: set[tuple[str, str]] = set()
+    top_keys: set[tuple[str, str]] = set()
+    release_keys: set[tuple[str, str, str]] = set()
 
     def window_ok(duration: int) -> bool:
         return not duration_window or min_duration <= duration <= max_duration
@@ -767,15 +782,19 @@ def build_catalog(
                     skipped_duration += 1
                 continue
             key = owned_key(artist_name, track["title"])
+            release_key = release_owned_key(
+                artist_name, release.get("title", ""), track["title"]
+            )
             video_id = track["video_id"]
             if (
                 video_id in archive
                 or owned_file_exists(output_root, track, release)
-                or key in disk_keys
+                or key in top_keys
+                or release_key in release_keys
             ):
                 if is_kept:
                     already_owned += 1
-                    owned_keys.add(key)
+                    release_keys.add(release_key)
                 continue
             if is_kept:
                 classified[bid].append((track, year, key))
@@ -803,7 +822,7 @@ def build_catalog(
     if top:
         # Top songs come first; a catalog track equal to a top song is a dup.
         for t in top["entries"]:
-            owned_keys.add(owned_key(artist_name, t["title"]))
+            top_keys.add(owned_key(artist_name, t["title"]))
 
     # Pass B: form kept-release entries; rows that dup a selected top song
     # are counted as owned-duplicates and dropped.
@@ -816,10 +835,11 @@ def build_catalog(
         new_in_release = 0
         meta_row = release_row_index[bid]
         for track, year, key in classified[bid]:
-            if key in owned_keys:
+            release_key = release_owned_key(artist_name, release.get("title", ""), track["title"])
+            if key in top_keys or release_key in release_keys:
                 already_owned += 1
                 continue
-            owned_keys.add(key)
+            release_keys.add(release_key)
             new_in_release += 1
             new_tracks += 1
             entries.append(_entry_for(track, release, artist_name, singles_dir=singles_dir, release_row=meta_row))
@@ -1216,7 +1236,7 @@ def apply_selection(
 
     # Seed owned keys with what the user is keeping, nothing else.
     selected_entries: list[dict[str, Any]] = []
-    owned_keys: set[tuple[str, str]] = set()
+    owned_keys: set[tuple[str, str, str]] = set()
     selected_meta_rows: set[int] = set()
 
     def window_ok(duration: int) -> bool:
@@ -1230,7 +1250,9 @@ def apply_selection(
         for entry in payload["entries"]:
             if entry.get("release_row") == meta.get("row"):
                 selected_entries.append(entry)
-                owned_keys.add(owned_key(artist_name, entry["title"]))
+                owned_keys.add(release_owned_key(
+                    artist_name, entry.get("album", ""), entry["title"]
+                ))
         selected_meta_rows.add(meta.get("row", -1))
 
     # Tagged/excluded releases: resolve and classify now.
@@ -1270,12 +1292,13 @@ def apply_selection(
             duration = track.get("duration_seconds", 0)
             if not window_ok(duration):
                 continue
-            key = owned_key(artist_name, track["title"])
+            key = release_owned_key(
+                artist_name, release.get("title", ""), track["title"]
+            )
             video_id = track["video_id"]
             if (
                 video_id in archive
                 or owned_file_exists(output_root, track, release)
-                or key in disk_keys
                 or key in owned_keys
             ):
                 owned_keys.add(key)

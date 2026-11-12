@@ -393,7 +393,7 @@ def build_run_control_parent(
             dest="force_new_archive",
             action="store_true",
             default=argparse.SUPPRESS,
-            help=argparse.SUPPRESS,
+            help="start a new download history even if the library has music",
         )
 
     return p
@@ -696,8 +696,6 @@ def resolve_auth(args: argparse.Namespace, argv: list[str] | None = None) -> Non
     * --cookies and --cookies-from-browser are mutually exclusive only when both
       are given on the CLI.
     * A CLI value overrides an env var of the other kind without error.
-    * --browser-profile P given with --cookies-from-browser BROWSER becomes
-      BROWSER:P with a deprecation line printed to stderr.
     """
     import sys
 
@@ -1195,7 +1193,7 @@ def build_parser() -> argparse.ArgumentParser:
          "songs found by genre tag (default: 5)"),
     ):
         p_taste.add_argument(
-            flag, dest=dest, type=positive_int, default=default,
+            flag, alias, dest=dest, type=positive_int, default=default,
             help=help_text,
         )
     p_taste.add_argument(
@@ -1239,6 +1237,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=positive_int,
         default=12,
         help="how many liked songs to start from (default: 12)",
+    )
+    p_queues.add_argument(
+        "--total-cap",
+        dest="total_cap",
+        type=positive_int,
+        default=200,
+        metavar="N",
+        help="maximum queue tracks before dedupe (default: 200)",
     )
     p_queues.add_argument(
         "--hop-depth",

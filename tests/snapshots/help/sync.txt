@@ -2,9 +2,9 @@ usage: packrat sync [-h] [--headers FILE] [--cookies FILE]
                     [--cookies-from-browser BROWSER[:PROFILE]] [--output DIR]
                     [--archive FILE] [--delay SECONDS] [--max-size SIZE]
                     [--limit N] [--dry-run] [--yes] [--tui]
-                    [--theme {ocean,sunset,matrix,mono}] [--no-anim]
-                    [--no-color] [--ascii] [--palette {auto,fixed,basic}]
-                    [--source SOURCE]
+                    [--force-new-archive] [--theme {ocean,sunset,matrix,mono}]
+                    [--no-anim] [--no-color] [--ascii]
+                    [--palette {auto,fixed,basic}] [--source SOURCE]
 
 Download songs you have not downloaded yet. Without --source it uses your
 Liked Songs.
@@ -36,6 +36,8 @@ Advanced:
                         ~/.config/packrat/archive)
   --delay SECONDS       seconds to wait between songs (default: 7.0)
   --max-size SIZE       skip songs bigger than SIZE (example: 3GB)
+  --force-new-archive   start a new download history even if the library has
+                        music
 
 Advanced display:
   --tui                 show the full-screen progress view

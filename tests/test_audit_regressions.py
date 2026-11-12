@@ -254,3 +254,68 @@ def test_headless_sync_writes_log(tmp_path, monkeypatch):
     ]) == 0
     logs = list(logging_config.LOG_DIR.glob("packrat-*.log"))
     assert logs
+
+
+def test_worker_error_is_stopped_not_done():
+    from packrat import tui
+    from packrat.events import State
+
+    state = State()
+    control = tui.Control()
+    container = {}
+    tui._worker_target(lambda: {"error": "boom"}, {}, state, control, container)
+    assert state.status == "STOPPED"
+
+
+def test_basic_palette_uses_low_color_tier():
+    from packrat import tui_theme
+
+    assert tui_theme.select_tier(True, 256, False, "basic") == tui_theme.TIER_BMID
+
+
+def test_cookie_redaction_masks_all_pairs():
+    from packrat.logging_config import redact
+
+    out = redact("Cookie: PREF=x; LOGIN_INFO=secret")
+    assert "secret" not in out
+    assert out.startswith("Cookie: <redacted>")
+
+
+def test_release_keys_are_album_aware():
+    from packrat.artists import release_owned_key
+
+    assert release_owned_key("A", "Album One", "Intro") != release_owned_key(
+        "A", "Album Two", "Intro"
+    )
+
+
+def test_disk_owned_keys_scan_non_m4a(tmp_path):
+    from packrat.artists import disk_owned_keys
+
+    (tmp_path / "A" / "Al").mkdir(parents=True)
+    (tmp_path / "A" / "Al" / "01 - Song.webm").write_bytes(b"x")
+    assert disk_owned_keys(tmp_path)
+
+
+def test_artist_failed_only_includes_skipped(tmp_path):
+    from packrat import artist_playlists
+
+    payload = {"command": "artist", "label": "A", "entries": [
+        {"video_id": "v1", "title": "T", "artist": "A", "album": "Al",
+         "duration": 100, "est_size": 1, "status": "skipped",
+         "path": None, "error": None},
+    ]}
+    manifest_path = tmp_path / "playlists" / "artist-A.manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(payload))
+    seen = []
+    with patch("packrat.artist_playlists.run_batch_download",
+               side_effect=lambda entries, **kw: seen.extend(e["video_id"] for e in entries) or {
+                   "downloaded": 0, "archived": 0, "skipped_size": 0,
+                   "failed": 0, "stopped": False,
+               }):
+        artist_playlists.download_artist(
+            "A", tmp_path, str(tmp_path / "archive"),
+            payload=payload, manifest_path=manifest_path, failed_only=True,
+        )
+    assert seen == ["v1"]

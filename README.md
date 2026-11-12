@@ -11,7 +11,7 @@
 
 <p align="center">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square">
-  <img alt="Packrat 0.3" src="https://img.shields.io/badge/packrat-0.3-38bdf8?style=flat-square">
+  <img alt="Packrat 0.3.4" src="https://img.shields.io/badge/packrat-0.3.4-38bdf8?style=flat-square">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-22c55e?style=flat-square">
 </p>
 
@@ -145,7 +145,7 @@ python -m pytest
 ```
 
 The test suite blocks real network access. The local bare mirror, shared hooks
-and signed release workflow are documented in
+and attested release workflow are documented in
 [Development](docs/DEVELOPMENT.md); design history is in
 [History](docs/HISTORY.md).
 

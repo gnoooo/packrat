@@ -32,6 +32,10 @@ class Control:
         with self._lock:
             self.skip_current = True
 
+    def clear_skip(self) -> None:
+        with self._lock:
+            self.skip_current = False
+
     def request_stop(self) -> None:
         with self._lock:
             self.stop_after_current = True

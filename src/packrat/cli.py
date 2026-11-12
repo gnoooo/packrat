@@ -1033,7 +1033,7 @@ def _print_recap(catalog: dict[str, Any], args: argparse.Namespace) -> None:
             + " (all shown, deselected by default)"
         )
     if totals.get("skipped_duration"):
-        print(f"outside --duration-window: {totals['skipped_duration']}")
+        print(f"outside duration window: {totals['skipped_duration']}")
     time_label = f"~{summary['est_time_seconds'] // 60} min"
     if summary["est_source"] == "measured":
         time_label += f" (measured {summary['measured_s_per_track']:.1f} s/track)"
@@ -1642,7 +1642,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # ytmusicapi; yt-dlp needs a real cookie jar for age/bot-gated videos.
     browser = None
     needs_cookies = (
-        args.command in {"download-one", "sync", "download-manifest", "artist"}
+        args.command in {"download-one", "sync", "download-manifest", "resume", "artist"}
         or (args.command == "discover"
             and getattr(args, "discover_command", "") in {"queues", "albums", "radio"})
     )
@@ -1697,8 +1697,8 @@ def _friendly_error(exc: Exception) -> str:
         return "unexpected YouTube Music response; try again (or update ytmusicapi)"
     text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
     if isinstance(exc, (ValueError, FileNotFoundError, OSError)):
-        return text[:300] if text else name
-    return f"{name}: {text[:300]}" if text else name
+        return _redact(text[:300]) if text else name
+    return f"{name}: {_redact(text[:300])}" if text else name
 
 
 

@@ -17,7 +17,8 @@ class RedactFilter(logging.Filter):
     """Mask auth tokens and strip terminal color escapes from log records."""
 
     _PATTERNS = [
-        (re.compile(r"(?i)(Cookie:\s*)[^\s\r\n]+"), r"\1<redacted>"),
+        (re.compile(r"(?i)(Cookie:\s*)[^\r\n]*?(?=(?:\s+Authorization:)|\r?$)"),
+         r"\1<redacted>"),
         (re.compile(r"(?i)(Authorization:\s*)[^;\r\n]+"), r"\1<redacted>"),
         (re.compile(r"(?i)(SAPISID\s*=\s*)[^\s;,&]+"), r"\1<redacted>"),
         (re.compile(r"(?i)((?:SID|HSID|SSID|APISID|SAPISID)\s*=\s*)[^;\s,]+"),

@@ -1,5 +1,6 @@
 usage: packrat [-h] [--headers FILE] [--cookies FILE]
                [--cookies-from-browser BROWSER[:PROFILE]] [-v] [--version]
+               [--force-new-archive]
                {auth,login,logout,doctor,upgrade,export-metadata,library,download-one,sync,download-manifest,resume,artist,discover} ...
 
 Download music from YouTube Music so you can listen offline. First time? Run
@@ -36,6 +37,8 @@ First-time setup:
 
 Advanced:
   -v, --verbose         show more detail while running (repeat for even more)
+  --force-new-archive   start a new download history even if the library has
+                        music
 
 options:
   -h, --help            show this help message and exit

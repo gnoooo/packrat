@@ -214,7 +214,7 @@ Scope: choose and pin the stack for a YouTube Music offline downloader CLI.
 - Shared one manifest-download helper for albums/queues, one bucket finisher
   for `discover taste`, and removed the dead top-songs branch, unused
   parameters and test-only helpers.
-- Result: ~17,993 -> ~16,225 Python lines (about 10%), 561 -> 502 tests, with
+- Result: ~17,993 -> ~16,225 Python lines (about 10%), 561 -> 588 tests, with
   all remaining tests passing. Command aliases (`retry`, `radio`, ...) still
   work; option aliases were removed in 0.2.0.
 

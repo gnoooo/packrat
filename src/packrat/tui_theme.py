@@ -321,7 +321,7 @@ def select_tier(
     """
     if no_color or not has_colors:
         return TIER_NONE
-    if colors < 256:
+    if colors < 256 or palette_mode == "basic":
         return TIER_BMID
     if palette_mode == "auto" and can_change_color:
         return TIER_CUSTOM

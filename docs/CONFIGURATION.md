@@ -52,22 +52,22 @@ export PACKRAT_OUTPUT=/srv/music
 
 ## Manifest as source of truth
 
-For a sync, the saved manifest is authoritative: a `downloaded` entry with a valid file is skipped, a missing/corrupt 
-file is retried, and the legacy archive is only a fallback when the manifest has no entry. 
+For a sync, the saved manifest is authoritative: a `downloaded` entry with a valid file is skipped, a missing/corrupt
+file is retried, and the legacy archive is only a fallback when the manifest has no entry.
 The archive remains a fast index and a compatibility path.
 
 Manifest and archive writes are atomic (`tempfile` + `os.replace` + `fsync`).
 
 ## Credentials
 
-`packrat login` stores headers at `~/.config/packrat/browser.json` with mode `0600` and creates the config directory as `0700`. 
-`packrat logout` deletes the file. Browser cookie jars extracted by Packrat are temporary `0600` files and are removed at exit. 
+`packrat login` stores headers at `~/.config/packrat/browser.json` with mode `0600` and creates the config directory as `0700`.
+`packrat logout` deletes the file. Browser cookie jars extracted by Packrat are temporary `0600` files and are removed at exit.
 Logs redact cookies, authorization headers and Google session cookies.
 
 ## Archive
 
-The archive prevents re-downloading finished tracks. 
-If you delete it but the output folder already contains audio, Packrat warns and asks before 
+The archive prevents re-downloading finished tracks.
+If you delete it but the output folder already contains audio, Packrat warns and asks before
 starting a new history, even with `--yes`. `--force-new-archive` skips that check.
 
 Back up `~/.config/packrat/archive` together with `~/Music/PackratMidden/`.
@@ -81,7 +81,7 @@ Back up `~/.config/packrat/archive` together with `~/Music/PackratMidden/`.
 
 ## Manifests
 
-`--manifest-format json` writes a JSON plan. `json+csv` writes JSON plus a CSV sidecar for spreadsheets. 
+`PACKRAT_MANIFEST_FORMAT=json+csv` writes JSON plus a CSV sidecar for spreadsheets.
 A plan is written before downloads and updated as tracks finish, so `download-manifest` can resume it.
 
 ## TUI configuration
