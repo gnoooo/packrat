@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 import pathlib
 
-CONFIG_DIR = pathlib.Path.home() / ".config" / "packrat"
+CONFIG_HOME = pathlib.Path(
+    os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")
+).expanduser()
+CONFIG_DIR = CONFIG_HOME / "packrat"
 LOGS_DIR = CONFIG_DIR / "logs"
 ARCHIVE_PATH = CONFIG_DIR / "archive"
 RUNS_PATH = CONFIG_DIR / "runs.jsonl"

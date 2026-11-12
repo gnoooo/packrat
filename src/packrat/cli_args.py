@@ -30,7 +30,7 @@ DEFAULT_THEME = "ocean"
 DEFAULT_PALETTE = "auto"
 DEFAULT_MANIFEST_FORMAT = "json"
 
-HEADERS_CONFIG_PATH = "~/.config/packrat/browser.json"
+HEADERS_CONFIG_PATH = str(paths.CONFIG_DIR / "browser.json")
 LEGACY_HEADERS_CONFIG_PATH = "~/.config/ytmusic-composer/browser.json"
 LEGACY_ARCHIVE_NAMES = (".packrat_archive", ".ytm_offline_archive")
 
@@ -552,7 +552,7 @@ def build_verbose_parent(
         action=CountVerboseAction,
         default=default,
         help=_help_text(
-            "show more detail while running (repeat for even more)",
+            "show more detail while running",
             suppress_help,
         ),
     )

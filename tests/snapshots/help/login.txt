@@ -6,7 +6,7 @@ auth' afterwards to check it.
 
 Common options:
   --file FILE  where to save the login file (default:
-               ~/.config/packrat/browser.json)
+               /home/gno/.config/packrat/browser.json)
 
 options:
   -h, --help   show this help message and exit

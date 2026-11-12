@@ -42,7 +42,7 @@ def _normalize_track(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "artist": artist,
         "album": album,
         "track_num": raw.get("trackNumber") if isinstance(raw.get("trackNumber"), int) else None,
-        "release_type": raw.get("releaseType"),
+        "release_type": raw.get("releaseType") or ("single" if not raw.get("album") else None),
         "duration": raw.get("duration_seconds") or raw.get("lengthSeconds") or 0,
     }
 

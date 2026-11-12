@@ -36,7 +36,7 @@ First-time setup:
                         (env: PACKRAT_COOKIES_FROM_BROWSER)
 
 Advanced:
-  -v, --verbose         show more detail while running (repeat for even more)
+  -v, --verbose         show more detail while running
   --force-new-archive   start a new download history even if the library has
                         music
 

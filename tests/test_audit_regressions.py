@@ -319,3 +319,19 @@ def test_artist_failed_only_includes_skipped(tmp_path):
             payload=payload, manifest_path=manifest_path, failed_only=True,
         )
     assert seen == ["v1"]
+
+
+def test_manifest_add_dedupes_video_id():
+    m = manifest.Manifest()
+    m.add("v1", "Old", "A", "Al", 1, "pending")
+    m.add("v1", "New", "A", "Al", 1, "failed")
+    assert len(m.entries) == 1
+    assert m.entries[0]["title"] == "New"
+    assert m.entries[0]["status"] == "failed"
+
+
+def test_sync_marks_albumless_track_as_single():
+    track = sync._normalize_track({
+        "videoId": "v1", "title": "Single", "artists": [{"name": "A"}],
+    }, 1)
+    assert track["release_type"] == "single"

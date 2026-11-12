@@ -92,6 +92,10 @@ class Manifest:
             "path": path,
         }
         entry.update(extra)
+        for existing in self.entries:
+            if existing.get("video_id") == video_id:
+                existing.update(entry)
+                return
         self.entries.append(entry)
 
     def total_est_size(self) -> int:
