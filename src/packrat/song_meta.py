@@ -92,6 +92,8 @@ def resolve_song_metadata(video_id: str, headers_path: str) -> SongMetadata:
         if normalize(result_artist) != normalize(artist):
             continue
         result_duration = _duration(result)
+        if normalize(result.get("title")) != normalize(title):
+            continue
         if duration is not None and result_duration is not None and abs(duration - result_duration) > 3:
             continue
         album = result.get("album")

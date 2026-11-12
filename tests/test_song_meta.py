@@ -80,3 +80,16 @@ def test_resolved_path_uses_artist_album_and_track(tmp_path: pathlib.Path, monke
         / "The_Hives_Forever_Forever_The_Hives"
         / "12 - Path_Of_Most_Resistance.m4a"
     )
+
+
+def test_resolve_rejects_search_title_mismatch(monkeypatch):
+    class WrongTitle(FakeYTMusic):
+        def search(self, query, filter, limit):
+            result = super().search(query, filter, limit)[0]
+            result["title"] = "Completely Different"
+            return [result]
+
+    monkeypatch.setattr(song_meta, "YTMusic", WrongTitle)
+    meta = song_meta.resolve_song_metadata("SGw5bKLV-tY", "/tmp/headers.json")
+    assert meta.album == ""
+    assert meta.track_num is None
