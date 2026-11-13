@@ -140,7 +140,9 @@ Uses YouTube Music catalog metadata when available, so the file goes to
 than the uploader ("Official Audio" channels, `Unknown Album`). Falls back to
 the uploader/title layout if metadata lookup fails.
 
-Downloads, verifies the file with ffprobe/mutagen, and prints metadata.
+Shows the same gradient progress bar as the TUI on a terminal, then a concise
+result (duration, size, codec, path). Use `-v` for format/player/ffprobe/mutagen
+details, or `PACKRAT_NO_PROGRESS=1` to suppress the bar.
 
 ## artist
 

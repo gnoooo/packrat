@@ -19,6 +19,7 @@
 | `PACKRAT_SINGLES_DIR` | `Singles` | Singles folder inside each artist. |
 | `PACKRAT_MANIFEST_FORMAT` | `json` | `json` or `json+csv`. |
 | `PACKRAT_TUI_ANIM` | enabled | `0` disables TUI animation. |
+| `PACKRAT_NO_PROGRESS` | unset | `1` disables the headless progress bar. |
 | `LASTFM_API_KEY` | - | Enables Last.fm discovery extras. |
 | `NO_COLOR` | - | Disable colors. |
 
