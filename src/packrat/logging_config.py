@@ -120,10 +120,10 @@ def setup_logging(
         root.addHandler(ring_handler)
     else:
         console = logging.StreamHandler()
-        console.setLevel(logging.INFO)
+        console.setLevel(logging.WARNING)
         console.setFormatter(fmt)
         console.addFilter(redact_filter)
         root.addHandler(console)
 
-    logging.info("logging initialized: %s", log_file)
+    logging.debug("logging initialized: %s", log_file)
     return ring_handler
