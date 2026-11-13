@@ -894,14 +894,15 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if not _confirm_download(args, prompt):
             return 2
     if args.tui and not args.dry_run:
-        return exit_code_from_result(
-            tui_module.run_tui(
-                sync_module.run_sync,
-                {"args": args},
-                mode=args.source,
-                ascii_mode=args.ascii,
-            )
+        result = tui_module.run_tui(
+            sync_module.run_sync,
+            {"args": args},
+            mode=args.source,
+            ascii_mode=args.ascii,
         )
+        if not tui_module.supports_tui():
+            print_result_summary(result)
+        return exit_code_from_result(result)
     result = sync_module.run_sync(args)
     print_result_summary(result)
     return exit_code_from_result(result)
