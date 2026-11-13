@@ -193,6 +193,10 @@ def test_download_one_parses_cookie_spec(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_final_filepath", lambda *_a: downloaded)
     monkeypatch.setattr(cli, "_verify_with_ffprobe", lambda _p: {})
     monkeypatch.setattr(cli, "_verify_with_mutagen", lambda _p: {})
+    monkeypatch.setattr(
+        "packrat.cli.verify_audio",
+        lambda *_a, **_k: type("C", (), {"ok": True, "reason": "", "duration": 200, "size": 1})(),
+    )
 
     args = _parse([
         "download-one", "abcdefghijk",

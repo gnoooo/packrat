@@ -31,6 +31,7 @@ from packrat import security
 from packrat.archive import Archive
 from packrat import upgrade as upgrade_module
 from packrat import paths
+from packrat import cli_progress
 from packrat.services import credentials as credentials_service
 from packrat.services import diagnostics as diagnostics_service
 from packrat.services import metadata as metadata_service
@@ -539,8 +540,6 @@ def cmd_download_one(args: argparse.Namespace) -> int:
             ext="m4a",
             release_type=metadata.release_type,
         )
-        print(f"metadata: {metadata.artist} / {metadata.album or 'Singles'}")
-        print(f"destination: {output_path}")
     else:
         output_path = output_root / "%(artist,uploader)s" / "%(album|Unknown Album)s" / "%(title)s.%(ext)s"
 
@@ -548,6 +547,15 @@ def cmd_download_one(args: argparse.Namespace) -> int:
 
     logger = _YtdlpLogger()
     url = f"https://music.youtube.com/watch?v={video_id}"
+    progress = cli_progress.console_progress()
+    progress.start(
+        metadata.title if metadata is not None else video_id,
+        (
+            f"{metadata.artist} · {metadata.album or 'Singles'}"
+            if metadata is not None
+            else "uploader layout"
+        ),
+    )
 
     ydl_opts: dict = {
         "format": "bestaudio[ext=m4a]/bestaudio",
@@ -559,7 +567,8 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         ],
         "js_runtimes": {"deno": {}},
         "quiet": True,
-        "progress": True,
+        "progress": False,
+        "progress_hooks": [progress.on_ytdlp],
         "logger": logger,
         "noplaylist": True,
     }
@@ -574,6 +583,7 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as exc:
+        progress.fail(f"download failed: {_redact(exc.msg)}")
         print(f"Download failed: {_redact(exc.msg)}", file=sys.stderr)
         if not deno_ok:
             print(
@@ -588,11 +598,13 @@ def cmd_download_one(args: argparse.Namespace) -> int:
             )
         return 1
     except Exception as exc:
+        progress.fail(f"download failed: {_redact(exc)}")
         print(f"download failed: {_redact(exc)}", file=sys.stderr)
         return 1
 
     downloaded = _final_filepath(info, ydl)
     if not downloaded.exists():
+        progress.fail(f"expected file not found: {downloaded}")
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
     if metadata is not None:
@@ -613,33 +625,38 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         print(f"warning: could not update saved plans: {_redact(exc)}",
               file=sys.stderr)
 
-    print(f"downloaded: {downloaded}")
-    print(
-        f"format: {info.get('format_id')} "
-        f"(codec={info.get('acodec')}, abr={info.get('abr')})"
-    )
-    print(
-        "cookies configured: "
-        f"{'yes' if args.cookies or args.cookies_from_browser else 'no'}"
-    )
-    if logger.player_client:
-        print(f"player client: {logger.player_client}")
-
-    try:
-        probe = _verify_with_ffprobe(downloaded)
-        print("ffprobe:")
-        print(json.dumps(probe, indent=2))
-    except Exception as exc:
-        print(f"ffprobe failed: {_redact(exc)}", file=sys.stderr)
+    check = verify_audio(downloaded)
+    if not check.ok:
+        progress.fail(f"audio verification failed: {check.reason}")
+        print(f"download failed: audio verification: {check.reason}", file=sys.stderr)
         return 1
 
-    try:
-        meta = _verify_with_mutagen(downloaded)
-        print("mutagen:")
-        print(json.dumps(meta, indent=2))
-    except Exception as exc:
-        print(f"mutagen failed: {_redact(exc)}", file=sys.stderr)
-        return 1
+    duration = info.get("duration") or check.duration or 0
+    size = downloaded.stat().st_size
+    codec = str(info.get("acodec") or "audio").upper()
+    abr = info.get("abr")
+    quality = f" · {codec}" + (f" {abr:.0f} kb/s" if isinstance(abr, (int, float)) else "")
+    lines = [
+        f"✓ {int(float(duration))}s · {size / 1024 / 1024:.1f} MB{quality} · verified",
+        str(downloaded),
+    ]
+    progress.finish(lines)
+
+    if getattr(args, "verbose", 0):
+        print(f"format: {info.get('format_id')} (codec={info.get('acodec')}, abr={info.get('abr')})")
+        print(f"cookies configured: {'yes' if args.cookies or args.cookies_from_browser else 'no'}")
+        if logger.player_client:
+            print(f"player client: {logger.player_client}")
+        try:
+            print("ffprobe:")
+            print(json.dumps(_verify_with_ffprobe(downloaded), indent=2))
+        except Exception as exc:
+            print(f"ffprobe failed: {_redact(exc)}", file=sys.stderr)
+        try:
+            print("mutagen:")
+            print(json.dumps(_verify_with_mutagen(downloaded), indent=2))
+        except Exception as exc:
+            print(f"mutagen failed: {_redact(exc)}", file=sys.stderr)
 
     return 0
 
@@ -1665,6 +1682,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         getattr(args, "palette", "auto"),
     )
     _tui.set_no_anim_default(getattr(args, "no_anim", False))
+    cli_progress.configure(
+        theme=getattr(args, "theme", "ocean"),
+        no_color=getattr(args, "no_color", None),
+        ascii_mode=getattr(args, "ascii", False),
+    )
 
     # If the user did not pass cookies explicitly, reuse the browser that
     # produced the login headers.  The headers file only authenticates

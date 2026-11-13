@@ -148,6 +148,10 @@ def test_download_one_updates_archive(monkeypatch, tmp_path):
     monkeypatch.setattr("packrat.cli.apply_song_metadata", lambda *_a, **_k: True)
     monkeypatch.setattr("packrat.cli._verify_with_ffprobe", lambda _p: {})
     monkeypatch.setattr("packrat.cli._verify_with_mutagen", lambda _p: {})
+    monkeypatch.setattr(
+        "packrat.cli.verify_audio",
+        lambda *_a, **_k: type("C", (), {"ok": True, "reason": "", "duration": 200, "size": 1})(),
+    )
 
     args = cli.build_parser().parse_args([
         "download-one", "SGw5bKLV-tY", "--output", str(tmp_path),
@@ -422,6 +426,10 @@ def test_download_one_updates_saved_manifest(monkeypatch, tmp_path):
     monkeypatch.setattr("packrat.cli.apply_song_metadata", lambda *_a, **_k: True)
     monkeypatch.setattr("packrat.cli._verify_with_ffprobe", lambda _p: {})
     monkeypatch.setattr("packrat.cli._verify_with_mutagen", lambda _p: {})
+    monkeypatch.setattr(
+        "packrat.cli.verify_audio",
+        lambda *_a, **_k: type("C", (), {"ok": True, "reason": "", "duration": 200, "size": 1})(),
+    )
     args = cli.build_parser().parse_args([
         "download-one", "abcdefghijk", "--output", str(tmp_path),
     ])

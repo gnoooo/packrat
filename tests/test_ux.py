@@ -94,6 +94,10 @@ def test_download_one_accepts_a_link_without_cookies(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_final_filepath", lambda *_a: downloaded)
     monkeypatch.setattr(cli, "_verify_with_ffprobe", lambda _p: {})
     monkeypatch.setattr(cli, "_verify_with_mutagen", lambda _p: {})
+    monkeypatch.setattr(
+        "packrat.cli.verify_audio",
+        lambda *_a, **_k: type("C", (), {"ok": True, "reason": "", "duration": 200, "size": 1})(),
+    )
 
     args = _parse([
         "download-one", "https://music.youtube.com/watch?v=abcdefghijk",
@@ -148,6 +152,10 @@ def test_download_one_warns_but_continues_without_deno(monkeypatch, tmp_path, ca
     monkeypatch.setattr(cli, "_final_filepath", lambda *_a: downloaded)
     monkeypatch.setattr(cli, "_verify_with_ffprobe", lambda _p: {})
     monkeypatch.setattr(cli, "_verify_with_mutagen", lambda _p: {})
+    monkeypatch.setattr(
+        "packrat.cli.verify_audio",
+        lambda *_a, **_k: type("C", (), {"ok": True, "reason": "", "duration": 200, "size": 1})(),
+    )
 
     args = _parse(["download-one", "abcdefghijk", "--output", str(tmp_path)])
     assert cli.cmd_download_one(args) == 0

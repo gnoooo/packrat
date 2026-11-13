@@ -55,6 +55,9 @@ def run_batch_download(
     """
     if archive is None and archive_path is not None:
         archive = Archive(archive_path)
+    if event_callback is None:
+        from packrat.cli_progress import console_progress
+        event_callback = console_progress()
     started = time.monotonic()
 
     _emit(
