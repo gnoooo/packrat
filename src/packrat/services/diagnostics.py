@@ -5,7 +5,9 @@ from __future__ import annotations
 import dataclasses
 import importlib.metadata
 import pathlib
+import re
 import shutil
+import subprocess
 import sys
 
 from packrat import cli_args, security
@@ -16,6 +18,17 @@ class Check:
     status: str
     label: str
     detail: str
+
+
+def _deno_version() -> str | None:
+    try:
+        proc = subprocess.run(
+            ["deno", "--version"], capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", proc.stdout or proc.stderr)
+    return match.group(0) if match else None
 
 
 def _headers_path(headers: str | None) -> pathlib.Path:
@@ -36,9 +49,22 @@ def run_checks(headers: str | None = None, online: bool = False) -> list[Check]:
             add("PASS", package, importlib.metadata.version(package))
         except importlib.metadata.PackageNotFoundError:
             add("FAIL", package, "not installed")
-    for tool in ("ffmpeg", "ffprobe", "deno"):
+    for tool in ("ffmpeg", "ffprobe"):
         path = shutil.which(tool)
-        add("PASS" if path else "WARN", tool, path or "not found")
+        add("PASS" if path else "FAIL", tool, path or "not found")
+    deno_path = shutil.which("deno")
+    if not deno_path:
+        add("WARN", "deno", "not found (recommended; install from https://deno.com)")
+    else:
+        version = _deno_version()
+        if version:
+            major, minor, _patch = (int(part) for part in version.split("."))
+            if (major, minor) < (2, 3):
+                add("WARN", "deno", f"{version} at {deno_path}; need >= 2.3")
+            else:
+                add("PASS", "deno", f"{version} at {deno_path}")
+        else:
+            add("WARN", "deno", f"{deno_path}; version could not be read")
 
     path = _headers_path(headers)
     if path.exists():

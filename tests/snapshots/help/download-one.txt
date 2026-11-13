@@ -1,6 +1,8 @@
 usage: packrat download-one [-h] [--cookies FILE]
                             [--cookies-from-browser BROWSER[:PROFILE]]
-                            [--headers FILE] [--output DIR]
+                            [--headers FILE] [--output DIR] [-v]
+                            [--theme {ocean,sunset,matrix,mono}] [--no-color]
+                            [--ascii]
                             LINK_OR_ID
 
 Download one song. Deno (https://deno.com) is recommended; cookies are
@@ -24,6 +26,15 @@ First-time setup:
   --headers FILE        your YouTube Music login file; create it with `packrat
                         login` (env: PACKRAT_HEADERS; default:
                         ~/.config/packrat/browser.json)
+
+Advanced:
+  -v, --verbose         show more detail while running
+
+Advanced display:
+  --theme {ocean,sunset,matrix,mono}
+                        progress bar colors (default: ocean)
+  --no-color            no colors (env: NO_COLOR)
+  --ascii               plain characters instead of symbols
 
 options:
   -h, --help            show this help message and exit

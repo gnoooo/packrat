@@ -51,7 +51,7 @@ Common options such as `--output`, `--limit`, `--dry-run` and `--yes` may go bef
 | `--headers FILE` | Login headers file. |
 | `--cookies FILE` | Netscape cookie jar for yt-dlp. |
 | `--cookies-from-browser SPEC` | Browser cookie extraction, e.g. `firefox:default-release`. |
-| `-v/--verbose` | More logging. Repeat for more detail. |
+| `-v/--verbose` | More detail. `-vv` also enables yt-dlp debug output. |
 
 `--cookies` and `--cookies-from-browser` are mutually exclusive.
 
@@ -77,6 +77,7 @@ packrat upgrade             # prompt, then update
 packrat upgrade --yes       # no prompt
 packrat upgrade --pre       # include prereleases
 packrat upgrade --dry-run   # show what would change
+packrat upgrade --from-master  # newest master snapshot prerelease
 ```
 
 Self-update is supported only for the standard installer layout:
@@ -90,7 +91,8 @@ It refuses editable checkouts, distro packages, `uv tool`, pipx, and unknown
 installations.
 
 The downloaded wheel is checked against `SHA256SUMS` and verified with
-GitHub's keyless build attestation through `gh attestation verify`. The old
+GitHub's keyless build attestation through `gh attestation verify`; `gh` must
+be installed and authenticated (`gh auth login`, or `GH_TOKEN`). The old
 venv is kept as a backup until the new venv and its `packrat --version` check
 succeed. Music, manifests, and config/state are untouched.
 
@@ -125,8 +127,8 @@ packrat download-manifest --failed-only
 packrat resume --limit 5
 ```
 
-With no `--manifest`, the newest plan in the output folder is used. 
-If the manifest records an output folder, that folder is used unless `--output` overrides it.
+With no `--manifest`, the newest plan in the output folder is used. If the
+manifest lives outside a `playlists/` folder, pass `--output` explicitly.
 
 ## download-one
 

@@ -11,16 +11,17 @@
 
 <p align="center">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square">
-  <img alt="Packrat 0.3.4" src="https://img.shields.io/badge/packrat-0.3.4-38bdf8?style=flat-square">
+  <img alt="Packrat 0.3.5" src="https://img.shields.io/badge/packrat-0.3.5-38bdf8?style=flat-square">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-22c55e?style=flat-square">
 </p>
 
 ![Packrat TUI](docs/images/tui-overview.png)
 
-Packrat is a local-first YouTube Music downloader. It syncs Liked Songs and
+Packrat is a local-first YouTube Music downloader. It needs Python 3.11+,
+ffmpeg/ffprobe, and recommends Deno 2.3+ for YouTube's JavaScript challenges. It syncs Liked Songs and
 playlists, builds artist catalogs, plans discovery runs, and downloads through
-`yt-dlp` into a plain `~/Music/PackratMidden/` folder. Every run is backed by a manifest and an
-archive, so it is safe to stop, resume, and retry.
+`yt-dlp` into a plain `~/Music/PackratMidden/` folder. Batch runs are backed by
+a manifest and an archive, so they are safe to stop, resume, and retry.
 
 ## Why Packrat?
 
@@ -32,12 +33,12 @@ archive, so it is safe to stop, resume, and retry.
 - **Discovery plans**: sections, taste-adjacent, radio queues, albums and radio, always written to a manifest before downloading.
 - **A real TUI**: rounded frame, smooth HSL progress bars, log panel, pause/skip, themes, and tmux-aware palettes.
 - **Local-first layout**: `~/Music/PackratMidden/`, JSON manifests, `.m3u8` playlists and a simple archive; no database.
-- **Recoverable by design**: failed tracks are recorded, `download-manifest` resumes, and `--failed-only` retries only failures.
+- **Recoverable by design**: failed tracks are recorded, `download-manifest` resumes, and `--failed-only` retries failed, oversized and user-skipped tracks.
 
 ## Quick start
 
 ```bash
-# 1.a) Remote install (review the script first, don't run random scripts plz):
+# 1.a) Remote install (review the script first):
 curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash
 # 1.b) Install from the repository (same thing, review the script before): 
 git clone https://github.com/gnoooo/packrat.git && cd packrat
@@ -127,7 +128,7 @@ Environment equivalents are documented in
 
 ## TUI at a glance
 
-The TUI uses a rounded outer frame, a header/footer, and a progress-bar one for OVERALL and NOW PLAYING. 
+The TUI uses a rounded outer frame, a header/footer, and progress bars for OVERALL and NOW PLAYING.
 
 
 - `p` pause, `s` skip, `q` quit, `l` log, `a` animation, `t` theme, `?` help

@@ -546,6 +546,26 @@ def _pretty_source(source: str) -> str:
     return text
 
 
+def _ascii_visual(vis: Visual | None) -> bool:
+    return bool(vis) and str(vis.g.get("bar_fill", "")) == "#"
+
+
+def _sep(vis: Visual) -> str:
+    return "  |  " if _ascii_visual(vis) else "  ·  "
+
+
+def _ellipsis(vis: Visual) -> str:
+    return "..." if _ascii_visual(vis) else "…"
+
+
+def _bar_prefix(vis: Visual) -> str:
+    return "| " if _ascii_visual(vis) else "│ "
+
+
+def _arrow(vis: Visual) -> str:
+    return ">" if _ascii_visual(vis) else "›"
+
+
 def _segments_width(segments: list[tuple[str, int]]) -> int:
     return sum(tg.display_width(text) for text, _attr in segments)
 
@@ -651,7 +671,7 @@ def _draw_header(win, snap: State, vis: Visual) -> None:
     colors = vis.colors
     status = snap.status
     if status == "DONE":
-        key = "success"
+        key = "success" if snap.failed == 0 else "error"
     elif status in ("STOPPED", "ABORTED"):
         key = "error"
     elif status == "STOPPING":
@@ -664,7 +684,7 @@ def _draw_header(win, snap: State, vis: Visual) -> None:
     note = f"{g.get('note', '~')} "
     _safe_addstr(win, 0, 0, note, colors.get("info", 0) | curses.A_BOLD)
     x = tg.display_width(note)
-    left = f"packrat  ›  {_pretty_source(snap.mode)} "
+    left = f"packrat  {_arrow(vis)}  {_pretty_source(snap.mode)} "
     right = (f"{g.get('dot', '*')} {status}  "
              f"{g.get('clock', '~')} {format_duration(snap.elapsed_seconds)} ")
     right_w = tg.display_width(right)
@@ -681,14 +701,16 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     h, w = win.getmaxyx()
     _draw_panel_top(win, "overall", vis)
     if snap.total <= 0:
-        _panel_segments(win, 1, [("resolving tracks…", vis.colors.get("info", 0))], vis)
+        _panel_segments(win, 1, [
+            (f"resolving tracks{_ellipsis(vis)}", vis.colors.get("info", 0)),
+        ], vis)
         _draw_panel_bottom(win, vis)
         return
     pct = min(100.0, max(0.0, snap.done / snap.total * 100))
     eta = snap.eta_seconds()
     eta_s = "--:--" if eta is None else format_duration(eta)
     suffix = f" {pct:5.1f}% "
-    prefix = "│ "
+    prefix = _bar_prefix(vis)
     bar_w = max(10, w - 2 - tg.display_width(prefix) - tg.display_width(suffix) - 1)
     suffix = tg.clip_width(suffix, max(0, w - 1 - 2 - tg.display_width(prefix) - bar_w))
     body = tg.bar(vis.g, bar_w, pct)
@@ -700,21 +722,21 @@ def _draw_overall(win, snap: State, vis: Visual, frame: dict) -> None:
     info = vis.colors.get("info", 0)
     segments: list[tuple[str, int]] = [
         (f"{snap.done}/{snap.total} tracks", info | curses.A_BOLD),
-        ("  ·  ", dim),
+        (_sep(vis), dim),
         (f"{format_bytes(snap.total_bytes_downloaded)} / "
          f"{format_bytes(snap.total_est_bytes)}", dim),
-        ("  ·  ", dim),
+        (_sep(vis), dim),
         (f"ETA {eta_s}", info),
     ]
     if snap.max_size_bytes:
-        segments += [("  ·  ", dim),
+        segments += [(_sep(vis), dim),
                      (f"max {format_bytes(snap.max_size_bytes)}", dim)]
     rate = tg.rates_60s(frame.get("history") or (), time.monotonic())
     if rate:
-        segments += [("  ·  ", dim), (f"{format_bytes(rate)}/s", dim)]
+        segments += [(_sep(vis), dim), (f"{format_bytes(rate)}/s", dim)]
     used = _segments_width(segments)
     avail = w - 4 - used - 2
-    graph = _throughput_graph(frame, avail)
+    graph = "" if _ascii_visual(vis) else _throughput_graph(frame, avail)
     if graph:
         segments += [("  ", dim), (graph, dim)]
     _panel_segments(win, 2, segments, vis)
@@ -760,7 +782,7 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
         _panel_segments(win, 3, line3, vis)
 
         pct = max(0.0, min(100.0, cur.percent))
-        prefix = "│ "
+        prefix = _bar_prefix(vis)
         suffix = f" {pct:5.1f}% "
         bar_w = max(8, w - 2 - tg.display_width(prefix)
                     - tg.display_width(suffix) - 1)
@@ -777,9 +799,9 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
              f"{format_bytes(cur.total_bytes)}", colors.get("info", 0)),
         ]
         if cur.speed:
-            stats += [("  ·  ", colors.get("dim", 0)),
+            stats += [(_sep(vis), colors.get("dim", 0)),
                       (cur.speed, colors.get("dim", 0))]
-        stats += [("  ·  ", colors.get("dim", 0)),
+        stats += [(_sep(vis), colors.get("dim", 0)),
                   (f"ETA {eta}", colors.get("info", 0))]
         _panel_segments(win, 5, stats, vis)
         written = {1, 2, 3, 4, 5}
@@ -797,14 +819,37 @@ def _draw_current(win, snap: State, vis: Visual, frame: dict) -> None:
         else:
             written = {1}
     elif snap.status == "DONE":
-        _panel_segments(win, 1, [
-            (f"{g.get('done', '+')} all done · {snap.downloaded} downloaded",
-             colors.get("success", 0) | curses.A_BOLD),
-        ], vis)
+        if snap.failed:
+            _panel_segments(win, 1, [
+                (f"{g.get('fail', 'x')} finished with {snap.failed} failed",
+                 colors.get("error", 0) | curses.A_BOLD),
+                (_sep(vis), colors.get("dim", 0)),
+                (f"{snap.downloaded} downloaded", colors.get("info", 0)),
+            ], vis)
+        else:
+            _panel_segments(win, 1, [
+                (f"{g.get('done', '+')} all done{_sep(vis)}{snap.downloaded} downloaded",
+                 colors.get("success", 0) | curses.A_BOLD),
+            ], vis)
         written = {1}
+    elif snap.status in ("STOPPED", "ABORTED"):
+        reason = snap._stop_reason or "stopped"
+        if reason == "consecutive_errors":
+            reason = "3 consecutive retryable errors"
+        elif reason == "user":
+            reason = "stopped by user"
+        _panel_segments(win, 1, [
+            (f"{g.get('fail', 'x')} {reason}",
+             colors.get("error", 0) | curses.A_BOLD),
+        ], vis)
+        _panel_segments(win, 2, [
+            ("resume with ", colors.get("dim", 0)),
+            ("packrat download-manifest --failed-only", colors.get("info", 0)),
+        ], vis)
+        written = {1, 2}
     else:
-        text = ("waiting for the next track…" if snap.done
-                else "waiting for the first track…")
+        text = (f"waiting for the next track{_ellipsis(vis)}" if snap.done
+                else f"waiting for the first track{_ellipsis(vis)}")
         _panel_segments(win, 1, [(text, colors.get("dim", 0))], vis)
         written = {1}
     _empty_border_rows(win, h, written, vis)
@@ -872,10 +917,9 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
             lines = []
     if not lines:
         lines = list(snap.log_lines)
-    if log_offset and log_offset < len(lines):
+    if log_offset:
+        log_offset = min(log_offset, max(0, len(lines) - 1))
         lines = lines[: len(lines) - log_offset]
-    elif log_offset >= len(lines):
-        lines = []
     visible = max(0, h - 2)
     shown = lines[-visible:]
     colors = vis.colors
@@ -896,7 +940,7 @@ def _draw_log(win, snap: State, vis: Visual, ring_handler, log_offset: int) -> N
 
 
 def _draw_footer(win, snap, y: int = 0, show_log: bool = False,
-                 vis: Visual | None = None) -> None:
+                 vis: Visual | None = None, log_visible: bool | None = None) -> None:
     h, w = win.getmaxyx()
     if y < 0 or y >= h:
         return
@@ -904,11 +948,14 @@ def _draw_footer(win, snap, y: int = 0, show_log: bool = False,
     key_attr = colors.get("info", 0) | curses.A_BOLD
     desc_attr = colors.get("dim", 0)
     if snap.status == "STOPPING":
-        text = " finishing the current track… press q again to quit now "
+        text = (f" finishing the current track{_ellipsis(vis)} press q to quit "
+                "after it finishes ")
         _safe_addstr(win, y, 0, text[:w],
                      colors.get("warning", 0) | curses.A_BOLD)
         return
-    log_label = "hide log" if show_log else "log"
+    if log_visible is None:
+        log_visible = show_log
+    log_label = "hide log" if log_visible else "log"
     keys = [
         ("p", "pause"), ("s", "skip"), ("q", "quit"),
         ("l", log_label), ("a", "anim"), ("t", "theme"), ("?", "help"),
@@ -972,7 +1019,9 @@ def _status_chips(snap: State, vis: Visual) -> list[tuple[str, str]]:
     if snap.retries:
         chips.append((f"{g.get('retry', 'r')} {snap.retries} retries", "warning"))
     if snap.skipped_size:
-        chips.append((f"{g.get('ellipsis', '..')} {snap.skipped_size} skipped", "warning"))
+        chips.append((f"{g.get('ellipsis', '..')} {snap.skipped_size} skipped-size", "warning"))
+    if snap.skipped:
+        chips.append((f"{g.get('ellipsis', '..')} {snap.skipped} skipped", "warning"))
     if not chips:
         chips.append((f"{g.get('dot', '*')} ready", "info"))
     return chips
@@ -1063,7 +1112,7 @@ def _draw_all(stdscr, snap: State, vis: Visual, ring_handler, show_log: bool,
     _draw_header(header, snap, vis)
     header.noutrefresh()
     footer = stdscr.derwin(1, inner_w, h - 2, 1)
-    _draw_footer(footer, snap, 0, show_log, vis)
+    _draw_footer(footer, snap, 0, show_log, vis, log_visible=show_log and h >= 30)
     footer.noutrefresh()
     heights = _panel_heights(snap, cw, vis)
     gaps = 0 if h < 30 else (2 if h >= 36 else 1)
@@ -1123,6 +1172,7 @@ def _handle_keys(stdscr, control: Control, state: State,
         return True, show_log, log_offset, help_mode, action
     if key == -1:
         return True, show_log, log_offset, help_mode, action
+    active = state.status in ("RUNNING", "WAITING", "PAUSED")
     if key in (ord("q"), ord("Q")):
         if state.status in ("DONE", "STOPPED", "ABORTED", "STOPPING"):
             action = "quit"
@@ -1130,10 +1180,10 @@ def _handle_keys(stdscr, control: Control, state: State,
             control.request_stop()
             state.apply(Event("status", {"status": "STOPPING", "reason": "user quit"}))
             action = "stopping"
-    elif key in (ord("p"), ord("P"), 32):
+    elif key in (ord("p"), ord("P"), 32) and active:
         control.toggle_pause()
         state.apply(Event("status", {"status": "PAUSED" if control.paused else "RUNNING"}))
-    elif key in (ord("s"), ord("S")):
+    elif key in (ord("s"), ord("S")) and active and state.current.video_id:
         control.request_skip()
     elif key in (ord("l"), ord("L")):
         show_log = not show_log
@@ -1144,14 +1194,14 @@ def _handle_keys(stdscr, control: Control, state: State,
         action = "next_theme"
     elif key == 63:  # ?
         help_mode = not help_mode
-    elif key == curses.KEY_UP:
-        log_offset = max(0, log_offset - 1)
-    elif key == curses.KEY_DOWN:
+    elif key == curses.KEY_UP and show_log:
         log_offset += 1
-    elif key == curses.KEY_PPAGE:
-        log_offset = max(0, log_offset - 10)
-    elif key == curses.KEY_NPAGE:
+    elif key == curses.KEY_DOWN and show_log:
+        log_offset = max(0, log_offset - 1)
+    elif key == curses.KEY_PPAGE and show_log:
         log_offset += 10
+    elif key == curses.KEY_NPAGE and show_log:
+        log_offset = max(0, log_offset - 10)
     elif key == curses.KEY_RESIZE:
         action = "resize"
     return True, show_log, log_offset, help_mode, action
@@ -1259,6 +1309,8 @@ def _worker_target(worker_func: Callable, worker_kwargs: dict, state: State,
 
 def _join_worker(thread: threading.Thread, log_note: str = "") -> None:
     """Wait for the worker; a second Ctrl-C force-exits (partial file may remain)."""
+    if thread.is_alive():
+        print("Finishing the current track before exit…", file=sys.stderr)
     try:
         thread.join()
     except KeyboardInterrupt:

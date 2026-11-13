@@ -63,8 +63,9 @@ Useful options:
 
 ## What gets downloaded
 
-The catalog includes the artist's top songs and release tracks, deduped by
-artist + base title. Already-owned tracks are detected from the archive,
+The catalog includes the artist's top songs and release tracks, deduped with
+album-aware release keys so the same title on different releases is not
+collapsed. Already-owned tracks are detected from the archive,
 filesystem paths and normalized title matching.
 
 Folder layout:

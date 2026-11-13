@@ -55,8 +55,7 @@ class ConsoleProgress:
     def _reset(self) -> str:
         return "\x1b[0m" if not (self.no_color or self.ascii_mode) else ""
 
-    def _bar(self, percent: float) -> str:
-        width = self.width or min(48, max(16, shutil.get_terminal_size((80, 20)).columns - 32))
+    def _bar(self, percent: float, width: int) -> str:
         percent = max(0.0, min(100.0, percent))
         fill = str(self.glyphs.get("bar_fill", "#"))
         track = str(self.glyphs.get("bar_track_line", "-"))
@@ -68,8 +67,8 @@ class ConsoleProgress:
         rest = max(0, width - full - len(edge))
         cells: list[str] = []
         for i in range(full):
-            rgb = self._gradient[min(len(self._gradient) - 1, round(i / max(1, width - 1) * (len(self._gradient) - 1)))]
-            cells.append(self._fg(rgb) + fill)
+            pos = round(i / max(1, width - 1) * (len(self._gradient) - 1))
+            cells.append(self._fg(self._gradient[pos]) + fill)
         if edge:
             cells.append(self._fg(self._gradient[-1]) + edge)
         cells.append(self._fg(self._track) + track * rest)
@@ -88,6 +87,32 @@ class ConsoleProgress:
             self.stream.flush()
             self._last_len = 0
 
+    def _columns(self) -> int:
+        return self.width or shutil.get_terminal_size((80, 20)).columns
+
+    def _line(self, percent: float, *, suffix: str = "", stage: str = "") -> str:
+        """Build a single line that always fits the terminal width."""
+        cols = max(20, self._columns())
+        prefix = f"{self.done + 1}/{self.total} " if self.total else ""
+        if stage:
+            suffix = f" {stage}"
+        if tg.display_width(prefix) + tg.display_width(suffix) + 12 > cols:
+            suffix = tg.truncate_width(
+                suffix, max(0, cols - tg.display_width(prefix) - 12)
+            )
+        fixed = tg.display_width(prefix) + tg.display_width(suffix) + 2
+        title_w = max(0, min(34, cols - fixed - 10))
+        title = tg.truncate_width(self.title, title_w)
+        bar_w = max(6, min(48, cols - fixed - tg.display_width(title) - 1))
+        if tg.display_width(prefix) + tg.display_width(title) + 1 + bar_w + tg.display_width(suffix) > cols:
+            bar_w = max(4, bar_w - 1)
+        return f"{prefix}{title} {self._bar(percent, bar_w)}{suffix}"
+
+    def _format_speed(self, speed: Any) -> str:
+        if isinstance(speed, (int, float)):
+            return f"{speed / 1024 / 1024:.1f} MB/s"
+        return str(speed or "")
+
     # --- public API ---------------------------------------------------
     def start(self, title: str = "", subtitle: str = "", total: int = 0) -> None:
         self.title = title
@@ -99,23 +124,32 @@ class ConsoleProgress:
         if subtitle:
             self.stream.write(subtitle + "\n")
         self.stream.flush()
-        if not self.enabled:
-            return
 
-    def update(self, percent: float, *, speed: str = "", eta: int | None = None) -> None:
+    def update(
+        self,
+        percent: float,
+        *,
+        speed: str = "",
+        eta: int | None = None,
+        stage: str = "",
+    ) -> None:
         if not self.enabled:
             return
-        title = tg.truncate_width(self.title, 34)
-        prefix = f"{self.done + 1}/{self.total} " if self.total else ""
         suffix = f" {percent:3.0f}%"
-        if speed:
-            suffix += f" {speed}"
+        speed_text = self._format_speed(speed)
+        if speed_text:
+            suffix += f" {speed_text}"
         if eta is not None:
             suffix += f" ETA {eta}s"
-        self._write(f"{prefix}{title} {self._bar(percent)}{suffix}")
+        self._write(self._line(percent, suffix=suffix, stage=stage))
+
+    def stage(self, text: str, percent: float = 0.0) -> None:
+        if not self.enabled:
+            return
+        self._write(self._line(percent, stage=text))
 
     def converting(self) -> None:
-        self._write(f"{self.title} {self._bar(100)} converting")
+        self.stage("converting", 100.0)
 
     def finish(self, lines: list[str] | None = None) -> None:
         self._clear()
@@ -138,10 +172,12 @@ class ConsoleProgress:
             downloaded = data.get("downloaded_bytes", 0)
             percent = (downloaded / total * 100) if total else 0.0
             speed = data.get("_speed_str") or data.get("speed") or ""
-            if isinstance(speed, (int, float)):
-                speed = f"{speed / 1024 / 1024:.1f} MB/s"
             eta = data.get("eta")
-            self.update(percent, speed=str(speed), eta=eta if isinstance(eta, int) else None)
+            self.update(
+                percent,
+                speed=self._format_speed(speed),
+                eta=eta if isinstance(eta, int) else None,
+            )
         elif status == "finished":
             self.converting()
 
@@ -154,17 +190,37 @@ class ConsoleProgress:
         elif kind == "track_start":
             self.title = str(payload.get("title") or "")
             self.subtitle = str(payload.get("artist") or "")
+            self.stage(str(payload.get("stage") or "resolving"))
         elif kind == "track_progress":
-            self.update(
-                float(payload.get("percent") or 0),
-                speed=str(payload.get("speed") or ""),
-                eta=payload.get("eta_seconds"),
-            )
+            stage = str(payload.get("stage") or "")
+            if stage == "converting":
+                self.converting()
+            elif stage.startswith("retry") or stage == "resolving":
+                self.stage(stage)
+            else:
+                self.update(
+                    float(payload.get("percent") or 0),
+                    speed=payload.get("speed") or "",
+                    eta=payload.get("eta_seconds"),
+                )
+        elif kind == "delay":
+            if payload.get("paused"):
+                return
+            remaining = float(payload.get("remaining") or 0)
+            suffix = f" waiting {remaining:.1f}s"
+            nxt = str(payload.get("next") or "")
+            if nxt:
+                suffix += f" · next {nxt}"
+            self._write(self._line(0.0, suffix=suffix))
+        elif kind == "status":
+            status = str(payload.get("status") or "")
+            reason = str(payload.get("reason") or "")
+            if status == "STOPPING":
+                self._write(self._line(0.0, stage=f"stopping: {reason}"))
         elif kind == "track_done":
             self.done += 1
             self._clear()
-            status = payload.get("status")
-            if status == "failed" and self.enabled:
+            if payload.get("status") == "failed" and self.enabled:
                 self.stream.write(
                     f"✗ {payload.get('title', '')}: {payload.get('error', 'failed')}\n"
                 )

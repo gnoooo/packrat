@@ -38,7 +38,7 @@ Advanced:
   --max-size SIZE       skip songs bigger than SIZE (example: 3GB)
   --force-new-archive   start a new download history even if the library has
                         music
-  --failed-only         only retry songs that failed
+  --failed-only         retry failed, oversized and user-skipped tracks
 
 Advanced display:
   --tui                 show the full-screen progress view

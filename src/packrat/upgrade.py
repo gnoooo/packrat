@@ -76,7 +76,9 @@ def _get_json(url: str) -> Any:
         return json.load(response)
 
 
-def latest_release(include_prerelease: bool = False) -> Release:
+def latest_release(
+    include_prerelease: bool = False, master_only: bool = False,
+) -> Release:
     if include_prerelease:
         releases = _get_json(f"{API}/repos/{REPO}/releases?per_page=20")
     else:
@@ -85,6 +87,10 @@ def latest_release(include_prerelease: bool = False) -> Release:
         if data.get("draft"):
             continue
         tag = str(data.get("tag_name", ""))
+        if master_only and not (
+            data.get("prerelease") and ".dev" in tag
+        ):
+            continue
         assets = {a.get("name"): a.get("browser_download_url") for a in data.get("assets", [])}
         wheels = [name for name in assets if name and name.endswith(".whl")]
         if not wheels or "SHA256SUMS" not in assets:
@@ -156,6 +162,14 @@ def _attest(wheel: pathlib.Path, tag: str) -> None:
             "GitHub CLI (gh) is required to verify the release attestation; "
             "install gh or use the install script"
         )
+    auth = subprocess.run(
+        [gh, "auth", "status"], text=True, capture_output=True,
+    )
+    if auth.returncode != 0:
+        raise UpgradeError(
+            "GitHub CLI (gh) is not authenticated; run 'gh auth login' "
+            "(or set GH_TOKEN), then retry 'packrat upgrade'."
+        )
     result = subprocess.run(
         [
             gh, "attestation", "verify", str(wheel), "--repo", REPO,
@@ -220,8 +234,11 @@ def _replace_install(
     requirements: pathlib.Path | None = None,
 ) -> None:
     venv = root / "venv"
+    new_venv = root / "venv.upgrade-new"
     backup = root / "venv.upgrade-backup"
     marker = root / "venv.upgrade-ok"
+    shutil.rmtree(new_venv, ignore_errors=True)
+    swapped = False
     if backup.exists():
         if marker.exists():
             shutil.rmtree(backup, ignore_errors=True)
@@ -232,12 +249,12 @@ def _replace_install(
             raise UpgradeError(
                 f"stale upgrade backup exists: {backup}; inspect it before retrying"
             )
-    if venv.exists():
-        venv.rename(backup)
     try:
-        _install_wheel(wheel, venv, requirements)
+        # Build beside the live install; the command never points at a
+        # half-installed venv.
+        _install_wheel(wheel, new_venv, requirements)
         out = subprocess.run(
-            [str(venv / "bin" / "packrat"), "--version"],
+            [str(new_venv / "bin" / "packrat"), "--version"],
             check=True, text=True, capture_output=True,
         ).stdout.strip()
         got = out.split()[-1] if out else ""
@@ -245,6 +262,10 @@ def _replace_install(
             raise UpgradeError(
                 f"new install reports {got or 'no version'}, expected {target_version}"
             )
+        if venv.exists():
+            venv.rename(backup)
+        new_venv.rename(venv)
+        swapped = True
         link = bin_dir / "packrat"
         link.parent.mkdir(parents=True, exist_ok=True)
         tmp_link = bin_dir / ".packrat.upgrade-link"
@@ -253,8 +274,12 @@ def _replace_install(
         tmp_link.symlink_to(venv / "bin" / "packrat")
         os.replace(tmp_link, link)
     except BaseException:
-        shutil.rmtree(venv, ignore_errors=True)
-        if backup.exists():
+        shutil.rmtree(new_venv, ignore_errors=True)
+        if swapped:
+            shutil.rmtree(venv, ignore_errors=True)
+            if backup.exists():
+                backup.rename(venv)
+        elif not venv.exists() and backup.exists():
             backup.rename(venv)
         marker.unlink(missing_ok=True)
         raise
@@ -288,11 +313,16 @@ def run_upgrade(
     *,
     check_only: bool = False,
     include_prerelease: bool = False,
+    from_master: bool = False,
     yes: bool = False,
     dry_run: bool = False,
 ) -> int:
     _cleanup_previous_backup()
-    release = latest_release(include_prerelease)
+    release = (
+        latest_release(True, master_only=True)
+        if from_master
+        else latest_release(include_prerelease)
+    )
     print(f"current: {__version__}")
     print(f"latest:  {release.version} ({release.tag})")
     if compare_versions(release.version, __version__) <= 0:

@@ -72,6 +72,7 @@ def run_batch_download(
     )
 
     failures: list[str] = []
+    failure_details: list[dict[str, Any]] = []
     consecutive_retryable = 0
     stop_early = False
     stop_reason = "completed"
@@ -200,6 +201,12 @@ def run_batch_download(
         elif result.retryable:
             consecutive_retryable += 1
             failures.append(entry["video_id"])
+            failure_details.append({
+                "video_id": entry["video_id"],
+                "title": entry.get("title", ""),
+                "error": entry.get("error") or "download failed",
+                "status": result.status,
+            })
             if consecutive_retryable >= 3:
                 _emit(
                     event_callback,
@@ -215,6 +222,13 @@ def run_batch_download(
         else:
             consecutive_retryable = 0
             failures.append(entry["video_id"])
+            if result.status == "failed":
+                failure_details.append({
+                    "video_id": entry["video_id"],
+                    "title": entry.get("title", ""),
+                    "error": entry.get("error") or "download failed",
+                    "status": result.status,
+                })
 
         if result.status == "skipped_size":
             consecutive_retryable = 0
@@ -234,6 +248,15 @@ def run_batch_download(
                         stop_early = True
                         stop_reason = "user"
                         break
+                    if control and control.paused:
+                        control.wait_while_paused(
+                            callback=lambda: _emit(
+                                event_callback,
+                                "delay",
+                                {"remaining": delay, "paused": True},
+                            )
+                        )
+                        continue
                     remaining = max(0.0, delay - slept)
                     _emit(
                         event_callback,
@@ -281,6 +304,7 @@ def run_batch_download(
         "failed": sum(1 for e in entries if e.get("status") == "failed"),
         "skipped": sum(1 for e in entries if e.get("status") == "skipped"),
         "failures": failures,
+        "failure_details": failure_details,
         "stopped": stop_early,
         "stop_reason": stop_reason,
     }

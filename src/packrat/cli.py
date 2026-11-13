@@ -25,7 +25,7 @@ from packrat import sync as sync_module
 from packrat import tui as tui_module
 from packrat import cli_args
 from packrat.batch import exit_code_from_result, run_batch_download
-from packrat.download import _browser_tuple, _final_filepath
+from packrat.download import _browser_tuple, _final_filepath, _quarantine
 from packrat.logging_config import redact as _redact
 from packrat import security
 from packrat.archive import Archive
@@ -45,7 +45,7 @@ from packrat.song_meta import SongMetadata, apply_song_metadata, resolve_song_me
 
 
 def print_result_summary(result: Any) -> None:
-    """One-line download summary from a worker result; never a raw dict."""
+    """Print one stable run report; failed tracks are listed, never dropped."""
     if isinstance(result, dict) and result.get("error"):
         print(result["error"], file=sys.stderr)
         return
@@ -54,13 +54,30 @@ def print_result_summary(result: Any) -> None:
         summary = result if isinstance(result, dict) else None
     if not isinstance(summary, dict) or "downloaded" not in summary:
         return  # listing-only result (no batch ran) has no summary line
-    print(
-        f"downloaded {summary.get('downloaded', 0)}"
-        f"  archived {summary.get('archived', 0)}"
-        f"  skipped-size {summary.get('skipped_size', 0)}"
-        f"  failed {summary.get('failed', 0)}"
-        f"  stopped {summary.get('stopped', False)}"
-    )
+
+    parts = [
+        f"downloaded {summary.get('downloaded', 0)}",
+        f"archived {summary.get('archived', 0)}",
+        f"skipped-size {summary.get('skipped_size', 0)}",
+    ]
+    if summary.get("skipped"):
+        parts.append(f"skipped {summary['skipped']}")
+    parts.append(f"failed {summary.get('failed', 0)}")
+    if summary.get("stopped"):
+        reason = summary.get("stop_reason") or "stopped"
+        if reason == "consecutive_errors":
+            reason = "3 consecutive retryable errors"
+        elif reason == "user":
+            reason = "stopped by user"
+        parts.append(f"stopped: {reason}")
+    print(" · ".join(parts))
+
+    for detail in summary.get("failure_details") or []:
+        title = detail.get("title") or detail.get("video_id") or "track"
+        error = detail.get("error") or "download failed"
+        print(f"  ✗ {title}: {error}")
+    if summary.get("failed") or summary.get("stopped"):
+        print("  retry: packrat download-manifest --failed-only")
 
 
 def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
@@ -75,7 +92,7 @@ def _confirm_download(args: argparse.Namespace, prompt: str) -> bool:
         )
         return False
     answer = input(prompt).strip().lower()
-    if answer in ("", "y", "yes"):
+    if answer in ("y", "yes"):
         return True
     print("Not downloading.", file=sys.stderr)
     return False
@@ -251,7 +268,8 @@ def cmd_login(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(
             f"Could not verify the login: {exc.__class__.__name__}.\n"
-            "The file was saved; run 'packrat auth' to try again.",
+            "The file was saved, but the headers may be stale or incomplete. "
+            "Run 'packrat login' again and paste fresh headers.",
             file=sys.stderr,
         )
         return 1
@@ -315,7 +333,8 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     try:
         return upgrade_module.run_upgrade(
             check_only=getattr(args, "check", False),
-            include_prerelease=getattr(args, "pre", False) or getattr(args, "from_master", False),
+            include_prerelease=getattr(args, "pre", False),
+            from_master=getattr(args, "from_master", False),
             yes=getattr(args, "yes", False),
             dry_run=getattr(args, "dry_run", False),
         )
@@ -348,10 +367,11 @@ def cmd_auth(args: argparse.Namespace) -> int:
         yt.get_library_playlists(limit=1)
         liked = yt.get_liked_songs(limit=1)
     except Exception as exc:
+        path = getattr(args, "headers", None) or cli_args._headers_default()
         print(
             f"Login failed ({exc.__class__.__name__}). Your login may have "
-            "expired. Run: ytmusicapi browser --file "
-            "~/.config/packrat/browser.json",
+            f"expired. Run 'packrat login --file {path}' and paste fresh "
+            "browser headers.",
             file=sys.stderr,
         )
         return 1
@@ -482,6 +502,29 @@ def _mark_downloaded_in_manifests(
             atomic_write_text(manifest_path, json.dumps(payload, indent=2))
 
 
+def _friendly_codec(value: Any) -> str:
+    raw = str(value or "audio").lower()
+    if raw.startswith("mp4a") or raw in {"aac", "m4a"}:
+        return "AAC"
+    if raw.startswith("opus"):
+        return "Opus"
+    if raw.startswith("vorbis"):
+        return "Vorbis"
+    if raw.startswith("flac"):
+        return "FLAC"
+    if raw.startswith("mp3"):
+        return "MP3"
+    return raw.upper()
+
+
+def _friendly_duration(value: Any) -> str:
+    try:
+        seconds = int(float(value or 0))
+    except (TypeError, ValueError):
+        seconds = 0
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
 def cmd_download_one(args: argparse.Namespace) -> int:
     """Download a single song from a link or video ID and verify the result."""
     video_id = queues_module.parse_video_id(args.video_id)
@@ -543,10 +586,6 @@ def cmd_download_one(args: argparse.Namespace) -> int:
     else:
         output_path = output_root / "%(artist,uploader)s" / "%(album|Unknown Album)s" / "%(title)s.%(ext)s"
 
-    import yt_dlp
-
-    logger = _YtdlpLogger()
-    url = f"https://music.youtube.com/watch?v={video_id}"
     progress = cli_progress.console_progress()
     progress.start(
         metadata.title if metadata is not None else video_id,
@@ -557,6 +596,38 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         ),
     )
 
+    # Idempotency: a valid canonical file is already the requested result.
+    if metadata is not None and output_path.exists():
+        existing = verify_audio(
+            output_path, expected_duration=metadata.duration,
+        )
+        if existing.ok:
+            try:
+                apply_song_metadata(output_path, metadata)
+            except Exception:
+                pass
+            try:
+                archive = Archive(cli_args._archive_default())
+                archive.add(video_id)
+                archive.save()
+            except Exception:
+                pass
+            try:
+                _mark_downloaded_in_manifests(output_root, video_id, output_path)
+            except Exception:
+                pass
+            progress.finish([
+                f"✓ already present · {_friendly_duration(existing.duration)}"
+                f" · {existing.size / 1024 / 1024:.1f} MB · verified",
+                str(output_path),
+            ])
+            return 0
+        _quarantine(output_path)
+
+    import yt_dlp
+
+    logger = _YtdlpLogger()
+    url = f"https://music.youtube.com/watch?v={video_id}"
     ydl_opts: dict = {
         "format": "bestaudio[ext=m4a]/bestaudio",
         "outtmpl": str(output_path),
@@ -607,6 +678,15 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         progress.fail(f"expected file not found: {downloaded}")
         print(f"download failed: expected file not found: {downloaded}", file=sys.stderr)
         return 1
+
+    expected_duration = metadata.duration if metadata is not None else info.get("duration")
+    check = verify_audio(downloaded, expected_duration=expected_duration)
+    if not check.ok:
+        _quarantine(downloaded)
+        progress.fail(f"audio verification failed: {check.reason}")
+        print(f"download failed: audio verification: {check.reason}", file=sys.stderr)
+        return 1
+
     if metadata is not None:
         try:
             apply_song_metadata(downloaded, metadata)
@@ -625,19 +705,13 @@ def cmd_download_one(args: argparse.Namespace) -> int:
         print(f"warning: could not update saved plans: {_redact(exc)}",
               file=sys.stderr)
 
-    check = verify_audio(downloaded)
-    if not check.ok:
-        progress.fail(f"audio verification failed: {check.reason}")
-        print(f"download failed: audio verification: {check.reason}", file=sys.stderr)
-        return 1
-
     duration = info.get("duration") or check.duration or 0
     size = downloaded.stat().st_size
-    codec = str(info.get("acodec") or "audio").upper()
+    codec = _friendly_codec(info.get("acodec"))
     abr = info.get("abr")
     quality = f" · {codec}" + (f" {abr:.0f} kb/s" if isinstance(abr, (int, float)) else "")
     lines = [
-        f"✓ {int(float(duration))}s · {size / 1024 / 1024:.1f} MB{quality} · verified",
+        f"✓ {_friendly_duration(duration)} · {size / 1024 / 1024:.1f} MB{quality} · verified",
         str(downloaded),
     ]
     progress.finish(lines)
@@ -724,7 +798,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
         if args.dry_run:
             return 0
-        if not _confirm_download(args, "download discovered tracks? [Y/n] "):
+        if not _confirm_download(args, "download discovered tracks? [y/N] "):
             return 2
         print("\ndownloading discovered tracks...")
         return exit_code_from_result(
@@ -813,9 +887,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if not args.dry_run and not getattr(args, "yes", False):
         prompt = (
             "Download your Liked Songs now? This can download many songs; "
-            "add --limit N to cap. [Y/n] "
+            "add --limit N to cap. [y/N] "
             if args.source == "liked"
-            else "Download this playlist now? [Y/n] "
+            else "Download this playlist now? [y/N] "
         )
         if not _confirm_download(args, prompt):
             return 2
@@ -828,7 +902,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 ascii_mode=args.ascii,
             )
         )
-    return exit_code_from_result(sync_module.run_sync(args))
+    result = sync_module.run_sync(args)
+    print_result_summary(result)
+    return exit_code_from_result(result)
 
 
 def cmd_download_manifest(args: argparse.Namespace) -> int:
@@ -880,10 +956,12 @@ def cmd_download_manifest(args: argparse.Namespace) -> int:
     if payload.get("command") == "artist":
         label = payload.get("label") or payload.get("artist", manifest_path.stem)
         failed_only = bool(getattr(args, "failed_only", False))
-        wanted = "failed" if failed_only else "pending"
+        retryable_statuses = {"failed", "skipped_size", "skipped"}
+        wanted = "retryable" if failed_only else "pending"
         artist_entries = [
             e for e in payload.get("entries", [])
-            if e.get("status") == wanted
+            if (e.get("status") in retryable_statuses if failed_only
+                else e.get("status") == "pending")
         ]
         if not artist_entries:
             print(f"no {wanted} tracks in manifest")
@@ -1110,7 +1188,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
         return 2
     print("Will process: " + ", ".join(specs))
     if len(specs) > 1 and not args.yes and not args.dry_run and sys.stdin.isatty():
-        if not _confirm_download(args, "continue? [Y/n] "):
+        if not _confirm_download(args, "continue? [y/N] "):
             return 2
 
     yt = YTMusic(args.headers)
@@ -1339,7 +1417,7 @@ def cmd_artist(args: argparse.Namespace) -> int:
         )
         return 2
     if not args.yes and getattr(args, "select", None):
-        if not _confirm_download(args, "start download? [Y/n] "):
+        if not _confirm_download(args, "start download? [y/N] "):
             return 2
 
     exit_code = 0
@@ -1442,7 +1520,7 @@ def cmd_radio(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         return 0
-    if not _confirm_download(args, "download radio? [Y/n] "):
+    if not _confirm_download(args, "download radio? [y/N] "):
         return 2
 
     if args.tui:
@@ -1505,7 +1583,7 @@ def cmd_discover_queues(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         return 0
-    if not _confirm_download(args, "download queues? [Y/n] "):
+    if not _confirm_download(args, "download queues? [y/N] "):
         return 2
 
     if args.tui:
@@ -1581,7 +1659,7 @@ def cmd_discover_albums(args: argparse.Namespace) -> int:
 
     if args.dry_run:
         return 0
-    if not _confirm_download(args, "download albums? [Y/n] "):
+    if not _confirm_download(args, "download albums? [y/N] "):
         return 2
 
     if args.tui:
@@ -1684,7 +1762,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     _tui.set_no_anim_default(getattr(args, "no_anim", False))
     cli_progress.configure(
         theme=getattr(args, "theme", "ocean"),
-        no_color=getattr(args, "no_color", None),
+        no_color=bool(
+            getattr(args, "no_color", False) or os.environ.get("NO_COLOR")
+        ),
         ascii_mode=getattr(args, "ascii", False),
     )
 
@@ -1743,7 +1823,7 @@ def _friendly_error(exc: Exception) -> str:
     """Keep auth/API failures readable instead of dumping a raw API response."""
     name = type(exc).__name__
     if name.startswith("YTMusic"):
-        return "authentication may be expired or missing; run 'packrat auth'"
+        return "authentication may be expired or missing; run 'packrat login'"
     if isinstance(exc, KeyError):
         return "unexpected YouTube Music response; try again (or update ytmusicapi)"
     text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""

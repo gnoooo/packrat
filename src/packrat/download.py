@@ -213,8 +213,11 @@ def _progress_hook(
     event_callback: Callable[[dict[str, Any]], None] | None,
     d: dict[str, Any],
 ) -> None:
-    if control and control.should_skip():
-        raise AbortTrack("user skipped track")
+    if control:
+        # Pause inside the transfer, not only between tracks.
+        control.wait_while_paused()
+        if control.should_skip():
+            raise AbortTrack("user skipped track")
     if event_callback is None:
         return
     status = d.get("status", "")

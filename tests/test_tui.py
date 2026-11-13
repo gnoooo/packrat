@@ -282,3 +282,96 @@ def test_join_worker_second_ctrl_c_force_exit(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "partial file may remain" in err
     assert "logs/x.log" in err
+
+
+def test_skipped_tracks_are_counted():
+    from packrat.events import Event, State
+
+    state = State()
+    state.apply(Event("start", {"total": 2}))
+    state.apply(Event("track_done", {"status": "skipped", "title": "S"}))
+    assert state.skipped == 1
+    assert state.done == 1
+
+
+def test_pause_and_skip_ignored_after_done():
+    from packrat import tui
+    from packrat.events import Event, State
+
+    class Screen:
+        def getch(self):
+            return ord("p")
+
+    state = State()
+    state.apply(Event("done", {"reason": "finished"}))
+    control = tui.Control()
+    tui._handle_keys(Screen(), control, state, True, 0, False)
+    assert control.paused is False
+    assert state.status == "DONE"
+
+    class SkipScreen:
+        def getch(self):
+            return ord("s")
+
+    state.apply(Event("status", {"status": "WAITING 3.0s"}))
+    tui._handle_keys(SkipScreen(), control, state, True, 0, False)
+    assert control.skip_current is False
+
+
+def _fake_visual():
+    from packrat import tui
+    from packrat import tui_glyphs as tg
+    from packrat import tui_theme as tt
+
+    pal = tt.Palette(tt.THEMES["ocean"], tt.TIER_NONE)
+    return tui.Visual(tg.GLYPHS["ascii"], pal, {}, lambda idx, bold=False: 0,
+                      True, tt.TIER_NONE)
+
+
+def test_done_with_failures_is_not_green_all_done():
+    from packrat import events as ev
+    from packrat import tui
+
+    state = ev.State()
+    state.apply(ev.Event("track_done", {"status": "failed", "title": "X",
+                                       "error": "403"}))
+    state.apply(ev.Event("done", {"reason": "finished"}))
+    win = _FakeWin(7, 60)
+    tui._draw_current(win, state, _fake_visual(), {})
+    text = "".join(win.writes)
+    assert "finished with 1 failed" in text
+    assert "all done" not in text
+
+
+def test_stopped_shows_reason():
+    from packrat import events as ev
+    from packrat import tui
+
+    state = ev.State()
+    state.apply(ev.Event("stopped", {"reason": "consecutive_errors"}))
+    win = _FakeWin(7, 60)
+    tui._draw_current(win, state, _fake_visual(), {})
+    text = "".join(win.writes)
+    assert "3 consecutive retryable errors" in text
+    assert "download-manifest" in text
+
+
+def test_progress_hook_blocks_while_paused():
+    import threading
+    import time
+
+    from packrat import download
+    from packrat.control import Control
+
+    control = Control()
+    control.pause()
+    thread = threading.Thread(
+        target=download._progress_hook,
+        args=(control, None, {"status": "downloading"}),
+    )
+    thread.start()
+    time.sleep(0.15)
+    assert thread.is_alive()
+    control.resume()
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()

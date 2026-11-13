@@ -34,6 +34,10 @@ packrat discover sections --sources home,charts
 
 ## Common options
 
+Not every subcommand accepts every option; `discover taste` is plan-only and
+`discover albums`/`queues`/`radio` have their own subset. Run
+`packrat discover <subcommand> --help` for the exact list.
+
 ```text
 --quota N              songs per source/category
 --min-duration SEC     default 90
@@ -79,8 +83,9 @@ packrat discover radio "https://music.youtube.com/watch?v=..."
 
 ## Dedupe and archive
 
-Discovery filters out tracks already in the archive and dedupes by artist and
-base title. `--skip-previous` skips tracks from the previous discovery plan.
+Discovery filters out tracks already in the archive and dedupes with
+album-aware release keys. `--skip-previous` skips tracks from the previous
+discovery plan.
 
 ## Last.fm
 

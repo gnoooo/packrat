@@ -45,6 +45,7 @@ class State:
         self.downloaded = 0
         self.archived = 0
         self.skipped_size = 0
+        self.skipped = 0
         self.failed = 0
         self.retries = 0
         self.consecutive_retryable = 0
@@ -107,6 +108,9 @@ class State:
                 elif status == "skipped_size":
                     self.skipped_size += 1
                     self.consecutive_retryable = 0
+                elif status == "skipped":
+                    self.skipped += 1
+                    self.consecutive_retryable = 0
                 elif status == "failed":
                     self.failed += 1
                     if p.get("retryable"):
@@ -150,6 +154,7 @@ class State:
             snap.downloaded = self.downloaded
             snap.archived = self.archived
             snap.skipped_size = self.skipped_size
+            snap.skipped = self.skipped
             snap.failed = self.failed
             snap.retries = self.retries
             snap.consecutive_retryable = self.consecutive_retryable

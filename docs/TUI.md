@@ -67,7 +67,7 @@ packrat --tui --theme mono sync
 
 - `--palette auto`: exact palette when supported; inside tmux uses OSC 4 (tmux 3.7+), otherwise nearest xterm-256.
 - `--palette fixed`: nearest xterm-256; useful for limited terminals.
-- `--palette basic`: plain attributes.
+- `--palette basic`: low-color attributes; 256-color terminals may still use a gradient bar.
 
 For tmux, use `tmux-256color`:
 

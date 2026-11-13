@@ -147,4 +147,5 @@ def test_from_master_uses_prerelease_channel(monkeypatch):
     monkeypatch.setattr(upgrade, "run_upgrade", lambda **kw: seen.update(kw) or 0)
     args = cli.build_parser().parse_args(["upgrade", "--from-master", "--check"])
     assert cli.cmd_upgrade(args) == 0
-    assert seen["include_prerelease"] is True
+    assert seen["include_prerelease"] is False
+    assert seen["from_master"] is True

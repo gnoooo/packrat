@@ -95,7 +95,10 @@ deno --version   # need >= 2.3
 Install from <https://deno.com>. Without Deno some tracks fail with a player
 or signature error.
 
-## Legacy names (not important)
-Before being pushed to this repository, Packrat was named "ytm-composer" or "ytm-offline", since the name was lacking of taste, it as been replaced by Packrat.
-So old `YTM_*` environment variables are still read as fallbacks. 
-The old config path `~/.config/ytmusic-composer/browser.json` is used if the new path does not exist (but it's better if not).
+## Migrating from ytm-composer / ytm-offline
+Packrat was previously named "ytm-composer" and "ytm-offline". Old `YTM_*`
+environment variables are still read as fallbacks; the `ytm-offline` command
+remains a compatibility alias.
+The old config path `~/.config/ytmusic-composer/browser.json` is used only as
+a fallback when the new path does not exist. Run `packrat login` to migrate to
+`~/.config/packrat/browser.json`.

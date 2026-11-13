@@ -31,7 +31,7 @@ to `python -m venv` + `pip`. It installs into:
 ~/.local/bin/packrat
 ```
 
-and links only the main `packrat` command. Re-running the script replaces the
+and also keeps a compatibility `ytm-offline` link. Re-running the script replaces the
 venv atomically; it never touches your music library, archive, config or logs.
 
 ```bash
@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/in
 A piped install defaults to `https://github.com/gnoooo/packrat.git`. Override it for a fork or a pinned branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash -s -- --git https://github.com/you/packrat.git --ref main
+curl -fsSL https://raw.githubusercontent.com/gnoooo/packrat/refs/heads/master/install.sh | bash -s -- --git https://github.com/you/packrat.git --ref dev
 ```
 
 Preview without installing:
@@ -82,7 +82,7 @@ using this path.
 ## Manual install
 
 ```bash
-git clone <your-packrat-remote> packrat
+git clone https://github.com/gnoooo/packrat.git packrat
 cd packrat
 python -m venv .venv
 source .venv/bin/activate
@@ -121,7 +121,8 @@ packrat upgrade --check
 packrat upgrade
 ```
 
-`upgrade` requires `gh` for attestation verification. It replaces only the
+`upgrade` requires `gh` installed and authenticated (`gh auth login`, or
+`GH_TOKEN`) for attestation verification. It replaces only the
 application venv and command link; the music library and
 `~/.config/packrat/` state are preserved.
 
@@ -147,7 +148,7 @@ With the default script layout:
 
 ```bash
 rm -rf ~/.local/share/packrat
-rm -f ~/.local/bin/packrat
+rm -f ~/.local/bin/packrat ~/.local/bin/ytm-offline
 ```
 
 This removes the application only. Your music library, `~/.config/packrat/archive`,

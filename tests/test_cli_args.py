@@ -188,6 +188,8 @@ def test_shared_options_have_same_definition_across_commands(parser):
                     continue
                 if name == "upgrade" and opt in ("--yes", "--dry-run"):
                     continue
+                if name == "download-one" and opt == "--theme":
+                    continue
                 assert action.help == ref.help, f"{name} {opt} help mismatch"
 
 

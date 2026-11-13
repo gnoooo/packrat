@@ -1002,8 +1002,23 @@ def build_parser() -> argparse.ArgumentParser:
                 tui=False,
                 force_new_archive=False,
             ),
-            verbose_silent,
+            build_verbose_parent(suppress_defaults=True),
         ],
+    )
+    one_display = p_download_one.add_argument_group("Display")
+    one_display.add_argument(
+        "--theme",
+        choices=("ocean", "sunset", "matrix", "mono"),
+        default=DEFAULT_THEME,
+        help=f"progress bar colors (default: {DEFAULT_THEME})",
+    )
+    one_display.add_argument(
+        "--no-color", action="store_true", default=False,
+        help="no colors (env: NO_COLOR)",
+    )
+    one_display.add_argument(
+        "--ascii", action="store_true", default=False,
+        help="plain characters instead of symbols",
     )
     p_download_one.add_argument(
         "video_id", metavar="LINK_OR_ID",
@@ -1064,7 +1079,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="failed_only",
         action="store_true",
         default=False,
-        help="only retry songs that failed",
+        help="retry failed, oversized and user-skipped tracks",
     )
     p_manifest.set_defaults(func=_noop)
 

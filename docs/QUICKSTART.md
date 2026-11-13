@@ -7,6 +7,14 @@
   <a href="TUI.md">TUI</a> · <a href="DISCOVERY.md">Discovery</a> · <a href="ARTISTS.md">Artists</a> · <a href="TROUBLESHOOTING.md">Troubleshooting</a> · <a href="DEVELOPMENT.md">Development</a> · <a href="HISTORY.md">History</a>
 </p>
 
+## Before you start
+
+- Python 3.11+
+- `ffmpeg` and `ffprobe`
+- Deno 2.3+ recommended for YouTube's JavaScript challenges
+
+Run `packrat doctor` to check all of them.
+
 ## 1. Log in
 
 ```bash
@@ -16,11 +24,8 @@ packrat login
 The command explains how to copy request headers from a logged-in `music.youtube.com` tab.
 It writes `~/.config/packrat/browser.json` by default.
 
-Check it:
-
-```bash
-packrat auth
-```
+`login` verifies the file immediately. Re-run `packrat auth` later if you want
+to check that the session is still valid.
 
 ## 2. Preview a sync
 
@@ -28,7 +33,8 @@ packrat auth
 packrat sync --limit 5 --dry-run
 ```
 
-This resolves Liked Songs, builds a manifest and prints the pending tracks without downloading anything.
+This resolves Liked Songs, builds a manifest, and prints the pending count and
+size without downloading anything. The manifest lists the individual tracks.
 
 ## 3. Download
 

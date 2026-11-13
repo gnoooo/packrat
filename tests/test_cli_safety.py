@@ -114,9 +114,9 @@ def test_discover_sections_yes_downloads(tmp_path, monkeypatch):
     assert called
 
 
-def test_discover_sections_tty_prompt_enter_downloads(tmp_path, monkeypatch):
+def test_discover_sections_tty_prompt_yes_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt="": "")
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "y")
     monkeypatch.setattr(
         "packrat.discover.run_discover",
         lambda **_kw: (_manifest(tmp_path), {
@@ -136,6 +136,30 @@ def test_discover_sections_tty_prompt_enter_downloads(tmp_path, monkeypatch):
     ]))
     assert rc == 0
     assert called
+
+
+def test_discover_sections_tty_prompt_enter_is_safe(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "")
+    monkeypatch.setattr(
+        "packrat.discover.run_discover",
+        lambda **_kw: (_manifest(tmp_path), {
+            "total": 1, "per_source": {"home": 1},
+            "estimated_size_human": "1 KB", "skipped_by_size": 0,
+            "top_artists": [("A", 1)],
+        }),
+    )
+    called = []
+    monkeypatch.setattr(
+        "packrat.discover.download_pending",
+        lambda **_kw: called.append(True) or 0,
+    )
+    rc = cli.cmd_discover(_args([
+        "discover", "sections", "--headers", "/tmp/x",
+        "--output", str(tmp_path), "--source", "home",
+    ]))
+    assert rc == 2
+    assert not called
 
 
 def test_discover_sections_tty_prompt_no_downloads(tmp_path, monkeypatch):

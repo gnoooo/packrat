@@ -196,6 +196,10 @@ install_packrat() {
     require_cmd flock
     exec 9>"$PREFIX/.install.lock"
     flock -n 9 || die "another Packrat install/upgrade is running"
+    RUN_LOCK="${XDG_CONFIG_HOME:-$HOME/.config}/packrat/run.lock"
+    if [ -e "$RUN_LOCK" ] && ! flock -n "$RUN_LOCK" true; then
+        die "a Packrat download is active; finish it before installing"
+    fi
     rm -rf "$TMP_VENV" "$OLD_VENV"
     trap cleanup EXIT
 
@@ -307,12 +311,15 @@ main() {
         note "dry-run complete; no changes made"
         exit 0
     fi
-    case ":$PATH:" in
-        *":$BIN_DIR:"*) ;;
-        *) note "add this to PATH: export PATH=\"$BIN_DIR:\$PATH\"" ;;
-    esac
-    note "installed: $("$BIN_DIR/packrat" --version 2>/dev/null || echo 'packrat')"
-    note "next: packrat login"
+    if case ":$PATH:" in *":$BIN_DIR:"*) true ;; *) false ;; esac; then
+        note "installed: $("$BIN_DIR/packrat" --version 2>/dev/null || echo 'packrat')"
+        note "next: packrat login"
+    else
+        note "add this to PATH: export PATH=\"$BIN_DIR:\$PATH\""
+        note "then run: hash -r && packrat login"
+        note "installed: $("$BIN_DIR/packrat" --version 2>/dev/null || echo 'packrat')"
+        note "next: \"$BIN_DIR/packrat\" login"
+    fi
 }
 
 main "$@"
